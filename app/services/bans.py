@@ -1,4 +1,10 @@
-"""Ban / warning enforcement helpers."""
+"""Ban / warning enforcement helpers.
+
+`_apply_ban` does the actual ban (profile update + persistence + log entry);
+`block_if_banned` and `check_active_chat_block` are guard checks handlers call
+before processing a message; `enforce_autoban_if_needed` applies the
+warn-count-based autoban rule. Persists through `app.database.requests`.
+"""
 from datetime import datetime
 
 from telegram import Update

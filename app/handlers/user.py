@@ -1,4 +1,12 @@
-"""User-facing command/callback/message handlers (private chat with the bot)."""
+"""User-facing command/callback/message handlers (private chat with the bot).
+
+Covers: /start and the main/settings menus, bug reports, profile display and
+nickname changes, and mood/"find an admin" requests that open a work-chat
+forum topic for the user to talk to staff through. Actual message relay
+between a user and their assigned admin lives in `app.services.messaging`.
+Admin-candidate approval UI lives in `app.handlers.candidates` instead,
+shared with `admin.py`.
+"""
 import asyncio
 import html
 import logging

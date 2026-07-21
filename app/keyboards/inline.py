@@ -1,4 +1,12 @@
-"""Inline/reply keyboard builders used across handlers."""
+"""Inline/reply keyboard builders used across handlers.
+
+Every `_build_*_keyboard` function returns an `InlineKeyboardMarkup` or
+`ReplyKeyboardMarkup` for one screen (main menu, settings, astats gender/tip
+editors, info-topic and setprefix panels, candidate onboarding); the
+`_next_*_panel_id` helpers generate the opaque ids those keyboards encode
+into callback_data. Pure UI construction only — no bot_data mutation beyond
+handing out sequence ids, no Telegram API calls.
+"""
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup
 from telegram.ext import ContextTypes
 
