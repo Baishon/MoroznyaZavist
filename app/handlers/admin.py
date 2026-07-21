@@ -1,5 +1,6 @@
 ﻿"""Admin-facing command/callback/message handlers (staff group + log chat)."""
 import asyncio
+import json
 import logging
 import re
 import shlex
@@ -58,6 +59,7 @@ from app.services.profiles import (
     _admin_default_prefix,
     _build_admin_stats_text,
     _build_user_stats_text,
+    _candidate_tip_value,
     _can_use_moderation_commands,
     _ensure_profile,
     _has_admin_ban_immunity,
@@ -66,6 +68,7 @@ from app.services.profiles import (
     _resolve_ban_target,
     _resolve_warn_target,
     _set_last_admin_tag_for_user,
+    _set_user_blocked_bot_state,
     is_user_banned,
 )
 from app.services.topics import (
