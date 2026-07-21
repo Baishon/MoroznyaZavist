@@ -1,4 +1,4 @@
-﻿"""Admin-facing command/callback/message handlers (staff group + log chat)."""
+"""Admin-facing command/callback/message handlers (staff group + log chat)."""
 import asyncio
 import json
 import logging
@@ -85,6 +85,9 @@ from app.services.topics import (
     _topic_url,
 )
 
+# ==== SECTION: Forum-topic management ====
+# /topic del|close|open — lets a topic admin delete, close, or reopen a
+# forum topic in one of the allowed chats (work/log/cooperation).
 async def topic_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.effective_user:
         return
@@ -103,17 +106,17 @@ async def topic_command_handler(update: Update, context: ContextTypes.DEFAULT_TY
     cmd_len = cmd_entity.length if cmd_entity and cmd_entity.type == "bot_command" else len("/topic")
     args_text = raw_text[cmd_len:].strip()
     if not args_text:
-        await update.message.reply_text('РСЃРїРѕР»СЊР·СѓР№С‚Рµ: /topic "url" del|close|open')
+        await update.message.reply_text('Используйте: /topic "url" del|close|open')
         return
 
     try:
         parts = shlex.split(args_text)
     except ValueError:
-        await update.message.reply_text('РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ С„РѕСЂРјР°С‚. РСЃРїРѕР»СЊР·СѓР№С‚Рµ: /topic "url" del|close|open')
+        await update.message.reply_text('Некорректный формат. Используйте: /topic "url" del|close|open')
         return
 
     if len(parts) < 2:
-        await update.message.reply_text('РСЃРїРѕР»СЊР·СѓР№С‚Рµ: /topic "url" del|close|open')
+        await update.message.reply_text('Используйте: /topic "url" del|close|open')
         return
 
     topic_url = parts[0]
@@ -210,6 +213,10 @@ async def topic_command_handler(update: Update, context: ContextTypes.DEFAULT_TY
 
 
 
+# ==== SECTION: Admin rights & mutes ====
+# /makeadmin & /prava grant/inspect staff levels (ADMIN_LEVEL_TITLES);
+# /amute, /unmute, and admin_mute_guard_handler enforce a temporary mute
+# stored inline on the target admin's profile (see app.services.mutes).
 async def _makeadmin_impl(update: Update, context: ContextTypes.DEFAULT_TYPE, owner_bypass: bool = False):
     if update.effective_chat.id != LOG_CHAT_ID or not update.message:
         return
@@ -234,7 +241,7 @@ async def _makeadmin_impl(update: Update, context: ContextTypes.DEFAULT_TYPE, ow
     if not args_text:
         await update.message.reply_text(
             'prefix_text: устанавливается после назначения (через /setprefix)\n'
-            'РСЃРїРѕР»СЊР·СѓР№С‚Рµ: /makeadmin "id_profile" "lvl"'
+            'Используйте: /makeadmin "id_profile" "lvl"'
         )
         return
 
@@ -243,14 +250,14 @@ async def _makeadmin_impl(update: Update, context: ContextTypes.DEFAULT_TYPE, ow
     except ValueError:
         await update.message.reply_text(
             'prefix_text: устанавливается после назначения (через /setprefix)\n'
-            'РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ С„РѕСЂРјР°С‚. РСЃРїРѕР»СЊР·СѓР№С‚Рµ: /makeadmin "id_profile" "lvl"'
+            'Некорректный формат. Используйте: /makeadmin "id_profile" "lvl"'
         )
         return
 
     if len(parts) < 2:
         await update.message.reply_text(
             'prefix_text: устанавливается после назначения (через /setprefix)\n'
-            'РСЃРїРѕР»СЊР·СѓР№С‚Рµ: /makeadmin "id_profile" "lvl"'
+            'Используйте: /makeadmin "id_profile" "lvl"'
         )
         return
 
@@ -324,7 +331,7 @@ async def _makeadmin_impl(update: Update, context: ContextTypes.DEFAULT_TYPE, ow
         state_map.pop(str(target_user_id), None)
 
         await update.message.reply_text(
-            f'в‘пёЏРџРѕР»СЊР·РѕРІР°С‚РµР»СЊ "{target_identifier}" был разжалован, админ-права сняты.'
+            f'☑️Пользователь "{target_identifier}" был разжалован, админ-права сняты.'
         )
 
         try:
@@ -364,7 +371,7 @@ async def _makeadmin_impl(update: Update, context: ContextTypes.DEFAULT_TYPE, ow
         }
 
         await update.message.reply_text(
-            f'в‘пёЏРџРѕР»СЊР·РѕРІР°С‚РµР»СЊ "{target_identifier}" был успешно назначен на админ-права, инструктаж ему отправлен в ЛС.\n'
+            f'☑️Пользователь "{target_identifier}" был успешно назначен на админ-права, инструктаж ему отправлен в ЛС.\n'
             f'Префикс: {prefix_text}\n'
             'Уровень: 1'
         )
@@ -383,7 +390,7 @@ async def _makeadmin_impl(update: Update, context: ContextTypes.DEFAULT_TYPE, ow
             await asyncio.sleep(2)
             await _send_candidate_stage_1(context, target_user_id_int)
         except Forbidden:
-            await update.message.reply_text("РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ Р·Р°Р±Р»РѕРєРёСЂРѕРІР°Р» Р±РѕС‚Р°. РРЅСЃС‚СЂСѓРєС‚Р°Р¶ РІ Р›РЎ РѕС‚РїСЂР°РІРёС‚СЊ РЅРµ СѓРґР°Р»РѕСЃСЊ.")
+            await update.message.reply_text("Пользователь заблокировал бота. Инструктаж в ЛС отправить не удалось.")
         except Exception as e:
             logging.exception("makeadmin onboarding send failed: %s", e)
         return
@@ -394,7 +401,7 @@ async def _makeadmin_impl(update: Update, context: ContextTypes.DEFAULT_TYPE, ow
     state_map.pop(str(target_user_id), None)
 
     await update.message.reply_text(
-        f'в‘пёЏРџРѕР»СЊР·РѕРІР°С‚РµР»СЊ "{target_identifier}" был успешно назначен.\n'
+        f'☑️Пользователь "{target_identifier}" был успешно назначен.\n'
         f'Префикс: {prefix_text}\n'
         f'Уровень: {lvl} ({rank_title}).'
     )
@@ -459,7 +466,7 @@ async def amute_command_handler(update: Update, context: ContextTypes.DEFAULT_TY
     try:
         parts = shlex.split(args_text)
     except ValueError:
-        await update.message.reply_text('РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ С„РѕСЂРјР°С‚. РСЃРїРѕР»СЊР·СѓР№С‚Рµ: /amute "id_profile" "minute"')
+        await update.message.reply_text('Некорректный формат. Используйте: /amute "id_profile" "minute"')
         return
 
     if len(parts) < 2:
@@ -538,7 +545,7 @@ async def unmute_command_handler(update: Update, context: ContextTypes.DEFAULT_T
     try:
         parts = shlex.split(args_text)
     except ValueError:
-        await update.message.reply_text('РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ С„РѕСЂРјР°С‚. РСЃРїРѕР»СЊР·СѓР№С‚Рµ: /aunmute "id_profile"')
+        await update.message.reply_text('Некорректный формат. Используйте: /aunmute "id_profile"')
         return
 
     if len(parts) < 1:
@@ -603,7 +610,10 @@ async def admin_mute_guard_handler(update: Update, context: ContextTypes.DEFAULT
     raise ApplicationHandlerStop
 
 
-
+# ==== SECTION: Log-chat routing & cooperation ads ====
+# log_command_router dispatches "/"-commands typed in the log chat;
+# cooperation_admin_command_guard/sendpiar/anpiar manage the
+# cooperation-prefix ad text an admin can post in the cooperation chat.
 async def log_command_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = getattr(update, "message", None)
     if message is None or not update.effective_user:
@@ -711,7 +721,7 @@ async def sendpiar_command_handler(update: Update, context: ContextTypes.DEFAULT
     args_text = source_text[cmd_len:]
 
     if not str(args_text).strip():
-        await update.message.reply_text('РСЃРїРѕР»СЊР·СѓР№С‚Рµ: /sendpiar "С‚РµРєСЃС‚" (РјРѕР¶РЅРѕ СЃ С„РѕС‚Рѕ РёР»Рё РІРёРґРµРѕ).')
+        await update.message.reply_text('Используйте: /sendpiar "текст" (можно с фото или видео).')
         return
 
     quoted = re.match(r'^\s*"([\s\S]*)"\s*$', args_text)
@@ -814,17 +824,17 @@ async def anpiar_command_handler(update: Update, context: ContextTypes.DEFAULT_T
     cmd_len = cmd_entity.length if cmd_entity and cmd_entity.type == "bot_command" else len("/anpiar")
     args_text = raw_text[cmd_len:].strip()
     if not args_text:
-        await update.message.reply_text('РСЃРїРѕР»СЊР·СѓР№С‚Рµ: /anpiar "id_profile" "1-0"')
+        await update.message.reply_text('Используйте: /anpiar "id_profile" "1-0"')
         return
 
     try:
         parts = shlex.split(args_text)
     except ValueError:
-        await update.message.reply_text('РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ С„РѕСЂРјР°С‚. РСЃРїРѕР»СЊР·СѓР№С‚Рµ: /anpiar "id_profile" "1-0"')
+        await update.message.reply_text('Некорректный формат. Используйте: /anpiar "id_profile" "1-0"')
         return
 
     if len(parts) < 2:
-        await update.message.reply_text('РСЃРїРѕР»СЊР·СѓР№С‚Рµ: /anpiar "id_profile" "1-0"')
+        await update.message.reply_text('Используйте: /anpiar "id_profile" "1-0"')
         return
 
     target_identifier = parts[0]
@@ -874,7 +884,10 @@ async def anpiar_command_handler(update: Update, context: ContextTypes.DEFAULT_T
         pass
 
 
-
+# ==== SECTION: Warnings, stats & the /astats profile editor ====
+# /warn issues a warning by id_profile+reason; /stats, /fullstats, /astats
+# and every astats_*_callback below render and edit an admin's profile card
+# (tag, bio, gender, cooperation tip text) via app.services.profiles.
 async def warn_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.id != LOG_CHAT_ID or not update.message:
         return
@@ -894,7 +907,7 @@ async def warn_command_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     try:
         parts = shlex.split(args_text)
     except ValueError:
-        await update.message.reply_text("РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ С„РѕСЂРјР°С‚. РСЃРїРѕР»СЊР·СѓР№С‚Рµ: /warn \"id_profile\" \"reason\"")
+        await update.message.reply_text("Некорректный формат. Используйте: /warn \"id_profile\" \"reason\"")
         return
 
     if len(parts) < 2:
@@ -952,17 +965,17 @@ async def stats_command_handler(update: Update, context: ContextTypes.DEFAULT_TY
     cmd_len = cmd_entity.length if cmd_entity and cmd_entity.type == "bot_command" else len("/stats")
     args_text = raw_text[cmd_len:].strip()
     if not args_text:
-        await update.message.reply_text('РСЃРїРѕР»СЊР·СѓР№С‚Рµ: /stats "id_profile"')
+        await update.message.reply_text('Используйте: /stats "id_profile"')
         return
 
     try:
         parts = shlex.split(args_text)
     except ValueError:
-        await update.message.reply_text('РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ С„РѕСЂРјР°С‚. РСЃРїРѕР»СЊР·СѓР№С‚Рµ: /stats "id_profile"')
+        await update.message.reply_text('Некорректный формат. Используйте: /stats "id_profile"')
         return
 
     if len(parts) < 1:
-        await update.message.reply_text('РСЃРїРѕР»СЊР·СѓР№С‚Рµ: /stats "id_profile"')
+        await update.message.reply_text('Используйте: /stats "id_profile"')
         return
 
     target_identifier = parts[0]
@@ -1041,17 +1054,17 @@ async def astats_command_handler(update: Update, context: ContextTypes.DEFAULT_T
     cmd_len = cmd_entity.length if cmd_entity and cmd_entity.type == "bot_command" else len("/astats")
     args_text = raw_text[cmd_len:].strip()
     if not args_text:
-        await update.message.reply_text('РСЃРїРѕР»СЊР·СѓР№С‚Рµ: /astats "id_profile"')
+        await update.message.reply_text('Используйте: /astats "id_profile"')
         return
 
     try:
         parts = shlex.split(args_text)
     except ValueError:
-        await update.message.reply_text('РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ С„РѕСЂРјР°С‚. РСЃРїРѕР»СЊР·СѓР№С‚Рµ: /astats "id_profile"')
+        await update.message.reply_text('Некорректный формат. Используйте: /astats "id_profile"')
         return
 
     if len(parts) < 1:
-        await update.message.reply_text('РСЃРїРѕР»СЊР·СѓР№С‚Рµ: /astats "id_profile"')
+        await update.message.reply_text('Используйте: /astats "id_profile"')
         return
 
     target_identifier = parts[0]
@@ -1239,7 +1252,7 @@ async def astats_tip_menu_callback(update: Update, context: ContextTypes.DEFAULT
 
     try:
         await update.callback_query.message.edit_text(
-            f"в•пёЏРџР°РЅРµР»СЊ СЂРµРґР°РєС‚РёСЂРѕРІР°РЅРёСЏ РґРёР°Р»РѕРіРѕРІ Сѓ Р°РґРјРёРЅР° {username_text}",
+            f"☕️Панель редактирования диалогов у админа {username_text}",
             reply_markup=_build_astats_tip_editor_keyboard(session_id, selected_keys),
         )
     except Exception:
@@ -1430,17 +1443,17 @@ async def info_topic_command_handler(update: Update, context: ContextTypes.DEFAU
     cmd_len = cmd_entity.length if cmd_entity and cmd_entity.type == "bot_command" else len("/info_topic")
     args_text = raw_text[cmd_len:].strip()
     if not args_text:
-        await update.message.reply_text('РСЃРїРѕР»СЊР·СѓР№С‚Рµ: /info_topic "topic_link"')
+        await update.message.reply_text('Используйте: /info_topic "topic_link"')
         return
 
     try:
         parts = shlex.split(args_text)
     except ValueError:
-        await update.message.reply_text('РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ С„РѕСЂРјР°С‚. РСЃРїРѕР»СЊР·СѓР№С‚Рµ: /info_topic "topic_link"')
+        await update.message.reply_text('Некорректный формат. Используйте: /info_topic "topic_link"')
         return
 
     if len(parts) < 1:
-        await update.message.reply_text('РСЃРїРѕР»СЊР·СѓР№С‚Рµ: /info_topic "topic_link"')
+        await update.message.reply_text('Используйте: /info_topic "topic_link"')
         return
 
     topic_link = parts[0]
@@ -1805,7 +1818,7 @@ async def astats_gender_menu_callback(update: Update, context: ContextTypes.DEFA
 
     try:
         await update.callback_query.message.edit_text(
-            "в•пёЏР РµРґР°РєС‚РѕСЂ СЃРјРµРЅС‹ РїРѕР»Р° Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂСѓ",
+            "☕️Редактор смены пола администратору",
             reply_markup=_build_astats_gender_editor_keyboard(session_id),
         )
     except Exception:
@@ -1855,7 +1868,7 @@ async def astats_gender_set_callback(update: Update, context: ContextTypes.DEFAU
             chat_id=LOG_CHAT_ID,
             text=(
                 f"✅Смена пола выполнена: id_profile #{target_profile.get('id_profile')} -> {admin_gender}. "
-                f"РРЅРёС†РёР°С‚РѕСЂ: id{update.effective_user.id}"
+                f"Инициатор: id{update.effective_user.id}"
             ),
         )
     except Exception:
@@ -2000,7 +2013,7 @@ async def astats_bio_view_callback(update: Update, context: ContextTypes.DEFAULT
 
     profile = _ensure_profile(context, target_user_id, f"id{target_user_id}")
     biography_text = str(profile.get("biography_admin") or "не заполнена")
-    await update.callback_query.message.reply_text(f"вєпёЏР’Р°С€Р° РЅРѕРІР°СЏ Р±РёРѕРіСЂР°С„РёСЏ: {biography_text}")
+    await update.callback_query.message.reply_text(f"☺️Ваша новая биография: {biography_text}")
 
 
 
@@ -2159,7 +2172,10 @@ async def handle_astats_bio_input_message(update: Update, context: ContextTypes.
     raise ApplicationHandlerStop
 
 
-
+# ==== SECTION: Direct admin messaging & prefix management ====
+# /pm and /kus let staff message a user/chat directly from the log chat;
+# /setprefix and its callbacks pick the ad-prefix label (see
+# app.keyboards.inline._prefix_options) shown on an admin's cooperation posts.
 async def pm_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not _is_special_admin_chat(update.effective_chat.id):
         return
@@ -2178,17 +2194,17 @@ async def pm_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
     cmd_len = cmd_entity.length if cmd_entity and cmd_entity.type == "bot_command" else len("/pm")
     args_text = raw_text[cmd_len:].strip()
     if not args_text:
-        await update.message.reply_text('РСЃРїРѕР»СЊР·СѓР№С‚Рµ: /pm "id_profile" "С‚РµРєСЃС‚"')
+        await update.message.reply_text('Используйте: /pm "id_profile" "текст"')
         return
 
     try:
         parts = shlex.split(args_text)
     except ValueError:
-        await update.message.reply_text('РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ С„РѕСЂРјР°С‚. РСЃРїРѕР»СЊР·СѓР№С‚Рµ: /pm "id_profile" "С‚РµРєСЃС‚"')
+        await update.message.reply_text('Некорректный формат. Используйте: /pm "id_profile" "текст"')
         return
 
     if len(parts) < 2:
-        await update.message.reply_text('РСЃРїРѕР»СЊР·СѓР№С‚Рµ: /pm "id_profile" "С‚РµРєСЃС‚"')
+        await update.message.reply_text('Используйте: /pm "id_profile" "текст"')
         return
 
     target_identifier = parts[0]
@@ -2325,17 +2341,17 @@ async def setprefix_command_handler(update: Update, context: ContextTypes.DEFAUL
     cmd_len = cmd_entity.length if cmd_entity and cmd_entity.type == "bot_command" else len("/setprefix")
     args_text = raw_text[cmd_len:].strip()
     if not args_text:
-        await update.message.reply_text('РСЃРїРѕР»СЊР·СѓР№С‚Рµ: /setprefix "id_profile"')
+        await update.message.reply_text('Используйте: /setprefix "id_profile"')
         return
 
     try:
         parts = shlex.split(args_text)
     except ValueError:
-        await update.message.reply_text('РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ С„РѕСЂРјР°С‚. РСЃРїРѕР»СЊР·СѓР№С‚Рµ: /setprefix "id_profile"')
+        await update.message.reply_text('Некорректный формат. Используйте: /setprefix "id_profile"')
         return
 
     if len(parts) < 1:
-        await update.message.reply_text('РСЃРїРѕР»СЊР·СѓР№С‚Рµ: /setprefix "id_profile"')
+        await update.message.reply_text('Используйте: /setprefix "id_profile"')
         return
 
     target_identifier = parts[0]
@@ -2366,7 +2382,7 @@ async def setprefix_command_handler(update: Update, context: ContextTypes.DEFAUL
             break
 
     await update.message.reply_text(
-        f"в•пёЏРћС‚РєСЂС‹С‚Р° РїР°РЅРµР»СЊ СЂРµРґР°РєС‚РёСЂРѕРІР°РЅРёСЏ РїСЂРµС„РёРєСЃР° С‡РµР»РѕРІРµРєР° {target_id_profile}",
+        f"☕️Открыта панель редактирования префикса человека {target_id_profile}",
         reply_markup=_build_setprefix_keyboard(panel_id, pending_panels[panel_id]["selected_prefix_key"]),
     )
 
@@ -2473,7 +2489,10 @@ async def setprefix_apply_callback(update: Update, context: ContextTypes.DEFAULT
     pending_panels.pop(panel_id, None)
 
 
-
+# ==== SECTION: Ban/unban moderation & user profile review ====
+# /unwarn, /ban, /unban and the admin_take/warn_user/confirm_warn button
+# flow (issued from a user's profile card) apply moderation actions via
+# app.services.bans and persist through app.database.requests.
 async def unwarn_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.id != LOG_CHAT_ID or not update.message:
         return
@@ -2493,7 +2512,7 @@ async def unwarn_command_handler(update: Update, context: ContextTypes.DEFAULT_T
     try:
         parts = shlex.split(args_text)
     except ValueError:
-        await update.message.reply_text('РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ С„РѕСЂРјР°С‚. РСЃРїРѕР»СЊР·СѓР№С‚Рµ: /unwarn "id_profile"')
+        await update.message.reply_text('Некорректный формат. Используйте: /unwarn "id_profile"')
         return
 
     if len(parts) < 1:
@@ -2549,7 +2568,7 @@ async def ban_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
     try:
         parts = shlex.split(args_text)
     except ValueError:
-        await update.message.reply_text('РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ С„РѕСЂРјР°С‚. РСЃРїРѕР»СЊР·СѓР№С‚Рµ: /ban "id_profile" "reason"')
+        await update.message.reply_text('Некорректный формат. Используйте: /ban "id_profile" "reason"')
         return
 
     if len(parts) < 2:
@@ -2599,7 +2618,7 @@ async def unban_command_handler(update: Update, context: ContextTypes.DEFAULT_TY
     try:
         parts = shlex.split(args_text)
     except ValueError:
-        await update.message.reply_text('РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ С„РѕСЂРјР°С‚. РСЃРїРѕР»СЊР·СѓР№С‚Рµ: /unban "id_profile"')
+        await update.message.reply_text('Некорректный формат. Используйте: /unban "id_profile"')
         return
 
     if len(parts) < 1:
@@ -2674,7 +2693,7 @@ async def admin_take_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     accept_text = (
         f"📊Вы находитесь в переписке на тему {mood}\n"
-        f"РРјСЏ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ: {username}\n"
+        f"Имя пользователя: {username}\n"
         f"Айди профиля: {requester_id_profile}\n"
         f"Администратор {admin_username}"
     )
@@ -2714,12 +2733,12 @@ async def admin_take_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         "╰────────────────╯"
     )
     user_text_2 = (
-        "в•­в”Ђ рџ“Њ рќ“рќ“·рќ“Їрќ“ё в”Ђв•®\n\n"
+        "╭─ 📌 𝓘𝓷𝓯𝓸 ─╮\n\n"
         "⚙️ Временно недоступна пересылка:\n\n"
         "• 📷 Фото\n"
         "• 🎥 Видео\n"
         "• 🎞 GIF\n"
-        "вЂў рџЉ РЎС‚РёРєРµСЂРѕРІ\n"
+        "• 😊 Стикеров\n"
         "• 📁 Файлов\n\n"
         "Это связано с технической ошибкой на стороне сервера.\n\n"
         "🛠 Мы уже занимаемся её устранением. Спасибо за терпение!\n\n"
@@ -3003,7 +3022,12 @@ async def handle_warn_reason_message(update: Update, context: ContextTypes.DEFAU
     raise ApplicationHandlerStop
 
 
-
+# ==== SECTION: Decline-request review flow ====
+# When staff decline an admin-candidate application, this flow (through
+# approve/reject_decline_callback) collects a reason and notifies the
+# applicant. unknown_chat_guard, dump_maps_handler (owner-only debug dump),
+# and the rules-message admin commands (add/del_rule) are grouped in below
+# as the remaining misc/debug commands in this module.
 async def admin_decline_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not _can_use_moderation_commands(context, str(update.effective_user.id)):
         await update.callback_query.answer("Действие доступно только администраторам 2 категории и выше.", show_alert=True)
@@ -3578,7 +3602,7 @@ async def dump_maps_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Send as a private message to the requester if possible, otherwise log to LOG_CHAT_ID
         try:
             await context.bot.send_message(chat_id=requester.id, text=text)
-            await update.message.reply_text("Р”Р° РјРѕР№ РІРµР»РёРєРёР№ РРІР°РЅСѓС€РєР°, РґР°РјРї РєР°СЂС‚ СѓСЃРїРµС€РЅРѕ С‚РµР±Рµ РІ Р»СЃ РѕС‚РїСЂР°РІРёР»")
+            await update.message.reply_text("Да мой великий Иванушка, дамп карт успешно тебе в лс отправил")
         except Exception:
             try:
                 await context.bot.send_message(chat_id=LOG_CHAT_ID, text=text)
@@ -3669,7 +3693,7 @@ async def del_rule_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not existing_rules_text and not existing_rules_message_id:
         await context.bot.send_message(
             chat_id=LOG_CHAT_ID,
-            text="в„№пёЏРџСЂР°РІРёР»Р° РЅРµ СѓСЃС‚Р°РЅРѕРІР»РµРЅС‹: РСЃРїРѕР»СЊР·СѓР№С‚Рµ РєРѕРјР°РЅРґСѓ /addrules С‡С‚РѕР±С‹ РґРѕР±Р°РІРёС‚СЊ РЅРѕРІС‹Рµ РїСЂР°РІРёР»Р°.",
+            text="ℹ️Правила не установлены: Используйте команду /addrules чтобы добавить новые правила.",
         )
         return
 
@@ -3691,7 +3715,7 @@ async def del_rule_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     context.application.bot_data.pop("global_rules_text", None)
     context.application.bot_data.pop("global_rules_message_id", None)
-    await update.message.reply_text("вњ…РџСЂР°РІРёР»Р° СѓСЃРїРµС€РЅРѕ СѓРґР°Р»РµРЅС‹. РСЃРїРѕР»СЊР·СѓР№С‚Рµ РєРѕРјР°РЅРґСѓ /addrules С‡С‚РѕР±С‹ РґРѕР±Р°РІРёС‚СЊ РЅРѕРІС‹Рµ РїСЂР°РІРёР»Р°.")
+    await update.message.reply_text("✅Правила успешно удалены. Используйте команду /addrules чтобы добавить новые правила.")
 
 
 
