@@ -91,11 +91,11 @@ async def topic_command_handler(update: Update, context: ContextTypes.DEFAULT_TY
 
     allowed_topic_chats = {WORK_CHAT_ID, LOG_CHAT_ID, COOPERATION_CHAT_ID}
     if update.effective_chat.id not in allowed_topic_chats:
-        await update.message.reply_text("РљРѕРјР°РЅРґР° /topic РґРѕСЃС‚СѓРїРЅР° С‚РѕР»СЊРєРѕ РІ СЃРїРµС†-РіСЂСѓРїРїР°С….")
+        await update.message.reply_text("Команда /topic доступна только в спец-группах.")
         return
 
     if not _is_topic_admin(context, str(update.effective_user.id)):
-        await update.message.reply_text("РљРѕРјР°РЅРґР° РґРѕСЃС‚СѓРїРЅР° С‚РѕР»СЊРєРѕ Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂР°Рј 4 РєР°С‚РµРіРѕСЂРёРё Рё РІС‹С€Рµ.")
+        await update.message.reply_text("Команда доступна только администраторам 4 категории и выше.")
         return
 
     raw_text = update.message.text or ""
@@ -119,16 +119,16 @@ async def topic_command_handler(update: Update, context: ContextTypes.DEFAULT_TY
     topic_url = parts[0]
     action = parts[1].strip().lower()
     if action not in {"del", "close", "open"}:
-        await update.message.reply_text('Р”РѕСЃС‚СѓРїРЅС‹Рµ РґРµР№СЃС‚РІРёСЏ: del, close, open.')
+        await update.message.reply_text('Доступные действия: del, close, open.')
         return
 
     chat_id, topic_id = _parse_topic_url(topic_url)
     if chat_id is None or topic_id is None:
-        await update.message.reply_text('РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ URL С‚РµРјС‹. РќСѓР¶РµРЅ С„РѕСЂРјР°С‚ РІРёРґР° https://t.me/c/<chat_id>/<topic_id>.')
+        await update.message.reply_text('Некорректный URL темы. Нужен формат вида https://t.me/c/<chat_id>/<topic_id>.')
         return
 
     if chat_id not in allowed_topic_chats:
-        await update.message.reply_text("Р­С‚Р° РєРѕРјР°РЅРґР° СѓРїСЂР°РІР»СЏРµС‚ С‚РѕР»СЊРєРѕ С‚РµРјР°РјРё РІ СЃРїРµС†-РіСЂСѓРїРїР°С….")
+        await update.message.reply_text("Эта команда управляет только темами в спец-группах.")
         return
 
     state = _get_topic_state(context, chat_id, topic_id)
@@ -137,75 +137,75 @@ async def topic_command_handler(update: Update, context: ContextTypes.DEFAULT_TY
         try:
             await context.bot.delete_forum_topic(chat_id=chat_id, message_thread_id=topic_id)
             _set_topic_state(context, chat_id, topic_id, "deleted")
-            await update.message.reply_text(f"вњ…РўРµРјР° {topic_url} СѓРґР°Р»РµРЅР°.")
+            await update.message.reply_text(f"✅Тема {topic_url} удалена.")
         except BadRequest as e:
             text = str(e).lower()
             if "not found" in text or "message thread" in text or "topic" in text:
-                await update.message.reply_text("РўРµРјР° РЅРµ РЅР°Р№РґРµРЅР° РёР»Рё СѓР¶Рµ СѓРґР°Р»РµРЅР°.")
+                await update.message.reply_text("Тема не найдена или уже удалена.")
             else:
-                await update.message.reply_text(f"РќРµ СѓРґР°Р»РѕСЃСЊ СѓРґР°Р»РёС‚СЊ С‚РµРјСѓ: {e}")
+                await update.message.reply_text(f"Не удалось удалить тему: {e}")
         except Exception as e:
-            await update.message.reply_text(f"РќРµ СѓРґР°Р»РѕСЃСЊ СѓРґР°Р»РёС‚СЊ С‚РµРјСѓ: {e}")
+            await update.message.reply_text(f"Не удалось удалить тему: {e}")
         return
 
     if action == "close":
         if state == "closed":
-            await update.message.reply_text("РўРµРјР° СѓР¶Рµ Р·Р°РєСЂС‹С‚Р°.")
+            await update.message.reply_text("Тема уже закрыта.")
             return
         if state == "deleted":
-            await update.message.reply_text("РўРµРјР° СѓР¶Рµ СѓРґР°Р»РµРЅР°.")
+            await update.message.reply_text("Тема уже удалена.")
             return
 
         close_method = getattr(context.bot, "close_forum_topic", None)
         if close_method is None:
-            await update.message.reply_text("Р’ СЌС‚РѕР№ РІРµСЂСЃРёРё Р±РѕС‚Р° Р·Р°РєСЂС‹С‚РёРµ С‚РµРј РЅРµРґРѕСЃС‚СѓРїРЅРѕ.")
+            await update.message.reply_text("В этой версии бота закрытие тем недоступно.")
             return
 
         try:
             await close_method(chat_id=chat_id, message_thread_id=topic_id)
             _set_topic_state(context, chat_id, topic_id, "closed")
-            await update.message.reply_text(f"вњ…РўРµРјР° {topic_url} Р·Р°РєСЂС‹С‚Р°.")
+            await update.message.reply_text(f"✅Тема {topic_url} закрыта.")
         except BadRequest as e:
             text = str(e).lower()
             if "already closed" in text or "closed" in text:
                 _set_topic_state(context, chat_id, topic_id, "closed")
-                await update.message.reply_text("РўРµРјР° СѓР¶Рµ Р·Р°РєСЂС‹С‚Р°.")
+                await update.message.reply_text("Тема уже закрыта.")
             elif "not found" in text or "message thread" in text or "topic" in text:
-                await update.message.reply_text("РўРµРјР° РЅРµ РЅР°Р№РґРµРЅР°.")
+                await update.message.reply_text("Тема не найдена.")
             else:
-                await update.message.reply_text(f"РќРµ СѓРґР°Р»РѕСЃСЊ Р·Р°РєСЂС‹С‚СЊ С‚РµРјСѓ: {e}")
+                await update.message.reply_text(f"Не удалось закрыть тему: {e}")
         except Exception as e:
-            await update.message.reply_text(f"РќРµ СѓРґР°Р»РѕСЃСЊ Р·Р°РєСЂС‹С‚СЊ С‚РµРјСѓ: {e}")
+            await update.message.reply_text(f"Не удалось закрыть тему: {e}")
         return
 
     if action == "open":
         if state == "open":
-            await update.message.reply_text("РўРµРјР° СѓР¶Рµ РѕС‚РєСЂС‹С‚Р°.")
+            await update.message.reply_text("Тема уже открыта.")
             return
         if state == "deleted":
-            await update.message.reply_text("РўРµРјР° СѓР¶Рµ СѓРґР°Р»РµРЅР°.")
+            await update.message.reply_text("Тема уже удалена.")
             return
 
         reopen_method = getattr(context.bot, "reopen_forum_topic", None)
         if reopen_method is None:
-            await update.message.reply_text("Р’ СЌС‚РѕР№ РІРµСЂСЃРёРё Р±РѕС‚Р° РѕС‚РєСЂС‹С‚РёРµ С‚РµРј РЅРµРґРѕСЃС‚СѓРїРЅРѕ.")
+            await update.message.reply_text("В этой версии бота открытие тем недоступно.")
             return
 
         try:
             await reopen_method(chat_id=chat_id, message_thread_id=topic_id)
             _set_topic_state(context, chat_id, topic_id, "open")
-            await update.message.reply_text(f"вњ…РўРµРјР° {topic_url} РѕС‚РєСЂС‹С‚Р°.")
+            await update.message.reply_text(f"✅Тема {topic_url} открыта.")
         except BadRequest as e:
             text = str(e).lower()
             if "already open" in text or "not closed" in text or "open" in text:
                 _set_topic_state(context, chat_id, topic_id, "open")
-                await update.message.reply_text("РўРµРјР° СѓР¶Рµ РѕС‚РєСЂС‹С‚Р°.")
+                await update.message.reply_text("Тема уже открыта.")
             elif "not found" in text or "message thread" in text or "topic" in text:
-                await update.message.reply_text("РўРµРјР° РЅРµ РЅР°Р№РґРµРЅР°.")
+                await update.message.reply_text("Тема не найдена.")
             else:
-                await update.message.reply_text(f"РќРµ СѓРґР°Р»РѕСЃСЊ РѕС‚РєСЂС‹С‚СЊ С‚РµРјСѓ: {e}")
+                await update.message.reply_text(f"Не удалось открыть тему: {e}")
         except Exception as e:
-            await update.message.reply_text(f"РќРµ СѓРґР°Р»РѕСЃСЊ РѕС‚РєСЂС‹С‚СЊ С‚РµРјСѓ: {e}")
+            await update.message.reply_text(f"Не удалось открыть тему: {e}")
         return
 
 
@@ -224,7 +224,7 @@ async def _makeadmin_impl(update: Update, context: ContextTypes.DEFAULT_TYPE, ow
         )
         issuer_level = int(issuer_profile.get("admin_level", 0) or 0)
         if issuer_level < 4:
-            await update.message.reply_text("РљРѕРјР°РЅРґР° РґРѕСЃС‚СѓРїРЅР° С‚РѕР»СЊРєРѕ Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂР°Рј 4 РєР°С‚РµРіРѕСЂРёРё Рё РІС‹С€Рµ.")
+            await update.message.reply_text("Команда доступна только администраторам 4 категории и выше.")
             return
 
     raw_text = update.message.text or ""
@@ -233,7 +233,7 @@ async def _makeadmin_impl(update: Update, context: ContextTypes.DEFAULT_TYPE, ow
     args_text = raw_text[cmd_len:].strip()
     if not args_text:
         await update.message.reply_text(
-            'prefix_text: СѓСЃС‚Р°РЅР°РІР»РёРІР°РµС‚СЃСЏ РїРѕСЃР»Рµ РЅР°Р·РЅР°С‡РµРЅРёСЏ (С‡РµСЂРµР· /setprefix)\n'
+            'prefix_text: устанавливается после назначения (через /setprefix)\n'
             'РСЃРїРѕР»СЊР·СѓР№С‚Рµ: /makeadmin "id_profile" "lvl"'
         )
         return
@@ -242,14 +242,14 @@ async def _makeadmin_impl(update: Update, context: ContextTypes.DEFAULT_TYPE, ow
         parts = shlex.split(args_text)
     except ValueError:
         await update.message.reply_text(
-            'prefix_text: СѓСЃС‚Р°РЅР°РІР»РёРІР°РµС‚СЃСЏ РїРѕСЃР»Рµ РЅР°Р·РЅР°С‡РµРЅРёСЏ (С‡РµСЂРµР· /setprefix)\n'
+            'prefix_text: устанавливается после назначения (через /setprefix)\n'
             'РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ С„РѕСЂРјР°С‚. РСЃРїРѕР»СЊР·СѓР№С‚Рµ: /makeadmin "id_profile" "lvl"'
         )
         return
 
     if len(parts) < 2:
         await update.message.reply_text(
-            'prefix_text: СѓСЃС‚Р°РЅР°РІР»РёРІР°РµС‚СЃСЏ РїРѕСЃР»Рµ РЅР°Р·РЅР°С‡РµРЅРёСЏ (С‡РµСЂРµР· /setprefix)\n'
+            'prefix_text: устанавливается после назначения (через /setprefix)\n'
             'РСЃРїРѕР»СЊР·СѓР№С‚Рµ: /makeadmin "id_profile" "lvl"'
         )
         return
@@ -258,38 +258,38 @@ async def _makeadmin_impl(update: Update, context: ContextTypes.DEFAULT_TYPE, ow
     lvl_raw = parts[1].strip()
     if not lvl_raw.isdigit():
         await update.message.reply_text(
-            "prefix_text: СѓСЃС‚Р°РЅР°РІР»РёРІР°РµС‚СЃСЏ РїРѕСЃР»Рµ РЅР°Р·РЅР°С‡РµРЅРёСЏ (С‡РµСЂРµР· /setprefix)\n"
-            "lvl РґРѕР»Р¶РµРЅ Р±С‹С‚СЊ С‡РёСЃР»РѕРј РѕС‚ 0 РґРѕ 5."
+            "prefix_text: устанавливается после назначения (через /setprefix)\n"
+            "lvl должен быть числом от 0 до 5."
         )
         return
     lvl = int(lvl_raw)
     rank_title = ADMIN_LEVEL_TITLES.get(lvl)
     if lvl != 0 and not rank_title:
-        await update.message.reply_text("Р”РѕСЃС‚СѓРїРЅС‹Рµ СѓСЂРѕРІРЅРё: 0, 1, 2, 3, 4, 5.")
+        await update.message.reply_text("Доступные уровни: 0, 1, 2, 3, 4, 5.")
         return
     if issuer_level == 4 and lvl not in {0, 1, 2, 3}:
-        await update.message.reply_text("РђРґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂ 4 РєР°С‚РµРіРѕСЂРёРё РјРѕР¶РµС‚ РІС‹РґР°РІР°С‚СЊ С‚РѕР»СЊРєРѕ СѓСЂРѕРІРЅРё 1, 2, 3 (РёР»Рё СЃРЅРёРјР°С‚СЊ РїСЂР°РІР° РІ 0).")
+        await update.message.reply_text("Администратор 4 категории может выдавать только уровни 1, 2, 3 (или снимать права в 0).")
         return
 
     target_user_id, profile = _resolve_warn_target(context, target_identifier)
     if not profile:
-        await update.message.reply_text(f'РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ СЃ id_profile "{target_identifier}" РЅРµ РЅР°Р№РґРµРЅ.')
+        await update.message.reply_text(f'Пользователь с id_profile "{target_identifier}" не найден.')
         return
 
     preview_prefix = str(profile.get("prefix") or "").strip()
     if not preview_prefix and lvl > 0:
         preview_prefix = str(_admin_default_prefix(lvl) or "").strip()
-    preview_prefix_text = preview_prefix or "РЅРµ СѓСЃС‚Р°РЅРѕРІР»РµРЅ"
+    preview_prefix_text = preview_prefix or "не установлен"
 
     target_user_id_int = int(target_user_id)
     in_work_chat = await _is_member_of_chat(context, WORK_CHAT_ID, target_user_id_int)
     if not in_work_chat:
-        await update.message.reply_text("Р’С‹РґР°С‡Р° РЅРµРІРѕР·РјРѕР¶РЅР°: РґРѕР±Р°РІСЊС‚Рµ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ РІ СЂР°Р±РѕС‡РёР№ С‡Р°С‚.")
+        await update.message.reply_text("Выдача невозможна: добавьте пользователя в рабочий чат.")
         return
 
     in_channel = await _is_member_of_chat(context, OFFICIAL_CHANNEL_ID, target_user_id_int)
     if not in_channel:
-        await update.message.reply_text("Р’С‹РґР°С‡Р° РЅРµРІРѕР·РјРѕР¶РЅР°: РїРѕР»СЊР·РѕРІР°С‚РµР»СЊ РЅРµ РїРѕРґРїРёСЃР°РЅ РЅР° РѕС„РёС†РёР°Р»СЊРЅС‹Р№ С‚РіРє Р±РѕС‚Р°.")
+        await update.message.reply_text("Выдача невозможна: пользователь не подписан на официальный тгк бота.")
         return
 
     if lvl > 1:
@@ -298,8 +298,8 @@ async def _makeadmin_impl(update: Update, context: ContextTypes.DEFAULT_TYPE, ow
         biography_admin = str(profile.get("biography_admin") or "").strip()
         if candidate_status != "approved" or not tag_admin or not biography_admin:
             await update.message.reply_text(
-                f"РџСЂРµС„РёРєСЃ: {preview_prefix_text}\n"
-                "Р’С‹РґР°С‡Р° РЅРµРІРѕР·РјРѕР¶РЅР°: СЃРЅР°С‡Р°Р»Р° РїРѕР»СЊР·РѕРІР°С‚РµР»СЊ РґРѕР»Р¶РµРЅ РїСЂРѕР№С‚Рё РєР°РЅРґРёРґР°С‚СѓСЂСѓ 1 СѓСЂРѕРІРЅСЏ Рё Р·Р°РїРѕР»РЅРёС‚СЊ Р°РЅРєРµС‚Сѓ (С‚РµРі Рё Р±РёРѕРіСЂР°С„РёСЏ)."
+                f"Префикс: {preview_prefix_text}\n"
+                "Выдача невозможна: сначала пользователь должен пройти кандидатуру 1 уровня и заполнить анкету (тег и биография)."
             )
             return
 
@@ -311,7 +311,7 @@ async def _makeadmin_impl(update: Update, context: ContextTypes.DEFAULT_TYPE, ow
         current_admin_level = int(profile.get("admin_level", 0) or 0)
         if current_admin_level <= 0:
             await update.message.reply_text(
-                f'РЎРЅСЏС‚РёРµ РЅРµРІРѕР·РјРѕР¶РЅРѕ: Сѓ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ "{target_identifier}" РЅРµС‚ Р°РєС‚РёРІРЅС‹С… Р°РґРјРёРЅ-РїСЂР°РІ.'
+                f'Снятие невозможно: у пользователя "{target_identifier}" нет активных админ-прав.'
             )
             return
 
@@ -324,19 +324,19 @@ async def _makeadmin_impl(update: Update, context: ContextTypes.DEFAULT_TYPE, ow
         state_map.pop(str(target_user_id), None)
 
         await update.message.reply_text(
-            f'в‘пёЏРџРѕР»СЊР·РѕРІР°С‚РµР»СЊ "{target_identifier}" Р±С‹Р» СЂР°Р·Р¶Р°Р»РѕРІР°РЅ, Р°РґРјРёРЅ-РїСЂР°РІР° СЃРЅСЏС‚С‹.'
+            f'в‘пёЏРџРѕР»СЊР·РѕРІР°С‚РµР»СЊ "{target_identifier}" был разжалован, админ-права сняты.'
         )
 
         try:
             await context.bot.send_message(
                 chat_id=target_user_id_int,
                 text=(
-                    "вљ пёЏР’Р°С€Рё Р°РґРјРёРЅ-РїСЂР°РІР° Р±С‹Р»Рё СЃРЅСЏС‚С‹.\n\n"
-                    f'Р РµС€РµРЅРёРµ РїСЂРёРЅСЏР»: "{admin_username}".'
+                    "⚠️Ваши админ-права были сняты.\n\n"
+                    f'Решение принял: "{admin_username}".'
                 ),
             )
         except Forbidden:
-            await update.message.reply_text("РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ Р·Р°Р±Р»РѕРєРёСЂРѕРІР°Р» Р±РѕС‚Р°. РЈРІРµРґРѕРјР»РµРЅРёРµ Рѕ СЂР°Р·Р¶Р°Р»РѕРІР°РЅРёРё РѕС‚РїСЂР°РІРёС‚СЊ РЅРµ СѓРґР°Р»РѕСЃСЊ.")
+            await update.message.reply_text("Пользователь заблокировал бота. Уведомление о разжаловании отправить не удалось.")
         except Exception as e:
             logging.exception("makeadmin demotion notify failed: %s", e)
         _save_profile_record(context, str(target_user_id))
@@ -350,7 +350,7 @@ async def _makeadmin_impl(update: Update, context: ContextTypes.DEFAULT_TYPE, ow
         default_prefix = _admin_default_prefix(lvl)
         if default_prefix:
             profile["prefix"] = default_prefix
-    prefix_text = str(profile.get("prefix") or "РЅРµ СѓСЃС‚Р°РЅРѕРІР»РµРЅ")
+    prefix_text = str(profile.get("prefix") or "не установлен")
 
     if lvl == 1:
         profile["admin_candidate"] = True
@@ -364,20 +364,20 @@ async def _makeadmin_impl(update: Update, context: ContextTypes.DEFAULT_TYPE, ow
         }
 
         await update.message.reply_text(
-            f'в‘пёЏРџРѕР»СЊР·РѕРІР°С‚РµР»СЊ "{target_identifier}" Р±С‹Р» СѓСЃРїРµС€РЅРѕ РЅР°Р·РЅР°С‡РµРЅ РЅР° Р°РґРјРёРЅ-РїСЂР°РІР°, РёРЅСЃС‚СЂСѓРєС‚Р°Р¶ РµРјСѓ РѕС‚РїСЂР°РІР»РµРЅ РІ Р›РЎ.\n'
-            f'РџСЂРµС„РёРєСЃ: {prefix_text}\n'
-            'РЈСЂРѕРІРµРЅСЊ: 1'
+            f'в‘пёЏРџРѕР»СЊР·РѕРІР°С‚РµР»СЊ "{target_identifier}" был успешно назначен на админ-права, инструктаж ему отправлен в ЛС.\n'
+            f'Префикс: {prefix_text}\n'
+            'Уровень: 1'
         )
 
         try:
-            await context.bot.send_message(chat_id=target_user_id_int, text="вљ™пёЏРљР»Р°РІРёР°С‚СѓСЂР° РѕР±РЅРѕРІР»РµРЅР°.", reply_markup=ReplyKeyboardRemove())
+            await context.bot.send_message(chat_id=target_user_id_int, text="⚙️Клавиатура обновлена.", reply_markup=ReplyKeyboardRemove())
             await context.bot.send_message(
                 chat_id=target_user_id_int,
                 text=(
-                    f"РџСЂРµС„РёРєСЃ: {prefix_text}\n"
-                    "вќ¤пёЏвЂЌрџ”ҐРџРѕР·РґСЂР°РІР»СЏРµРј! Р’С‹ Р±С‹Р»Рё РЅР°Р·РЅР°С‡РµРЅС‹ Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂРѕРј 1 СѓСЂРѕРІРЅСЏ. "
-                    f'РќР°Р·РЅР°С‡РёР» РІР°СЃ "{admin_username}"\n\n'
-                    "рџ“ќРџРµСЂРµРґ РЅР°С‡Р°Р»РѕР№ СЂР°Р±РѕС‚С‹ РІР°Рј РЅСѓР¶РЅРѕ Р·Р°РїРѕР»РЅРёС‚СЊ РёРЅС„РѕСЂРјР°С†РёСЋ Рѕ СЃРµР±Рµ..."
+                    f"Префикс: {prefix_text}\n"
+                    "❤️‍🔥Поздравляем! Вы были назначены администратором 1 уровня. "
+                    f'Назначил вас "{admin_username}"\n\n'
+                    "📝Перед началой работы вам нужно заполнить информацию о себе..."
                 ),
             )
             await asyncio.sleep(2)
@@ -394,21 +394,21 @@ async def _makeadmin_impl(update: Update, context: ContextTypes.DEFAULT_TYPE, ow
     state_map.pop(str(target_user_id), None)
 
     await update.message.reply_text(
-        f'в‘пёЏРџРѕР»СЊР·РѕРІР°С‚РµР»СЊ "{target_identifier}" Р±С‹Р» СѓСЃРїРµС€РЅРѕ РЅР°Р·РЅР°С‡РµРЅ.\n'
-        f'РџСЂРµС„РёРєСЃ: {prefix_text}\n'
-        f'РЈСЂРѕРІРµРЅСЊ: {lvl} ({rank_title}).'
+        f'в‘пёЏРџРѕР»СЊР·РѕРІР°С‚РµР»СЊ "{target_identifier}" был успешно назначен.\n'
+        f'Префикс: {prefix_text}\n'
+        f'Уровень: {lvl} ({rank_title}).'
     )
 
     try:
         await context.bot.send_message(
             chat_id=target_user_id_int,
             text=(
-                f"вќ¤пёЏвЂЌрџ”ҐРџРѕР·РґСЂР°РІР»СЏРµРј! Р’С‹ Р±С‹Р»Рё РЅР°Р·РЅР°С‡РµРЅС‹: {rank_title}. "
-                f'РќР°Р·РЅР°С‡РёР» РІР°СЃ "{admin_username}"'
+                f"❤️‍🔥Поздравляем! Вы были назначены: {rank_title}. "
+                f'Назначил вас "{admin_username}"'
             ),
         )
     except Forbidden:
-        await update.message.reply_text("РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ Р·Р°Р±Р»РѕРєРёСЂРѕРІР°Р» Р±РѕС‚Р°. РЈРІРµРґРѕРјР»РµРЅРёРµ РѕС‚РїСЂР°РІРёС‚СЊ РЅРµ СѓРґР°Р»РѕСЃСЊ.")
+        await update.message.reply_text("Пользователь заблокировал бота. Уведомление отправить не удалось.")
     except Exception as e:
         logging.exception("makeadmin notify failed: %s", e)
     _save_profile_record(context, str(target_user_id))
@@ -423,7 +423,7 @@ async def makeadmin_command_handler(update: Update, context: ContextTypes.DEFAUL
 async def prava_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.effective_user or update.effective_user.id != OWNER_ID:
         if update.message:
-            await update.message.reply_text("РљРѕРјР°РЅРґР° РґРѕСЃС‚СѓРїРЅР° С‚РѕР»СЊРєРѕ РІР»Р°РґРµР»СЊС†Сѓ Р±РѕС‚Р°.")
+            await update.message.reply_text("Команда доступна только владельцу бота.")
         return
 
     owner_profile = _ensure_profile(context, str(OWNER_ID), update.effective_user.username or f"id{OWNER_ID}")
@@ -436,7 +436,7 @@ async def prava_command_handler(update: Update, context: ContextTypes.DEFAULT_TY
     _save_profile_record(context, str(OWNER_ID))
 
     if update.message:
-        await update.message.reply_text("вњ…РџСЂР°РІР° 5 РєР°С‚РµРіРѕСЂРёРё РІС‹РґР°РЅС‹ РїРѕР»СЊР·РѕРІР°С‚РµР»СЋ СЃ Telegram ID 7545068007.")
+        await update.message.reply_text("✅Права 5 категории выданы пользователю с Telegram ID 7545068007.")
 
 
 
@@ -445,7 +445,7 @@ async def amute_command_handler(update: Update, context: ContextTypes.DEFAULT_TY
         return
 
     if not _can_use_moderation_commands(context, str(update.effective_user.id)):
-        await update.message.reply_text("РљРѕРјР°РЅРґР° РґРѕСЃС‚СѓРїРЅР° С‚РѕР»СЊРєРѕ Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂР°Рј 2 РєР°С‚РµРіРѕСЂРёРё Рё РІС‹С€Рµ.")
+        await update.message.reply_text("Команда доступна только администраторам 2 категории и выше.")
         return
 
     raw_text = update.message.text or ""
@@ -453,7 +453,7 @@ async def amute_command_handler(update: Update, context: ContextTypes.DEFAULT_TY
     cmd_len = cmd_entity.length if cmd_entity and cmd_entity.type == "bot_command" else len("/amute")
     args_text = raw_text[cmd_len:].strip()
     if not args_text:
-        await update.message.reply_text('РЈРєР°Р¶РёС‚Рµ id_profile Рё minute: /amute "id_profile" "minute"')
+        await update.message.reply_text('Укажите id_profile и minute: /amute "id_profile" "minute"')
         return
 
     try:
@@ -463,27 +463,27 @@ async def amute_command_handler(update: Update, context: ContextTypes.DEFAULT_TY
         return
 
     if len(parts) < 2:
-        await update.message.reply_text('РЈРєР°Р¶РёС‚Рµ id_profile Рё minute: /amute "id_profile" "minute"')
+        await update.message.reply_text('Укажите id_profile и minute: /amute "id_profile" "minute"')
         return
 
     target_identifier = parts[0]
     minute_raw = parts[1].strip()
     if not minute_raw.isdigit():
-        await update.message.reply_text("minute РґРѕР»Р¶РµРЅ Р±С‹С‚СЊ С†РµР»С‹Рј С‡РёСЃР»РѕРј Р±РѕР»СЊС€Рµ 0.")
+        await update.message.reply_text("minute должен быть целым числом больше 0.")
         return
 
     minutes = int(minute_raw)
     if minutes <= 0:
-        await update.message.reply_text("minute РґРѕР»Р¶РµРЅ Р±С‹С‚СЊ С†РµР»С‹Рј С‡РёСЃР»РѕРј Р±РѕР»СЊС€Рµ 0.")
+        await update.message.reply_text("minute должен быть целым числом больше 0.")
         return
 
     target_user_id, profile = _resolve_warn_target(context, target_identifier)
     if not profile:
-        await update.message.reply_text(f'РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ СЃ id_profile "{target_identifier}" РЅРµ РЅР°Р№РґРµРЅ.')
+        await update.message.reply_text(f'Пользователь с id_profile "{target_identifier}" не найден.')
         return
 
     if _has_admin_rights_level_1_5(profile):
-        await update.message.reply_text(f'РќРµРІРѕР·РјРѕР¶РЅРѕ РІС‹РґР°С‚СЊ РјСѓС‚: id_profile #{profile.get("id_profile")} РёРјРµРµС‚ Р°РґРјРёРЅ-РїСЂР°РІР° 1-5 СѓСЂРѕРІРЅСЏ.')
+        await update.message.reply_text(f'Невозможно выдать мут: id_profile #{profile.get("id_profile")} имеет админ-права 1-5 уровня.')
         return
 
     try:
@@ -496,22 +496,22 @@ async def amute_command_handler(update: Update, context: ContextTypes.DEFAULT_TY
             use_independent_chat_permissions=True,
         )
     except Forbidden:
-        await update.message.reply_text("РќРµ СѓРґР°Р»РѕСЃСЊ РІС‹РґР°С‚СЊ РјСѓС‚: Сѓ Р±РѕС‚Р° РЅРµС‚ РїСЂР°РІ РѕРіСЂР°РЅРёС‡РёРІР°С‚СЊ СѓС‡Р°СЃС‚РЅРёРєРѕРІ РІ СЌС‚РѕР№ РіСЂСѓРїРїРµ.")
+        await update.message.reply_text("Не удалось выдать мут: у бота нет прав ограничивать участников в этой группе.")
         return
     except Exception:
-        await update.message.reply_text("РќРµ СѓРґР°Р»РѕСЃСЊ РІС‹РґР°С‚СЊ РјСѓС‚ С‡РµСЂРµР· РЅР°СЃС‚СЂРѕР№РєРё Telegram.")
+        await update.message.reply_text("Не удалось выдать мут через настройки Telegram.")
         return
 
     profile["mute_until"] = time.time() + minutes * 60
     profile["mute_reason"] = f"mute for {minutes} minutes"
     profile["mute_set_by"] = str(update.effective_user.id)
 
-    await update.message.reply_text(f'вњ…РђРґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂ id_profile #{profile.get("id_profile")} РїРѕР»СѓС‡РёР» РјСѓС‚ РЅР° {minutes} РјРёРЅ.')
+    await update.message.reply_text(f'✅Администратор id_profile #{profile.get("id_profile")} получил мут на {minutes} мин.')
 
     try:
         await context.bot.send_message(
             chat_id=int(target_user_id),
-            text=f'в›”пёЏР’Р°Рј РІС‹РґР°РЅ РјСѓС‚ РЅР° {minutes} РјРёРЅ. Р’ СЌС‚Рѕ РІСЂРµРјСЏ РІР°С€Рё СЃРѕРѕР±С‰РµРЅРёСЏ РІ С‚РµРјРµ РЅРµ Р±СѓРґСѓС‚ РѕС‚РїСЂР°РІР»СЏС‚СЊСЃСЏ РїРѕР»СЊР·РѕРІР°С‚РµР»СЋ.',
+            text=f'⛔️Вам выдан мут на {minutes} мин. В это время ваши сообщения в теме не будут отправляться пользователю.',
         )
     except Exception:
         pass
@@ -524,7 +524,7 @@ async def unmute_command_handler(update: Update, context: ContextTypes.DEFAULT_T
         return
 
     if not _can_use_moderation_commands(context, str(update.effective_user.id)):
-        await update.message.reply_text("РљРѕРјР°РЅРґР° РґРѕСЃС‚СѓРїРЅР° С‚РѕР»СЊРєРѕ Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂР°Рј 2 РєР°С‚РµРіРѕСЂРёРё Рё РІС‹С€Рµ.")
+        await update.message.reply_text("Команда доступна только администраторам 2 категории и выше.")
         return
 
     raw_text = update.message.text or ""
@@ -532,7 +532,7 @@ async def unmute_command_handler(update: Update, context: ContextTypes.DEFAULT_T
     cmd_len = cmd_entity.length if cmd_entity and cmd_entity.type == "bot_command" else len("/aunmute")
     args_text = raw_text[cmd_len:].strip()
     if not args_text:
-        await update.message.reply_text('РЈРєР°Р¶РёС‚Рµ id_profile: /aunmute "id_profile"')
+        await update.message.reply_text('Укажите id_profile: /aunmute "id_profile"')
         return
 
     try:
@@ -542,13 +542,13 @@ async def unmute_command_handler(update: Update, context: ContextTypes.DEFAULT_T
         return
 
     if len(parts) < 1:
-        await update.message.reply_text('РЈРєР°Р¶РёС‚Рµ id_profile: /aunmute "id_profile"')
+        await update.message.reply_text('Укажите id_profile: /aunmute "id_profile"')
         return
 
     target_identifier = parts[0]
     target_user_id, profile = _resolve_warn_target(context, target_identifier)
     if not profile:
-        await update.message.reply_text(f'РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ СЃ id_profile "{target_identifier}" РЅРµ РЅР°Р№РґРµРЅ.')
+        await update.message.reply_text(f'Пользователь с id_profile "{target_identifier}" не найден.')
         return
 
     try:
@@ -559,19 +559,19 @@ async def unmute_command_handler(update: Update, context: ContextTypes.DEFAULT_T
             use_independent_chat_permissions=True,
         )
     except Forbidden:
-        await update.message.reply_text("РќРµ СѓРґР°Р»РѕСЃСЊ СЃРЅСЏС‚СЊ РјСѓС‚: Сѓ Р±РѕС‚Р° РЅРµС‚ РїСЂР°РІ РёР·РјРµРЅСЏС‚СЊ РѕРіСЂР°РЅРёС‡РµРЅРёСЏ СѓС‡Р°СЃС‚РЅРёРєРѕРІ РІ СЌС‚РѕР№ РіСЂСѓРїРїРµ.")
+        await update.message.reply_text("Не удалось снять мут: у бота нет прав изменять ограничения участников в этой группе.")
         return
     except Exception:
-        await update.message.reply_text("РќРµ СѓРґР°Р»РѕСЃСЊ СЃРЅСЏС‚СЊ РјСѓС‚ С‡РµСЂРµР· РЅР°СЃС‚СЂРѕР№РєРё Telegram.")
+        await update.message.reply_text("Не удалось снять мут через настройки Telegram.")
         return
 
     _clear_admin_mute(profile)
-    await update.message.reply_text(f'вњ…РЎ Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂР° id_profile #{profile.get("id_profile")} СЃРЅСЏС‚ РјСѓС‚.')
+    await update.message.reply_text(f'✅С администратора id_profile #{profile.get("id_profile")} снят мут.')
 
     try:
         await context.bot.send_message(
             chat_id=int(target_user_id),
-            text="вњ…РЎ РІР°СЃ СЃРЅСЏС‚ РјСѓС‚. РўРµРїРµСЂСЊ РІР°С€Рё СЃРѕРѕР±С‰РµРЅРёСЏ СЃРЅРѕРІР° Р±СѓРґСѓС‚ РѕС‚РїСЂР°РІР»СЏС‚СЊСЃСЏ РїРѕР»СЊР·РѕРІР°С‚РµР»СЋ.",
+            text="✅С вас снят мут. Теперь ваши сообщения снова будут отправляться пользователю.",
         )
     except Exception:
         pass
@@ -597,7 +597,7 @@ async def admin_mute_guard_handler(update: Update, context: ContextTypes.DEFAULT
 
     remaining_minutes = _mute_remaining_minutes(profile)
     try:
-        await update.message.reply_text(f"в›”пёЏР’С‹ РЅР°С…РѕРґРёС‚РµСЃСЊ РІ РјСѓС‚Рµ РµС‰Рµ {remaining_minutes} РјРёРЅ.")
+        await update.message.reply_text(f"⛔️Вы находитесь в муте еще {remaining_minutes} мин.")
     except Exception:
         pass
     raise ApplicationHandlerStop
@@ -658,7 +658,7 @@ async def cooperation_admin_command_guard(update: Update, context: ContextTypes.
         return
 
     try:
-        await message.reply_text("Р’ СЌС‚РѕРј С‡Р°С‚Рµ Р°РґРјРёРЅСЃРєРёРµ РєРѕРјР°РЅРґС‹ РЅРµРґРѕСЃС‚СѓРїРЅС‹.")
+        await message.reply_text("В этом чате админские команды недоступны.")
     except Exception:
         pass
     raise ApplicationHandlerStop
@@ -675,7 +675,7 @@ async def sendpiar_command_handler(update: Update, context: ContextTypes.DEFAULT
         return
 
     if int(update.effective_chat.id) != COOPERATION_CHAT_ID:
-        await update.message.reply_text("РљРѕРјР°РЅРґР° /sendpiar РґРѕСЃС‚СѓРїРЅР° С‚РѕР»СЊРєРѕ РІ С‡Р°С‚Рµ СЃРѕС‚СЂСѓРґРЅРёС‡РµСЃС‚РІР°.")
+        await update.message.reply_text("Команда /sendpiar доступна только в чате сотрудничества.")
         return
 
     bot_data = context.application.bot_data
@@ -687,12 +687,12 @@ async def sendpiar_command_handler(update: Update, context: ContextTypes.DEFAULT
         remaining_seconds = int(cooldown_until - now_ts)
         remaining_minutes = max(1, (remaining_seconds + 59) // 60)
         await update.message.reply_text(
-            f"вЏіРљРѕРјР°РЅРґР° /sendpiar РЅР° РєСѓР»РґР°СѓРЅРµ. РџРѕРґРѕР¶РґРёС‚Рµ {remaining_minutes} РјРёРЅ."
+            f"⏳Команда /sendpiar на кулдауне. Подождите {remaining_minutes} мин."
         )
         return
 
     if cooldown_until and cooldown_was_active and now_ts >= cooldown_until:
-        await update.message.reply_text("вњ…РљСѓР»РґР°СѓРЅ Р·Р°РІРµСЂС€РµРЅ. РљРѕРјР°РЅРґР° /sendpiar СЃРЅРѕРІР° РґРѕСЃС‚СѓРїРЅР°.")
+        await update.message.reply_text("✅Кулдаун завершен. Команда /sendpiar снова доступна.")
         bot_data["sendpiar_cooldown_was_active"] = False
 
     issuer_profile = _ensure_profile(
@@ -701,8 +701,8 @@ async def sendpiar_command_handler(update: Update, context: ContextTypes.DEFAULT
         update.effective_user.username or f"id{update.effective_user.id}",
     )
     issuer_prefix = str(issuer_profile.get("prefix") or "").strip()
-    if issuer_prefix != "рџ’ЋРЎРѕС‚СЂСѓРґРЅРёС‡РµСЃС‚РІРѕ":
-        await update.message.reply_text("РќРµР»СЊР·СЏ РІС‹РїРѕР»РЅРёС‚СЊ РєРѕРјР°РЅРґСѓ: РЅСѓР¶РµРЅ РїСЂРµС„РёРєСЃ рџ’ЋРЎРѕС‚СЂСѓРґРЅРёС‡РµСЃС‚РІРѕ.")
+    if issuer_prefix != "💎Сотрудничество":
+        await update.message.reply_text("Нельзя выполнить команду: нужен префикс 💎Сотрудничество.")
         return
 
     cmd_entities = update.message.entities if update.message.text else (update.message.caption_entities or [])
@@ -717,12 +717,12 @@ async def sendpiar_command_handler(update: Update, context: ContextTypes.DEFAULT
     quoted = re.match(r'^\s*"([\s\S]*)"\s*$', args_text)
     broadcast_text = quoted.group(1) if quoted else args_text.strip()
     if not broadcast_text:
-        await update.message.reply_text("РўРµРєСЃС‚ СЂР°СЃСЃС‹Р»РєРё РЅРµ РґРѕР»Р¶РµРЅ Р±С‹С‚СЊ РїСѓСЃС‚С‹Рј.")
+        await update.message.reply_text("Текст рассылки не должен быть пустым.")
         return
 
     payload_text = broadcast_text
-    if not payload_text.lower().startswith("#СЂРµРєР»Р°РјР°"):
-        payload_text = f"#СЂРµРєР»Р°РјР°\n\n{payload_text}"
+    if not payload_text.lower().startswith("#реклама"):
+        payload_text = f"#реклама\n\n{payload_text}"
 
     profiles = context.application.bot_data.setdefault("profiles", {})
     recipients: list[int] = []
@@ -741,7 +741,7 @@ async def sendpiar_command_handler(update: Update, context: ContextTypes.DEFAULT
             continue
 
     if not recipients:
-        await update.message.reply_text("Р’ Р±Р°Р·Рµ РЅРµС‚ РїРѕР»СЊР·РѕРІР°С‚РµР»РµР№ РґР»СЏ СЂР°СЃСЃС‹Р»РєРё.")
+        await update.message.reply_text("В базе нет пользователей для рассылки.")
         return
 
     photo_file_id = None
@@ -772,10 +772,10 @@ async def sendpiar_command_handler(update: Update, context: ContextTypes.DEFAULT
         except Exception:
             failed_count += 1
 
-    report_text = f"вњ…Р Р°СЃСЃС‹Р»РєР° РѕС‚РїСЂР°РІР»РµРЅР° РІСЃРµРј РїРѕР»СЊР·РѕРІР°С‚РµР»СЏРј Р±РѕС‚Р°.\nРЈСЃРїРµС€РЅРѕ: {success_count}\nРћС€РёР±РѕРє: {failed_count}"
+    report_text = f"✅Рассылка отправлена всем пользователям бота.\nУспешно: {success_count}\nОшибок: {failed_count}"
     if immune_profiles:
         immune_profiles = sorted([pid for pid in immune_profiles if int(pid or 0) > 0])
-        immune_lines = "\n".join([f"id_profile #{pid} РёРјРµРµС‚ РёРјРјСѓРЅРёС‚РµС‚ Рє СЂРµРєР»Р°РјРµ" for pid in immune_profiles])
+        immune_lines = "\n".join([f"id_profile #{pid} имеет иммунитет к рекламе" for pid in immune_profiles])
         report_text = f"{report_text}\n\n{immune_lines}"
 
     await update.message.reply_text(report_text)
@@ -806,7 +806,7 @@ async def anpiar_command_handler(update: Update, context: ContextTypes.DEFAULT_T
         update.effective_user.username or f"id{update.effective_user.id}",
     )
     if int(issuer_profile.get("admin_level", 0) or 0) < 3:
-        await update.message.reply_text("РљРѕРјР°РЅРґР° РґРѕСЃС‚СѓРїРЅР° С‚РѕР»СЊРєРѕ Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂР°Рј 3 РєР°С‚РµРіРѕСЂРёРё Рё РІС‹С€Рµ.")
+        await update.message.reply_text("Команда доступна только администраторам 3 категории и выше.")
         return
 
     raw_text = update.message.text or ""
@@ -830,12 +830,12 @@ async def anpiar_command_handler(update: Update, context: ContextTypes.DEFAULT_T
     target_identifier = parts[0]
     mode_raw = str(parts[1]).strip()
     if mode_raw not in {"1", "0"}:
-        await update.message.reply_text('Р’С‚РѕСЂРѕР№ Р°СЂРіСѓРјРµРЅС‚ РґРѕР»Р¶РµРЅ Р±С‹С‚СЊ "1" РёР»Рё "0".')
+        await update.message.reply_text('Второй аргумент должен быть "1" или "0".')
         return
 
     target_user_id, target_profile = _resolve_warn_target(context, target_identifier)
     if not target_profile:
-        await update.message.reply_text(f'РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ СЃ id_profile "{target_identifier}" РЅРµ РЅР°Р№РґРµРЅ.')
+        await update.message.reply_text(f'Пользователь с id_profile "{target_identifier}" не найден.')
         return
 
     has_access = bool(target_profile.get("ad_disable_access", False))
@@ -843,32 +843,32 @@ async def anpiar_command_handler(update: Update, context: ContextTypes.DEFAULT_T
 
     if mode_raw == "1":
         if has_access:
-            await update.message.reply_text(f"РЈ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ id_profile #{target_id_profile} СѓР¶Рµ РµСЃС‚СЊ РїСЂР°РІР° РЅР° РѕС‚РєР»СЋС‡РµРЅРёРµ СЂРµРєР»Р°РјС‹.")
+            await update.message.reply_text(f"У пользователя id_profile #{target_id_profile} уже есть права на отключение рекламы.")
             return
         target_profile["ad_disable_access"] = True
         _save_profile_record(context, str(target_user_id))
-        await update.message.reply_text(f"вњ…РџСЂР°РІР° РЅР° РѕС‚РєР»СЋС‡РµРЅРёРµ СЂРµРєР»Р°РјС‹ РІС‹РґР°РЅС‹ РїРѕР»СЊР·РѕРІР°С‚РµР»СЋ id_profile #{target_id_profile}.")
+        await update.message.reply_text(f"✅Права на отключение рекламы выданы пользователю id_profile #{target_id_profile}.")
         try:
             await context.bot.send_message(
                 chat_id=int(target_user_id),
-                text="вњ…Р’Р°Рј РІС‹РґР°РЅС‹ РїСЂР°РІР° РЅР° РѕС‚РєР»СЋС‡РµРЅРёРµ СЂРµРєР»Р°РјС‹. РћС‚РєСЂРѕР№С‚Рµ вљ™пёЏРќР°СЃС‚СЂРѕР№РєРё Рё РЅР°Р¶РјРёС‚Рµ рџ”•РћС‚РєР»СЋС‡РёС‚СЊ СЂРµРєР»Р°РјСѓ.",
+                text="✅Вам выданы права на отключение рекламы. Откройте ⚙️Настройки и нажмите 🔕Отключить рекламу.",
             )
         except Exception:
             pass
         return
 
     if not has_access:
-        await update.message.reply_text(f"РЈ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ id_profile #{target_id_profile} РЅРµС‚ РїСЂР°РІ РЅР° РѕС‚РєР»СЋС‡РµРЅРёРµ СЂРµРєР»Р°РјС‹.")
+        await update.message.reply_text(f"У пользователя id_profile #{target_id_profile} нет прав на отключение рекламы.")
         return
 
     target_profile["ad_disable_access"] = False
     target_profile["ad_disable_enabled"] = False
     _save_profile_record(context, str(target_user_id))
-    await update.message.reply_text(f"вњ…РџСЂР°РІР° РЅР° РѕС‚РєР»СЋС‡РµРЅРёРµ СЂРµРєР»Р°РјС‹ СЃРЅСЏС‚С‹ Сѓ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ id_profile #{target_id_profile}.")
+    await update.message.reply_text(f"✅Права на отключение рекламы сняты у пользователя id_profile #{target_id_profile}.")
     try:
         await context.bot.send_message(
             chat_id=int(target_user_id),
-            text="вљ пёЏРџСЂР°РІР° РЅР° РѕС‚РєР»СЋС‡РµРЅРёРµ СЂРµРєР»Р°РјС‹ Р±С‹Р»Рё РѕС‚РѕР·РІР°РЅС‹.",
+            text="⚠️Права на отключение рекламы были отозваны.",
         )
     except Exception:
         pass
@@ -880,7 +880,7 @@ async def warn_command_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         return
 
     if not _can_use_moderation_commands(context, str(update.effective_user.id)):
-        await update.message.reply_text("РљРѕРјР°РЅРґР° РґРѕСЃС‚СѓРїРЅР° С‚РѕР»СЊРєРѕ Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂР°Рј 2 РєР°С‚РµРіРѕСЂРёРё Рё РІС‹С€Рµ.")
+        await update.message.reply_text("Команда доступна только администраторам 2 категории и выше.")
         return
 
     raw_text = update.message.text or ""
@@ -888,7 +888,7 @@ async def warn_command_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     cmd_len = cmd_entity.length if cmd_entity and cmd_entity.type == "bot_command" else len("/warn")
     args_text = raw_text[cmd_len:].strip()
     if not args_text:
-        await update.message.reply_text("РЈРєР°Р¶РёС‚Рµ id_profile Рё РїСЂРёС‡РёРЅСѓ: /warn \"id_profile\" \"reason\"")
+        await update.message.reply_text("Укажите id_profile и причину: /warn \"id_profile\" \"reason\"")
         return
 
     try:
@@ -898,23 +898,23 @@ async def warn_command_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         return
 
     if len(parts) < 2:
-        await update.message.reply_text("РЈРєР°Р¶РёС‚Рµ id_profile Рё РїСЂРёС‡РёРЅСѓ: /warn \"id_profile\" \"reason\"")
+        await update.message.reply_text("Укажите id_profile и причину: /warn \"id_profile\" \"reason\"")
         return
 
     target_identifier = parts[0]
     reason = " ".join(parts[1:]).strip()
     if not reason:
-        await update.message.reply_text("РЈРєР°Р¶РёС‚Рµ РїСЂРёС‡РёРЅСѓ РїСЂРµРґСѓРїСЂРµР¶РґРµРЅРёСЏ.")
+        await update.message.reply_text("Укажите причину предупреждения.")
         return
 
     target_user_id, profile = _resolve_warn_target(context, target_identifier)
     if not profile:
-        await update.message.reply_text(f'РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ СЃ id_profile "{target_identifier}" РЅРµ РЅР°Р№РґРµРЅ.')
+        await update.message.reply_text(f'Пользователь с id_profile "{target_identifier}" не найден.')
         return
 
     if _has_admin_rights_level_1_5(profile):
         await update.message.reply_text(
-            f'РќРµРІРѕР·РјРѕР¶РЅРѕ РІС‹РґР°С‚СЊ РїСЂРµРґСѓРїСЂРµР¶РґРµРЅРёРµ: id_profile #{profile.get("id_profile")} РёРјРµРµС‚ Р°РґРјРёРЅ-РїСЂР°РІР° 1-5 СѓСЂРѕРІРЅСЏ.'
+            f'Невозможно выдать предупреждение: id_profile #{profile.get("id_profile")} имеет админ-права 1-5 уровня.'
         )
         return
 
@@ -924,13 +924,13 @@ async def warn_command_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     await enforce_autoban_if_needed(context, str(target_user_id), profile.get("username"))
 
     await update.message.reply_text(
-        f'вљ пёЏРџРѕР»СЊР·РѕРІР°С‚РµР»СЋ id_profile #{profile.get("id_profile")} РІС‹РґР°РЅРѕ РїСЂРµРґСѓРїСЂРµР¶РґРµРЅРёРµ. РўРµРїРµСЂСЊ Сѓ РЅРµРіРѕ {profile["warn"]} warn(-РѕРІ). РџСЂРёС‡РёРЅР°: "{reason}"'
+        f'⚠️Пользователю id_profile #{profile.get("id_profile")} выдано предупреждение. Теперь у него {profile["warn"]} warn(-ов). Причина: "{reason}"'
     )
 
     try:
         await context.bot.send_message(
             chat_id=int(target_user_id),
-            text=f'вќ—пёЏР’С‹ РїРѕР»СѓС‡РёР»Рё РїСЂРµРґСѓРїСЂРµР¶РґРµРЅРёРµ СЃ РїСЂРёС‡РёРЅРѕР№ "{reason}" РѕС‚ СЂСѓРєРѕРІРѕРґСЃС‚РІР° Р±РѕС‚Р°. РўРµРїРµСЂСЊ Сѓ РІР°СЃ {profile["warn"]} РїСЂРµРґСѓРїСЂРµР¶РґРµРЅРёР№',
+            text=f'❗️Вы получили предупреждение с причиной "{reason}" от руководства бота. Теперь у вас {profile["warn"]} предупреждений',
         )
     except Exception:
         pass
@@ -944,7 +944,7 @@ async def stats_command_handler(update: Update, context: ContextTypes.DEFAULT_TY
         return
 
     if not _can_use_moderation_commands(context, str(update.effective_user.id)):
-        await update.message.reply_text("РљРѕРјР°РЅРґР° РґРѕСЃС‚СѓРїРЅР° С‚РѕР»СЊРєРѕ Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂР°Рј 2 РєР°С‚РµРіРѕСЂРёРё Рё РІС‹С€Рµ.")
+        await update.message.reply_text("Команда доступна только администраторам 2 категории и выше.")
         return
 
     raw_text = update.message.text or ""
@@ -968,7 +968,7 @@ async def stats_command_handler(update: Update, context: ContextTypes.DEFAULT_TY
     target_identifier = parts[0]
     target_user_id, profile = _resolve_warn_target(context, target_identifier)
     if not profile:
-        await update.message.reply_text(f'РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ СЃ id_profile "{target_identifier}" РЅРµ РЅР°Р№РґРµРЅ.')
+        await update.message.reply_text(f'Пользователь с id_profile "{target_identifier}" не найден.')
         return
 
     await update.message.reply_text(_build_user_stats_text(context, str(target_user_id), profile))
@@ -985,7 +985,7 @@ async def fullstats_command_handler(update: Update, context: ContextTypes.DEFAUL
         update.effective_user.username or f"id{update.effective_user.id}",
     )
     if int(issuer_profile.get("admin_level", 0) or 0) < 4:
-        await update.message.reply_text("РљРѕРјР°РЅРґР° РґРѕСЃС‚СѓРїРЅР° С‚РѕР»СЊРєРѕ Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂР°Рј 4 РєР°С‚РµРіРѕСЂРёРё Рё РІС‹С€Рµ.")
+        await update.message.reply_text("Команда доступна только администраторам 4 категории и выше.")
         return
 
     profiles = context.application.bot_data.setdefault("profiles", {}) or {}
@@ -1011,13 +1011,13 @@ async def fullstats_command_handler(update: Update, context: ContextTypes.DEFAUL
     otvet_regist = int(context.application.bot_data.get("total_admin_replies", 0) or 0)
 
     await update.message.reply_text(
-        "рџ”ЌРџРѕР»РЅР°СЏ СЃС‚Р°С‚РёСЃС‚РёРєР° Р±Р°Р·С‹ РґР°РЅРЅС‹С… РјРѕСЂРѕР·РЅРѕР№ Р·Р°РІРёСЃС‚Рё\n\n"
-        f"Р—Р°СЂРµРіРёСЃС‚СЂРёСЂРѕРІР°РЅРѕ РїРѕР»СЊР·РѕРІР°С‚РµР»РµР№: {users_regist}\n"
-        f"РџРѕР»СЊР·РѕРІР°С‚РµР»РµР№ РєРѕС‚РѕСЂС‹Рµ Р·Р°Р±Р»РѕРєРёСЂРѕРІР°Р»Рё Р±РѕС‚Р°: {banned_users_regist}\n"
-        f"РђРґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂРѕРІ: {admins_regist}\n"
-        f"РђРєС‚РёРІРЅС‹С… СЃРµСЃСЃРёР№: {session_regist}\n"
-        f"РћС‚РїСЂР°РІР»РµРЅРЅС‹С… СЃРѕРѕР±С‰РµРЅРёР№: {send_regist}\n"
-        f"РџРѕР»СѓС‡РµРЅРЅС‹С… РѕС‚РІРµС‚РѕРІ: {otvet_regist}"
+        "🔍Полная статистика базы данных морозной зависти\n\n"
+        f"Зарегистрировано пользователей: {users_regist}\n"
+        f"Пользователей которые заблокировали бота: {banned_users_regist}\n"
+        f"Администраторов: {admins_regist}\n"
+        f"Активных сессий: {session_regist}\n"
+        f"Отправленных сообщений: {send_regist}\n"
+        f"Полученных ответов: {otvet_regist}"
     )
 
 
@@ -1033,7 +1033,7 @@ async def astats_command_handler(update: Update, context: ContextTypes.DEFAULT_T
         update.effective_user.username or f"id{update.effective_user.id}",
     )
     if int(issuer_profile.get("admin_level", 0) or 0) < 4:
-        await update.message.reply_text("РљРѕРјР°РЅРґР° РґРѕСЃС‚СѓРїРЅР° С‚РѕР»СЊРєРѕ Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂР°Рј 4 РєР°С‚РµРіРѕСЂРёРё Рё РІС‹С€Рµ.")
+        await update.message.reply_text("Команда доступна только администраторам 4 категории и выше.")
         return
 
     raw_text = update.message.text or ""
@@ -1057,12 +1057,12 @@ async def astats_command_handler(update: Update, context: ContextTypes.DEFAULT_T
     target_identifier = parts[0]
     target_user_id, profile = _resolve_warn_target(context, target_identifier)
     if not profile:
-        await update.message.reply_text(f'РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ СЃ id_profile "{target_identifier}" РЅРµ РЅР°Р№РґРµРЅ.')
+        await update.message.reply_text(f'Пользователь с id_profile "{target_identifier}" не найден.')
         return
 
     if not _has_admin_rights_level_1_5(profile):
         await update.message.reply_text(
-            f'РќРµР»СЊР·СЏ РёСЃРїРѕР»СЊР·РѕРІР°С‚СЊ /astats: id_profile #{profile.get("id_profile")} РЅРµ СЏРІР»СЏРµС‚СЃСЏ Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂРѕРј.'
+            f'Нельзя использовать /astats: id_profile #{profile.get("id_profile")} не является администратором.'
         )
         return
 
@@ -1098,11 +1098,11 @@ async def astats_tag_change_callback(update: Update, context: ContextTypes.DEFAU
     sessions = context.application.bot_data.setdefault("astats_tag_sessions", {})
     session = sessions.get(session_id)
     if not session:
-        await update.callback_query.answer("РџР°РЅРµР»СЊ СѓСЃС‚Р°СЂРµР»Р°", show_alert=True)
+        await update.callback_query.answer("Панель устарела", show_alert=True)
         return
 
     if str(update.effective_user.id) != str(session.get("issuer_user_id")):
-        await update.callback_query.answer("РљРЅРѕРїРєР° РґРѕСЃС‚СѓРїРЅР° С‚РѕР»СЊРєРѕ Р°РІС‚РѕСЂСѓ /astats", show_alert=True)
+        await update.callback_query.answer("Кнопка доступна только автору /astats", show_alert=True)
         return
 
     issuer_profile = _ensure_profile(
@@ -1111,7 +1111,7 @@ async def astats_tag_change_callback(update: Update, context: ContextTypes.DEFAU
         update.effective_user.username or f"id{update.effective_user.id}",
     )
     if int(issuer_profile.get("admin_level", 0) or 0) < 4:
-        await update.callback_query.answer("РќРµРґРѕСЃС‚Р°С‚РѕС‡РЅРѕ РїСЂР°РІ", show_alert=True)
+        await update.callback_query.answer("Недостаточно прав", show_alert=True)
         return
 
     pending_by_admin = context.application.bot_data.setdefault("pending_astats_tag_by_admin", {})
@@ -1126,9 +1126,9 @@ async def astats_tag_change_callback(update: Update, context: ContextTypes.DEFAU
             previous_session["prompt_message_id"] = None
 
     prompt = await update.callback_query.message.reply_text(
-        "РћС‚РїСЂР°РІСЊС‚Рµ РЅРѕРІС‹Р№ С‚РµРі (РґРѕР»Р¶РµРЅ РЅР°С‡РёРЅР°С‚СЊСЃСЏ СЃ #) РѕС‚РІРµС‚РѕРј РЅР° СЌС‚Рѕ СЃРѕРѕР±С‰РµРЅРёРµ.",
+        "Отправьте новый тег (должен начинаться с #) ответом на это сообщение.",
         reply_markup=InlineKeyboardMarkup(
-            [[InlineKeyboardButton("РѕС‚РјРµРЅР°", callback_data=f"astats_tag_cancel_{session_id}")]]
+            [[InlineKeyboardButton("отмена", callback_data=f"astats_tag_cancel_{session_id}")]]
         ),
     )
 
@@ -1151,11 +1151,11 @@ async def astats_bio_change_callback(update: Update, context: ContextTypes.DEFAU
     sessions = context.application.bot_data.setdefault("astats_tag_sessions", {})
     session = sessions.get(session_id)
     if not session:
-        await update.callback_query.answer("РџР°РЅРµР»СЊ СѓСЃС‚Р°СЂРµР»Р°", show_alert=True)
+        await update.callback_query.answer("Панель устарела", show_alert=True)
         return
 
     if str(update.effective_user.id) != str(session.get("issuer_user_id")):
-        await update.callback_query.answer("РљРЅРѕРїРєР° РґРѕСЃС‚СѓРїРЅР° С‚РѕР»СЊРєРѕ Р°РІС‚РѕСЂСѓ /astats", show_alert=True)
+        await update.callback_query.answer("Кнопка доступна только автору /astats", show_alert=True)
         return
 
     issuer_profile = _ensure_profile(
@@ -1164,7 +1164,7 @@ async def astats_bio_change_callback(update: Update, context: ContextTypes.DEFAU
         update.effective_user.username or f"id{update.effective_user.id}",
     )
     if int(issuer_profile.get("admin_level", 0) or 0) < 4:
-        await update.callback_query.answer("РќРµРґРѕСЃС‚Р°С‚РѕС‡РЅРѕ РїСЂР°РІ", show_alert=True)
+        await update.callback_query.answer("Недостаточно прав", show_alert=True)
         return
 
     pending_by_admin = context.application.bot_data.setdefault("pending_astats_tag_by_admin", {})
@@ -1179,9 +1179,9 @@ async def astats_bio_change_callback(update: Update, context: ContextTypes.DEFAU
 
     try:
         await update.callback_query.message.edit_text(
-            "РћС‚РїСЂР°РІСЊС‚Рµ РЅРѕРІСѓСЋ Р±РёРѕРіСЂР°С„РёСЋ Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂР°.",
+            "Отправьте новую биографию администратора.",
             reply_markup=InlineKeyboardMarkup(
-                [[InlineKeyboardButton("РѕС‚РјРµРЅР°", callback_data=f"astats_bio_cancel_{session_id}")]]
+                [[InlineKeyboardButton("отмена", callback_data=f"astats_bio_cancel_{session_id}")]]
             ),
         )
     except Exception:
@@ -1200,11 +1200,11 @@ async def astats_tip_menu_callback(update: Update, context: ContextTypes.DEFAULT
     sessions = context.application.bot_data.setdefault("astats_tag_sessions", {})
     session = sessions.get(session_id)
     if not session:
-        await update.callback_query.answer("РџР°РЅРµР»СЊ СѓСЃС‚Р°СЂРµР»Р°", show_alert=True)
+        await update.callback_query.answer("Панель устарела", show_alert=True)
         return
 
     if str(update.effective_user.id) != str(session.get("issuer_user_id")):
-        await update.callback_query.answer("РљРЅРѕРїРєР° РґРѕСЃС‚СѓРїРЅР° С‚РѕР»СЊРєРѕ Р°РІС‚РѕСЂСѓ /astats", show_alert=True)
+        await update.callback_query.answer("Кнопка доступна только автору /astats", show_alert=True)
         return
 
     issuer_profile = _ensure_profile(
@@ -1213,7 +1213,7 @@ async def astats_tip_menu_callback(update: Update, context: ContextTypes.DEFAULT
         update.effective_user.username or f"id{update.effective_user.id}",
     )
     if int(issuer_profile.get("admin_level", 0) or 0) < 4:
-        await update.callback_query.answer("РќРµРґРѕСЃС‚Р°С‚РѕС‡РЅРѕ РїСЂР°РІ", show_alert=True)
+        await update.callback_query.answer("Недостаточно прав", show_alert=True)
         return
 
     pending_by_admin = context.application.bot_data.setdefault("pending_astats_tag_by_admin", {})
@@ -1227,11 +1227,11 @@ async def astats_tip_menu_callback(update: Update, context: ContextTypes.DEFAULT
 
     existing_tip = str(target_profile.get("tip_admin") or "")
     selected_keys = []
-    if "рџ—ЈпёЏ" in existing_tip:
+    if "🗣️" in existing_tip:
         selected_keys.append("chat")
-    if "вќ¤пёЏ" in existing_tip:
+    if "❤️" in existing_tip:
         selected_keys.append("support")
-    if "рџ”Ґ" in existing_tip:
+    if "🔥" in existing_tip:
         selected_keys.append("flirt")
 
     session["status"] = "astats_tip_edit"
@@ -1262,11 +1262,11 @@ async def astats_tip_toggle_callback(update: Update, context: ContextTypes.DEFAU
     sessions = context.application.bot_data.setdefault("astats_tag_sessions", {})
     session = sessions.get(session_id)
     if not session:
-        await update.callback_query.answer("РџР°РЅРµР»СЊ СѓСЃС‚Р°СЂРµР»Р°", show_alert=True)
+        await update.callback_query.answer("Панель устарела", show_alert=True)
         return
 
     if str(update.effective_user.id) != str(session.get("issuer_user_id")):
-        await update.callback_query.answer("РљРЅРѕРїРєР° РґРѕСЃС‚СѓРїРЅР° С‚РѕР»СЊРєРѕ Р°РІС‚РѕСЂСѓ /astats", show_alert=True)
+        await update.callback_query.answer("Кнопка доступна только автору /astats", show_alert=True)
         return
 
     selected = list(session.get("tip_selected_keys") or [])
@@ -1296,11 +1296,11 @@ async def astats_tip_apply_callback(update: Update, context: ContextTypes.DEFAUL
     sessions = context.application.bot_data.setdefault("astats_tag_sessions", {})
     session = sessions.get(session_id)
     if not session:
-        await update.callback_query.answer("РџР°РЅРµР»СЊ СѓСЃС‚Р°СЂРµР»Р°", show_alert=True)
+        await update.callback_query.answer("Панель устарела", show_alert=True)
         return
 
     if str(update.effective_user.id) != str(session.get("issuer_user_id")):
-        await update.callback_query.answer("РљРЅРѕРїРєР° РґРѕСЃС‚СѓРїРЅР° С‚РѕР»СЊРєРѕ Р°РІС‚РѕСЂСѓ /astats", show_alert=True)
+        await update.callback_query.answer("Кнопка доступна только автору /astats", show_alert=True)
         return
 
     issuer_profile = _ensure_profile(
@@ -1309,7 +1309,7 @@ async def astats_tip_apply_callback(update: Update, context: ContextTypes.DEFAUL
         update.effective_user.username or f"id{update.effective_user.id}",
     )
     if int(issuer_profile.get("admin_level", 0) or 0) < 4:
-        await update.callback_query.answer("РќРµРґРѕСЃС‚Р°С‚РѕС‡РЅРѕ РїСЂР°РІ", show_alert=True)
+        await update.callback_query.answer("Недостаточно прав", show_alert=True)
         return
 
     selected = list(session.get("tip_selected_keys") or [])
@@ -1323,13 +1323,13 @@ async def astats_tip_apply_callback(update: Update, context: ContextTypes.DEFAUL
     try:
         await context.bot.send_message(
             chat_id=int(target_user_id),
-            text=f"рџ“ЌР’Р°С€ С‚РёРї РґРёР°Р»РѕРіРѕРІ Р±С‹Р» РёР·РјРµРЅРµРЅ. РўРµРїРµСЂСЊ РІС‹ РјРѕР¶РµС‚Рµ РѕР±С‰Р°С‚СЊСЃСЏ РЅР°: {tip_value}",
+            text=f"📍Ваш тип диалогов был изменен. Теперь вы можете общаться на: {tip_value}",
         )
     except Exception:
         pass
 
     session["status"] = "idle"
-    await update.callback_query.answer("РЎРјРµРЅР° РґРёР°Р»РѕРіРѕРІ СѓСЃРїРµС€РЅРѕ Р·Р°РІРµСЂС€РµРЅР°", show_alert=True)
+    await update.callback_query.answer("Смена диалогов успешно завершена", show_alert=True)
 
     try:
         await update.callback_query.message.edit_text(
@@ -1353,11 +1353,11 @@ async def astats_active_pz_callback(update: Update, context: ContextTypes.DEFAUL
     sessions = context.application.bot_data.setdefault("astats_tag_sessions", {})
     session = sessions.get(session_id)
     if not session:
-        await update.callback_query.answer("РџР°РЅРµР»СЊ СѓСЃС‚Р°СЂРµР»Р°", show_alert=True)
+        await update.callback_query.answer("Панель устарела", show_alert=True)
         return
 
     if str(update.effective_user.id) != str(session.get("issuer_user_id")):
-        await update.callback_query.answer("РљРЅРѕРїРєР° РґРѕСЃС‚СѓРїРЅР° С‚РѕР»СЊРєРѕ Р°РІС‚РѕСЂСѓ /astats", show_alert=True)
+        await update.callback_query.answer("Кнопка доступна только автору /astats", show_alert=True)
         return
 
     issuer_profile = _ensure_profile(
@@ -1366,7 +1366,7 @@ async def astats_active_pz_callback(update: Update, context: ContextTypes.DEFAUL
         update.effective_user.username or f"id{update.effective_user.id}",
     )
     if int(issuer_profile.get("admin_level", 0) or 0) < 4:
-        await update.callback_query.answer("РќРµРґРѕСЃС‚Р°С‚РѕС‡РЅРѕ РїСЂР°РІ", show_alert=True)
+        await update.callback_query.answer("Недостаточно прав", show_alert=True)
         return
 
     target_user_id = str(session.get("target_user_id"))
@@ -1375,7 +1375,7 @@ async def astats_active_pz_callback(update: Update, context: ContextTypes.DEFAUL
 
     try:
         await update.callback_query.message.edit_text(
-            f"рџ‘ЁвЂЌрџ‘¦РџР°РЅРµР»СЊ СѓРїСЂР°РІР»РµРЅРёСЏ Р°РєС‚РёРІРЅС‹РјРё РџР— Р°РґРјРёРЅР° {admin_username}",
+            f"👨‍👦Панель управления активными ПЗ админа {admin_username}",
         )
     except Exception:
         pass
@@ -1390,7 +1390,7 @@ async def astats_active_pz_callback(update: Update, context: ContextTypes.DEFAUL
         found_sessions.append((str(requester_user_id), active))
 
     if not found_sessions:
-        await update.callback_query.message.reply_text("РќРёС‡РµРіРѕ РЅРµ РЅР°Р№РґРµРЅРѕ")
+        await update.callback_query.message.reply_text("Ничего не найдено")
         return
 
     for requester_user_id, active in found_sessions:
@@ -1399,13 +1399,13 @@ async def astats_active_pz_callback(update: Update, context: ContextTypes.DEFAUL
         user_messages = int(active.get("msg_topic_user", 0) or 0)
         admin_messages = int(active.get("msg_topic_admin", 0) or 0)
         msg_topic = user_messages + admin_messages
-        date_value = str(active.get("session_started_at") or "РЅРµ СѓРєР°Р·Р°РЅР°")
+        date_value = str(active.get("session_started_at") or "не указана")
         topic_link = _topic_url(active.get("chat_id"), active.get("topic_id"))
 
         await update.callback_query.message.reply_text(
-            f"в„№пёЏРђРєС‚РёРІРЅРѕРµ РѕР±С‰РµРЅРёРµ СЃ {username_pz}\n"
-            f"рџ“ҐРЎРѕРѕР±С‰РµРЅРёР№: \"{msg_topic}\"\n\n"
-            f"Р РµРіРёСЃС‚СЂР°С†РёСЏ РѕР±С‰РµРЅРёСЏ: \"{date_value}\"\n"
+            f"ℹ️Активное общение с {username_pz}\n"
+            f"📥Сообщений: \"{msg_topic}\"\n\n"
+            f"Регистрация общения: \"{date_value}\"\n"
             f"/info_topic \"{topic_link}\""
         )
 
@@ -1422,7 +1422,7 @@ async def info_topic_command_handler(update: Update, context: ContextTypes.DEFAU
         update.effective_user.username or f"id{update.effective_user.id}",
     )
     if int(issuer_profile.get("admin_level", 0) or 0) < 3:
-        await update.message.reply_text("РљРѕРјР°РЅРґР° РґРѕСЃС‚СѓРїРЅР° С‚РѕР»СЊРєРѕ Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂР°Рј 3 РєР°С‚РµРіРѕСЂРёРё Рё РІС‹С€Рµ.")
+        await update.message.reply_text("Команда доступна только администраторам 3 категории и выше.")
         return
 
     raw_text = update.message.text or ""
@@ -1446,7 +1446,7 @@ async def info_topic_command_handler(update: Update, context: ContextTypes.DEFAU
     topic_link = parts[0]
     chat_id, topic_id = _parse_topic_url(topic_link)
     if chat_id is None or topic_id is None:
-        await update.message.reply_text('РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ URL С‚РµРјС‹. РќСѓР¶РµРЅ С„РѕСЂРјР°С‚ РІРёРґР° https://t.me/c/<chat_id>/<topic_id>.')
+        await update.message.reply_text('Некорректный URL темы. Нужен формат вида https://t.me/c/<chat_id>/<topic_id>.')
         return
 
     topic_map = context.application.bot_data.setdefault("topic_user_map", {})
@@ -1454,11 +1454,11 @@ async def info_topic_command_handler(update: Update, context: ContextTypes.DEFAU
     active_chats = context.application.bot_data.setdefault("active_chats", {})
     active = active_chats.get(str(target_user_id)) if target_user_id else None
     if not active or not active.get("active"):
-        await update.message.reply_text("РўРµРјР° РЅРµ РЅР°Р№РґРµРЅР° РёР»Рё СЃРµСЃСЃРёСЏ СѓР¶Рµ Р·Р°РІРµСЂС€РµРЅР°.")
+        await update.message.reply_text("Тема не найдена или сессия уже завершена.")
         return
 
     if int(active.get("chat_id", 0) or 0) != int(chat_id) or int(active.get("topic_id", 0) or 0) != int(topic_id):
-        await update.message.reply_text("РўРµРјР° РЅРµ РЅР°Р№РґРµРЅР° РёР»Рё СѓР¶Рµ РЅРµР°РєС‚СѓР°Р»СЊРЅР°.")
+        await update.message.reply_text("Тема не найдена или уже неактуальна.")
         return
 
     panel_id = _next_info_topic_panel_id(context)
@@ -1472,12 +1472,12 @@ async def info_topic_command_handler(update: Update, context: ContextTypes.DEFAU
     }
 
     target_profile = _ensure_profile(context, str(target_user_id), active.get("topic_base_name") or f"id{target_user_id}")
-    admin_username = str(active.get("admin_username") or "Р°РґРјРёРЅ")
+    admin_username = str(active.get("admin_username") or "админ")
     username_pz = str(target_profile.get("username") or active.get("topic_base_name") or f"id{target_user_id}")
     detect = int(active.get("detect_topic", 0) or 0)
     msg_topic = int(active.get("msg_topic_user", 0) or 0) + int(active.get("msg_topic_admin", 0) or 0)
     rp_topic = int(active.get("rp_topic", 0) or 0)
-    date_value = str(active.get("session_started_at") or "РЅРµ СѓРєР°Р·Р°РЅР°")
+    date_value = str(active.get("session_started_at") or "не указана")
 
     text = _build_info_topic_text(username_pz, admin_username, detect, msg_topic, rp_topic, date_value, topic_link)
     panels[panel_id]["panel_text"] = text
@@ -1498,11 +1498,11 @@ async def info_topic_close_callback(update: Update, context: ContextTypes.DEFAUL
     panels = context.application.bot_data.setdefault("info_topic_panels", {})
     panel = panels.get(panel_id)
     if not panel:
-        await update.callback_query.answer("РџР°РЅРµР»СЊ СѓСЃС‚Р°СЂРµР»Р°", show_alert=True)
+        await update.callback_query.answer("Панель устарела", show_alert=True)
         return
 
     if str(update.effective_user.id) != str(panel.get("issuer_user_id")):
-        await update.callback_query.answer("РљРЅРѕРїРєР° РґРѕСЃС‚СѓРїРЅР° С‚РѕР»СЊРєРѕ Р°РІС‚РѕСЂСѓ /info_topic", show_alert=True)
+        await update.callback_query.answer("Кнопка доступна только автору /info_topic", show_alert=True)
         return
 
     issuer_profile = _ensure_profile(
@@ -1511,7 +1511,7 @@ async def info_topic_close_callback(update: Update, context: ContextTypes.DEFAUL
         update.effective_user.username or f"id{update.effective_user.id}",
     )
     if int(issuer_profile.get("admin_level", 0) or 0) < 3:
-        await update.callback_query.answer("РќРµРґРѕСЃС‚Р°С‚РѕС‡РЅРѕ РїСЂР°РІ", show_alert=True)
+        await update.callback_query.answer("Недостаточно прав", show_alert=True)
         return
 
     panel["pending_action"] = "close"
@@ -1528,11 +1528,11 @@ async def info_topic_stop_callback(update: Update, context: ContextTypes.DEFAULT
     panels = context.application.bot_data.setdefault("info_topic_panels", {})
     panel = panels.get(panel_id)
     if not panel:
-        await update.callback_query.answer("РџР°РЅРµР»СЊ СѓСЃС‚Р°СЂРµР»Р°", show_alert=True)
+        await update.callback_query.answer("Панель устарела", show_alert=True)
         return
 
     if str(update.effective_user.id) != str(panel.get("issuer_user_id")):
-        await update.callback_query.answer("РљРЅРѕРїРєР° РґРѕСЃС‚СѓРїРЅР° С‚РѕР»СЊРєРѕ Р°РІС‚РѕСЂСѓ /info_topic", show_alert=True)
+        await update.callback_query.answer("Кнопка доступна только автору /info_topic", show_alert=True)
         return
 
     issuer_profile = _ensure_profile(
@@ -1541,7 +1541,7 @@ async def info_topic_stop_callback(update: Update, context: ContextTypes.DEFAULT
         update.effective_user.username or f"id{update.effective_user.id}",
     )
     if int(issuer_profile.get("admin_level", 0) or 0) < 3:
-        await update.callback_query.answer("РќРµРґРѕСЃС‚Р°С‚РѕС‡РЅРѕ РїСЂР°РІ", show_alert=True)
+        await update.callback_query.answer("Недостаточно прав", show_alert=True)
         return
 
     panel["pending_action"] = "stop"
@@ -1553,7 +1553,7 @@ async def info_topic_stop_callback(update: Update, context: ContextTypes.DEFAULT
 
 
 async def info_topic_cancel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.callback_query.answer("РћС‚РјРµРЅР°")
+    await update.callback_query.answer("Отмена")
     panel_id = (update.callback_query.data or "").split("_")[-1]
     panels = context.application.bot_data.setdefault("info_topic_panels", {})
     panel = panels.get(panel_id)
@@ -1561,7 +1561,7 @@ async def info_topic_cancel_callback(update: Update, context: ContextTypes.DEFAU
         return
 
     if str(update.effective_user.id) != str(panel.get("issuer_user_id")):
-        await update.callback_query.answer("РљРЅРѕРїРєР° РґРѕСЃС‚СѓРїРЅР° С‚РѕР»СЊРєРѕ Р°РІС‚РѕСЂСѓ /info_topic", show_alert=True)
+        await update.callback_query.answer("Кнопка доступна только автору /info_topic", show_alert=True)
         return
 
     active = context.application.bot_data.get("active_chats", {}).get(str(panel.get("target_user_id"))) or {}
@@ -1592,7 +1592,7 @@ async def _finish_info_topic_action(context: ContextTypes.DEFAULT_TYPE, panel_id
         return
 
     username_pz = str((context.application.bot_data.get("profiles", {}) or {}).get(target_user_id, {}).get("username") or active.get("topic_base_name") or f"id{target_user_id}")
-    admin_username = str(active.get("admin_username") or "Р°РґРјРёРЅ")
+    admin_username = str(active.get("admin_username") or "админ")
 
     if action == "close":
         active.pop("management_paused", None)
@@ -1601,7 +1601,7 @@ async def _finish_info_topic_action(context: ContextTypes.DEFAULT_TYPE, panel_id
             await context.bot.edit_forum_topic(
                 chat_id=chat_id,
                 message_thread_id=topic_id,
-                name=f"{active.get('topic_base_name') or username_pz} (Р—Р°РєСЂС‹С‚Рѕ СЂСѓРєРѕРІРѕРґСЃС‚РІРѕРј)",
+                name=f"{active.get('topic_base_name') or username_pz} (Закрыто руководством)",
             )
         except Exception:
             pass
@@ -1609,14 +1609,14 @@ async def _finish_info_topic_action(context: ContextTypes.DEFAULT_TYPE, panel_id
             await context.bot.send_message(
                 chat_id=chat_id,
                 message_thread_id=topic_id,
-                text="вќ—пёЏР СѓРєРѕРІРѕРґСЃС‚РІРѕ Р±РѕС‚Р° Р·Р°РєСЂС‹Р»Рѕ СЃРµСЃСЃРёСЋ, РўРµРјР° Р±РѕР»СЊС€Рµ РЅРµ Р°РєС‚СѓР°Р»СЊРЅР°",
+                text="❗️Руководство бота закрыло сессию, Тема больше не актуальна",
             )
         except Exception:
             pass
         try:
             await context.bot.send_message(
                 chat_id=int(target_user_id),
-                text="вќ—пёЏР’Р°С€Р° СЃРµСЃСЃРёСЏ Р±С‹Р»Р° Р·Р°РІРµСЂС€РµРЅР° СЂСѓРєРѕРІРѕРґСЃС‚РІРѕРј Р±РѕС‚Р°.",
+                text="❗️Ваша сессия была завершена руководством бота.",
             )
         except Exception:
             pass
@@ -1625,7 +1625,7 @@ async def _finish_info_topic_action(context: ContextTypes.DEFAULT_TYPE, panel_id
         context.application.bot_data.get("topic_user_map", {}).pop(str(topic_id), None)
         context.application.bot_data.get("active_chats", {}).pop(target_user_id, None)
         try:
-            await context.bot.send_message(chat_id=LOG_CHAT_ID, text=f"вњ…РЎРµСЃСЃРёСЏ {username_pz} СЃ Р°РґРјРёРЅРѕРј {admin_username} Р·Р°РєСЂС‹С‚Р° СЂСѓРєРѕРІРѕРґСЃС‚РІРѕРј.")
+            await context.bot.send_message(chat_id=LOG_CHAT_ID, text=f"✅Сессия {username_pz} с админом {admin_username} закрыта руководством.")
         except Exception:
             pass
         panels.pop(panel_id, None)
@@ -1637,7 +1637,7 @@ async def _finish_info_topic_action(context: ContextTypes.DEFAULT_TYPE, panel_id
             await context.bot.edit_forum_topic(
                 chat_id=chat_id,
                 message_thread_id=topic_id,
-                name=f"{active.get('topic_base_name') or username_pz} (РћСЃС‚Р°РЅРѕРІР»РµРЅРѕ СЂСѓРєРѕРІРѕРґСЃС‚РІРѕРј)",
+                name=f"{active.get('topic_base_name') or username_pz} (Остановлено руководством)",
             )
         except Exception:
             pass
@@ -1645,20 +1645,20 @@ async def _finish_info_topic_action(context: ContextTypes.DEFAULT_TYPE, panel_id
             await context.bot.send_message(
                 chat_id=chat_id,
                 message_thread_id=topic_id,
-                text="рџ’¤Р СѓРєРѕРІРѕРґСЃС‚РІРѕ Р±РѕС‚Р° РѕСЃС‚Р°РЅРѕРІРёР»Р° РѕР±С‰РµРЅРёРµ РІ СЌС‚РѕР№ С‚РµРјРµ, СЃРѕРѕР±С‰РµРЅРёРµ РѕС‚РїСЂР°РІР»СЏС‚СЊСЃСЏ РЅРµ Р±СѓРґСѓС‚.",
+                text="💤Руководство бота остановила общение в этой теме, сообщение отправляться не будут.",
             )
         except Exception:
             pass
         try:
             await context.bot.send_message(
                 chat_id=int(target_user_id),
-                text="рџ’¤РЎРµСЃСЃРёСЏ Р±С‹Р»Р° РѕСЃС‚Р°РЅРѕРІР»РµРЅР° СЂСѓРєРѕРІРѕРґСЃС‚РІРѕРј Р±РѕС‚Р°. РЎРѕРѕР±С‰РµРЅРёСЏ РІСЂРµРјРµРЅРЅРѕ РЅРµ РѕС‚РїСЂР°РІР»СЏСЋС‚СЃСЏ.",
+                text="💤Сессия была остановлена руководством бота. Сообщения временно не отправляются.",
             )
         except Exception:
             pass
         panel["pending_action"] = None
         try:
-            await context.bot.send_message(chat_id=LOG_CHAT_ID, text=f"рџ’¤РЎРµСЃСЃРёСЏ {username_pz} СЃ Р°РґРјРёРЅРѕРј {admin_username} РѕСЃС‚Р°РЅРѕРІР»РµРЅР° СЂСѓРєРѕРІРѕРґСЃС‚РІРѕРј.")
+            await context.bot.send_message(chat_id=LOG_CHAT_ID, text=f"💤Сессия {username_pz} с админом {admin_username} остановлена руководством.")
         except Exception:
             pass
         return
@@ -1677,20 +1677,20 @@ async def _finish_info_topic_action(context: ContextTypes.DEFAULT_TYPE, panel_id
             await context.bot.send_message(
                 chat_id=chat_id,
                 message_thread_id=topic_id,
-                text="вњ…РўРµРјР° СЃРЅРѕРІР° Р°РєС‚СѓР°Р»СЊРЅР°СЏ.",
+                text="✅Тема снова актуальная.",
             )
         except Exception:
             pass
         try:
             await context.bot.send_message(
                 chat_id=int(target_user_id),
-                text="вњ…РўРµРјР° СЃРЅРѕРІР° Р°РєС‚СѓР°Р»СЊРЅР°СЏ. РџРµСЂРµСЃС‹Р»РєР° СЃРѕРѕР±С‰РµРЅРёР№ РІРѕСЃСЃС‚Р°РЅРѕРІР»РµРЅР°.",
+                text="✅Тема снова актуальная. Пересылка сообщений восстановлена.",
             )
         except Exception:
             pass
         panel["pending_action"] = None
         try:
-            await context.bot.send_message(chat_id=LOG_CHAT_ID, text=f"вњ…РЎРµСЃСЃРёСЏ {username_pz} СЃ Р°РґРјРёРЅРѕРј {admin_username} РІРѕР·РѕР±РЅРѕРІР»РµРЅР° СЂСѓРєРѕРІРѕРґСЃС‚РІРѕРј.")
+            await context.bot.send_message(chat_id=LOG_CHAT_ID, text=f"✅Сессия {username_pz} с админом {admin_username} возобновлена руководством.")
         except Exception:
             pass
 
@@ -1701,21 +1701,21 @@ async def info_topic_close_confirm_callback(update: Update, context: ContextType
     panel_id = (update.callback_query.data or "").split("_")[-1]
     panel = context.application.bot_data.setdefault("info_topic_panels", {}).get(panel_id)
     if not panel:
-        await update.callback_query.answer("РџР°РЅРµР»СЊ СѓСЃС‚Р°СЂРµР»Р°", show_alert=True)
+        await update.callback_query.answer("Панель устарела", show_alert=True)
         return
 
     if str(update.effective_user.id) != str(panel.get("issuer_user_id")):
-        await update.callback_query.answer("РљРЅРѕРїРєР° РґРѕСЃС‚СѓРїРЅР° С‚РѕР»СЊРєРѕ Р°РІС‚РѕСЂСѓ /info_topic", show_alert=True)
+        await update.callback_query.answer("Кнопка доступна только автору /info_topic", show_alert=True)
         return
 
     issuer_profile = _ensure_profile(context, str(update.effective_user.id), update.effective_user.username or f"id{update.effective_user.id}")
     if int(issuer_profile.get("admin_level", 0) or 0) < 3:
-        await update.callback_query.answer("РќРµРґРѕСЃС‚Р°С‚РѕС‡РЅРѕ РїСЂР°РІ", show_alert=True)
+        await update.callback_query.answer("Недостаточно прав", show_alert=True)
         return
 
     await _finish_info_topic_action(context, panel_id, "close")
     try:
-        await update.callback_query.message.edit_text("вњ…РЎРµСЃСЃРёСЏ Р·Р°РєСЂС‹С‚Р° СЂСѓРєРѕРІРѕРґСЃС‚РІРѕРј Р±РѕС‚Р°.")
+        await update.callback_query.message.edit_text("✅Сессия закрыта руководством бота.")
     except Exception:
         pass
 
@@ -1726,22 +1726,22 @@ async def info_topic_stop_confirm_callback(update: Update, context: ContextTypes
     panel_id = (update.callback_query.data or "").split("_")[-1]
     panel = context.application.bot_data.setdefault("info_topic_panels", {}).get(panel_id)
     if not panel:
-        await update.callback_query.answer("РџР°РЅРµР»СЊ СѓСЃС‚Р°СЂРµР»Р°", show_alert=True)
+        await update.callback_query.answer("Панель устарела", show_alert=True)
         return
 
     if str(update.effective_user.id) != str(panel.get("issuer_user_id")):
-        await update.callback_query.answer("РљРЅРѕРїРєР° РґРѕСЃС‚СѓРїРЅР° С‚РѕР»СЊРєРѕ Р°РІС‚РѕСЂСѓ /info_topic", show_alert=True)
+        await update.callback_query.answer("Кнопка доступна только автору /info_topic", show_alert=True)
         return
 
     issuer_profile = _ensure_profile(context, str(update.effective_user.id), update.effective_user.username or f"id{update.effective_user.id}")
     if int(issuer_profile.get("admin_level", 0) or 0) < 3:
-        await update.callback_query.answer("РќРµРґРѕСЃС‚Р°С‚РѕС‡РЅРѕ РїСЂР°РІ", show_alert=True)
+        await update.callback_query.answer("Недостаточно прав", show_alert=True)
         return
 
     await _finish_info_topic_action(context, panel_id, "stop")
     try:
         await update.callback_query.message.edit_text(
-            "рџ’¤РЎРµСЃСЃРёСЏ РѕСЃС‚Р°РЅРѕРІР»РµРЅР° СЂСѓРєРѕРІРѕРґСЃС‚РІРѕРј Р±РѕС‚Р°.",
+            "💤Сессия остановлена руководством бота.",
             reply_markup=_build_info_topic_keyboard(panel_id, paused=True),
         )
     except Exception:
@@ -1754,19 +1754,19 @@ async def info_topic_resume_callback(update: Update, context: ContextTypes.DEFAU
     panel_id = (update.callback_query.data or "").split("_")[-1]
     panel = context.application.bot_data.setdefault("info_topic_panels", {}).get(panel_id)
     if not panel:
-        await update.callback_query.answer("РџР°РЅРµР»СЊ СѓСЃС‚Р°СЂРµР»Р°", show_alert=True)
+        await update.callback_query.answer("Панель устарела", show_alert=True)
         return
 
     if str(update.effective_user.id) != str(panel.get("issuer_user_id")):
-        await update.callback_query.answer("РљРЅРѕРїРєР° РґРѕСЃС‚СѓРїРЅР° С‚РѕР»СЊРєРѕ Р°РІС‚РѕСЂСѓ /info_topic", show_alert=True)
+        await update.callback_query.answer("Кнопка доступна только автору /info_topic", show_alert=True)
         return
 
     issuer_profile = _ensure_profile(context, str(update.effective_user.id), update.effective_user.username or f"id{update.effective_user.id}")
     if int(issuer_profile.get("admin_level", 0) or 0) < 3:
-        await update.callback_query.answer("РќРµРґРѕСЃС‚Р°С‚РѕС‡РЅРѕ РїСЂР°РІ", show_alert=True)
+        await update.callback_query.answer("Недостаточно прав", show_alert=True)
         return
 
-    panel_text = str(panel.get("panel_text") or "вњ…РўРµРјР° СЃРЅРѕРІР° Р°РєС‚СѓР°Р»СЊРЅР°СЏ.")
+    panel_text = str(panel.get("panel_text") or "✅Тема снова актуальная.")
 
     await _finish_info_topic_action(context, panel_id, "resume")
     try:
@@ -1787,11 +1787,11 @@ async def astats_gender_menu_callback(update: Update, context: ContextTypes.DEFA
     sessions = context.application.bot_data.setdefault("astats_tag_sessions", {})
     session = sessions.get(session_id)
     if not session:
-        await update.callback_query.answer("РџР°РЅРµР»СЊ СѓСЃС‚Р°СЂРµР»Р°", show_alert=True)
+        await update.callback_query.answer("Панель устарела", show_alert=True)
         return
 
     if str(update.effective_user.id) != str(session.get("issuer_user_id")):
-        await update.callback_query.answer("РљРЅРѕРїРєР° РґРѕСЃС‚СѓРїРЅР° С‚РѕР»СЊРєРѕ Р°РІС‚РѕСЂСѓ /astats", show_alert=True)
+        await update.callback_query.answer("Кнопка доступна только автору /astats", show_alert=True)
         return
 
     issuer_profile = _ensure_profile(
@@ -1800,7 +1800,7 @@ async def astats_gender_menu_callback(update: Update, context: ContextTypes.DEFA
         update.effective_user.username or f"id{update.effective_user.id}",
     )
     if int(issuer_profile.get("admin_level", 0) or 0) < 4:
-        await update.callback_query.answer("РќРµРґРѕСЃС‚Р°С‚РѕС‡РЅРѕ РїСЂР°РІ", show_alert=True)
+        await update.callback_query.answer("Недостаточно прав", show_alert=True)
         return
 
     try:
@@ -1828,11 +1828,11 @@ async def astats_gender_set_callback(update: Update, context: ContextTypes.DEFAU
     sessions = context.application.bot_data.setdefault("astats_tag_sessions", {})
     session = sessions.get(session_id)
     if not session:
-        await update.callback_query.answer("РџР°РЅРµР»СЊ СѓСЃС‚Р°СЂРµР»Р°", show_alert=True)
+        await update.callback_query.answer("Панель устарела", show_alert=True)
         return
 
     if str(update.effective_user.id) != str(session.get("issuer_user_id")):
-        await update.callback_query.answer("РљРЅРѕРїРєР° РґРѕСЃС‚СѓРїРЅР° С‚РѕР»СЊРєРѕ Р°РІС‚РѕСЂСѓ /astats", show_alert=True)
+        await update.callback_query.answer("Кнопка доступна только автору /astats", show_alert=True)
         return
 
     issuer_profile = _ensure_profile(
@@ -1841,12 +1841,12 @@ async def astats_gender_set_callback(update: Update, context: ContextTypes.DEFAU
         update.effective_user.username or f"id{update.effective_user.id}",
     )
     if int(issuer_profile.get("admin_level", 0) or 0) < 4:
-        await update.callback_query.answer("РќРµРґРѕСЃС‚Р°С‚РѕС‡РЅРѕ РїСЂР°РІ", show_alert=True)
+        await update.callback_query.answer("Недостаточно прав", show_alert=True)
         return
 
     target_user_id = str(session.get("target_user_id"))
     target_profile = _ensure_profile(context, target_user_id, f"id{target_user_id}")
-    admin_gender = "рџ™ЋвЂЌв™‚пёЏРњР°Р»СЊС‡РёРє" if gender_key == "male" else "рџ™ЌвЂЌв™ЂпёЏР”РµРІРѕС‡РєР°"
+    admin_gender = "🙎‍♂️Мальчик" if gender_key == "male" else "🙍‍♀️Девочка"
     target_profile["admin_gender"] = admin_gender
     _save_profile_record(context, target_user_id)
 
@@ -1854,7 +1854,7 @@ async def astats_gender_set_callback(update: Update, context: ContextTypes.DEFAU
         await context.bot.send_message(
             chat_id=LOG_CHAT_ID,
             text=(
-                f"вњ…РЎРјРµРЅР° РїРѕР»Р° РІС‹РїРѕР»РЅРµРЅР°: id_profile #{target_profile.get('id_profile')} -> {admin_gender}. "
+                f"✅Смена пола выполнена: id_profile #{target_profile.get('id_profile')} -> {admin_gender}. "
                 f"РРЅРёС†РёР°С‚РѕСЂ: id{update.effective_user.id}"
             ),
         )
@@ -1864,7 +1864,7 @@ async def astats_gender_set_callback(update: Update, context: ContextTypes.DEFAU
     try:
         await context.bot.send_message(
             chat_id=int(target_user_id),
-            text=f"рџ“ЌР’Р°С€ РїРѕР» Р±С‹Р» РёР·РјРµРЅРµРЅ. РўРµРїРµСЂСЊ РІС‹ {admin_gender}",
+            text=f"📍Ваш пол был изменен. Теперь вы {admin_gender}",
         )
     except Exception:
         pass
@@ -1881,7 +1881,7 @@ async def astats_gender_set_callback(update: Update, context: ContextTypes.DEFAU
 
 
 async def astats_gender_back_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.callback_query.answer("РћС‚РјРµРЅР°")
+    await update.callback_query.answer("Отмена")
     data = update.callback_query.data or ""
     parts = data.split("_")
     if len(parts) < 4:
@@ -1891,11 +1891,11 @@ async def astats_gender_back_callback(update: Update, context: ContextTypes.DEFA
     sessions = context.application.bot_data.setdefault("astats_tag_sessions", {})
     session = sessions.get(session_id)
     if not session:
-        await update.callback_query.answer("РџР°РЅРµР»СЊ СѓСЃС‚Р°СЂРµР»Р°", show_alert=True)
+        await update.callback_query.answer("Панель устарела", show_alert=True)
         return
 
     if str(update.effective_user.id) != str(session.get("issuer_user_id")):
-        await update.callback_query.answer("РљРЅРѕРїРєР° РґРѕСЃС‚СѓРїРЅР° С‚РѕР»СЊРєРѕ Р°РІС‚РѕСЂСѓ /astats", show_alert=True)
+        await update.callback_query.answer("Кнопка доступна только автору /astats", show_alert=True)
         return
 
     target_user_id = str(session.get("target_user_id"))
@@ -1913,7 +1913,7 @@ async def astats_gender_back_callback(update: Update, context: ContextTypes.DEFA
 
 
 async def astats_bio_cancel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.callback_query.answer("РћС‚РјРµРЅР°")
+    await update.callback_query.answer("Отмена")
     data = update.callback_query.data or ""
     parts = data.split("_")
     if len(parts) < 4:
@@ -1923,11 +1923,11 @@ async def astats_bio_cancel_callback(update: Update, context: ContextTypes.DEFAU
     sessions = context.application.bot_data.setdefault("astats_tag_sessions", {})
     session = sessions.get(session_id)
     if not session:
-        await update.callback_query.answer("РџР°РЅРµР»СЊ СѓСЃС‚Р°СЂРµР»Р°", show_alert=True)
+        await update.callback_query.answer("Панель устарела", show_alert=True)
         return
 
     if str(update.effective_user.id) != str(session.get("issuer_user_id")):
-        await update.callback_query.answer("РљРЅРѕРїРєР° РґРѕСЃС‚СѓРїРЅР° С‚РѕР»СЊРєРѕ Р°РІС‚РѕСЂСѓ /astats", show_alert=True)
+        await update.callback_query.answer("Кнопка доступна только автору /astats", show_alert=True)
         return
 
     pending_bio_by_admin = context.application.bot_data.setdefault("pending_astats_bio_by_admin", {})
@@ -1949,7 +1949,7 @@ async def astats_bio_cancel_callback(update: Update, context: ContextTypes.DEFAU
 
 
 async def astats_tag_cancel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.callback_query.answer("РћС‚РјРµРЅР°")
+    await update.callback_query.answer("Отмена")
     data = update.callback_query.data or ""
     parts = data.split("_")
     if len(parts) < 4:
@@ -1962,7 +1962,7 @@ async def astats_tag_cancel_callback(update: Update, context: ContextTypes.DEFAU
         return
 
     if str(update.effective_user.id) != str(session.get("issuer_user_id")):
-        await update.callback_query.answer("РљРЅРѕРїРєР° РґРѕСЃС‚СѓРїРЅР° С‚РѕР»СЊРєРѕ Р°РІС‚РѕСЂСѓ /astats", show_alert=True)
+        await update.callback_query.answer("Кнопка доступна только автору /astats", show_alert=True)
         return
 
     pending_by_admin = context.application.bot_data.setdefault("pending_astats_tag_by_admin", {})
@@ -1995,11 +1995,11 @@ async def astats_bio_view_callback(update: Update, context: ContextTypes.DEFAULT
 
     target_user_id = str(parts[3])
     if str(update.effective_user.id) != target_user_id:
-        await update.callback_query.answer("РљРЅРѕРїРєР° РґРѕСЃС‚СѓРїРЅР° С‚РѕР»СЊРєРѕ РІР»Р°РґРµР»СЊС†Сѓ РїСЂРѕС„РёР»СЏ", show_alert=True)
+        await update.callback_query.answer("Кнопка доступна только владельцу профиля", show_alert=True)
         return
 
     profile = _ensure_profile(context, target_user_id, f"id{target_user_id}")
-    biography_text = str(profile.get("biography_admin") or "РЅРµ Р·Р°РїРѕР»РЅРµРЅР°")
+    biography_text = str(profile.get("biography_admin") or "не заполнена")
     await update.callback_query.message.reply_text(f"вєпёЏР’Р°С€Р° РЅРѕРІР°СЏ Р±РёРѕРіСЂР°С„РёСЏ: {biography_text}")
 
 
@@ -2042,7 +2042,7 @@ async def handle_astats_tag_input_message(update: Update, context: ContextTypes.
 
     if str(update.effective_user.id) != str(session.get("issuer_user_id")):
         if resolved_from == "chat":
-            await update.message.reply_text("Р­С‚Сѓ СЃРјРµРЅСѓ С‚РµРіР° Р·Р°РїСѓСЃС‚РёР» РґСЂСѓРіРѕР№ Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂ.")
+            await update.message.reply_text("Эту смену тега запустил другой администратор.")
             raise ApplicationHandlerStop
         return
 
@@ -2050,28 +2050,28 @@ async def handle_astats_tag_input_message(update: Update, context: ContextTypes.
         return
 
     if int(session.get("chat_id", 0) or 0) != int(update.effective_chat.id):
-        await update.message.reply_text("РћС‚РїСЂР°РІСЊС‚Рµ С‚РµРі РІ С‚РѕС‚ Р¶Рµ С‡Р°С‚, РіРґРµ Р±С‹Р»Р° РЅР°Р¶Р°С‚Р° РєРЅРѕРїРєР° СЃРјРµРЅС‹ С‚РµРіР°.")
+        await update.message.reply_text("Отправьте тег в тот же чат, где была нажата кнопка смены тега.")
         raise ApplicationHandlerStop
 
     if resolved_from != "reply" and not pending_by_admin.get(admin_user_id):
-        await update.message.reply_text("РћС‚РІРµС‚СЊС‚Рµ РЅРѕРІС‹Рј С‚РµРіРѕРј РЅР° СЃРѕРѕР±С‰РµРЅРёРµ Р±РѕС‚Р° СЃ РїСЂРѕСЃСЊР±РѕР№ РѕС‚РїСЂР°РІРёС‚СЊ С‚РµРі.")
+        await update.message.reply_text("Ответьте новым тегом на сообщение бота с просьбой отправить тег.")
         raise ApplicationHandlerStop
 
     new_tag = (update.message.text or "").strip()
     if not new_tag.startswith("#"):
-        await update.message.reply_text("РўРµРі РґРѕР»Р¶РµРЅ РЅР°С‡РёРЅР°С‚СЊСЃСЏ СЃ #.")
+        await update.message.reply_text("Тег должен начинаться с #.")
         raise ApplicationHandlerStop
 
     target_user_id = str(session.get("target_user_id"))
     target_profile = _ensure_profile(context, target_user_id, f"id{target_user_id}")
-    old_tag = str(target_profile.get("tag_admin") or "РЅРµ СѓРєР°Р·Р°РЅ")
+    old_tag = str(target_profile.get("tag_admin") or "не указан")
     target_profile["tag_admin_new"] = new_tag
     _save_profile_record(context, target_user_id)
 
     try:
         await context.bot.send_message(
             chat_id=int(target_user_id),
-            text=f"рџ“ЌР’Р°С€ СѓРЅРёРєР°Р»СЊРЅС‹Р№ С‚РµРі {old_tag} Р±С‹Р» РёР·РјРµРЅРµРЅ РЅР° {new_tag}",
+            text=f"📍Ваш уникальный тег {old_tag} был изменен на {new_tag}",
         )
     except Exception:
         pass
@@ -2080,7 +2080,7 @@ async def handle_astats_tag_input_message(update: Update, context: ContextTypes.
     target_profile.pop("tag_admin_new", None)
     _save_profile_record(context, target_user_id)
 
-    await update.message.reply_text("вњ…Р—Р°РјРµРЅР° С‚РµРіР° СѓСЃРїРµС€РЅР°.")
+    await update.message.reply_text("✅Замена тега успешна.")
 
     prompt_message_id = session.get("prompt_message_id")
     if prompt_message_id:
@@ -2120,7 +2120,7 @@ async def handle_astats_bio_input_message(update: Update, context: ContextTypes.
 
     biography_text = (update.message.text or "").strip()
     if not biography_text:
-        await update.message.reply_text("Р‘РёРѕРіСЂР°С„РёСЏ РЅРµ РґРѕР»Р¶РЅР° Р±С‹С‚СЊ РїСѓСЃС‚РѕР№.")
+        await update.message.reply_text("Биография не должна быть пустой.")
         raise ApplicationHandlerStop
 
     target_user_id = str(session.get("target_user_id"))
@@ -2131,15 +2131,15 @@ async def handle_astats_bio_input_message(update: Update, context: ContextTypes.
     try:
         await context.bot.send_message(
             chat_id=int(target_user_id),
-            text="рџ“ЌР’Р°С€Р° Р±РёРѕРіСЂР°С„РёСЏ Р±С‹Р»Р° РёР·РјРµРЅРµРЅР°.",
+            text="📍Ваша биография была изменена.",
             reply_markup=InlineKeyboardMarkup(
-                [[InlineKeyboardButton("рџ“–РџРѕСЃРјРѕС‚СЂРµС‚СЊ", callback_data=f"astats_bio_view_{target_user_id}")]]
+                [[InlineKeyboardButton("📖Посмотреть", callback_data=f"astats_bio_view_{target_user_id}")]]
             ),
         )
     except Exception:
         pass
 
-    await update.message.reply_text("вњ…Р‘РёРѕРіСЂР°С„РёСЏ СѓСЃРїРµС€РЅРѕ РёР·РјРµРЅРµРЅР°.")
+    await update.message.reply_text("✅Биография успешно изменена.")
 
     editor_message_id = int(session.get("editor_message_id", 0) or 0)
     if editor_message_id:
@@ -2170,7 +2170,7 @@ async def pm_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         update.effective_user.username or f"id{update.effective_user.id}",
     )
     if not _has_admin_rights_level_1_5(issuer_profile):
-        await update.message.reply_text("РљРѕРјР°РЅРґР° РґРѕСЃС‚СѓРїРЅР° С‚РѕР»СЊРєРѕ Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂР°Рј 1 РєР°С‚РµРіРѕСЂРёРё Рё РІС‹С€Рµ.")
+        await update.message.reply_text("Команда доступна только администраторам 1 категории и выше.")
         return
 
     raw_text = update.message.text or ""
@@ -2194,29 +2194,29 @@ async def pm_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
     target_identifier = parts[0]
     dm_text = " ".join(parts[1:]).strip()
     if not dm_text:
-        await update.message.reply_text("РўРµРєСЃС‚ СЃРѕРѕР±С‰РµРЅРёСЏ РЅРµ РґРѕР»Р¶РµРЅ Р±С‹С‚СЊ РїСѓСЃС‚С‹Рј.")
+        await update.message.reply_text("Текст сообщения не должен быть пустым.")
         return
 
     if _has_suspicious_username(dm_text):
-        await update.message.reply_text("РћС‚РїСЂР°РІРєР° РѕС‚РєР»РѕРЅРµРЅР°: С‚РµРєСЃС‚ РЅРµ РґРѕР»Р¶РµРЅ СЃРѕРґРµСЂР¶Р°С‚СЊ @username РёР»Рё СЃСЃС‹Р»РєРё t.me.")
+        await update.message.reply_text("Отправка отклонена: текст не должен содержать @username или ссылки t.me.")
         return
 
     target_user_id, profile = _resolve_warn_target(context, target_identifier)
     if not profile:
-        await update.message.reply_text(f'РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ СЃ id_profile "{target_identifier}" РЅРµ РЅР°Р№РґРµРЅ.')
+        await update.message.reply_text(f'Пользователь с id_profile "{target_identifier}" не найден.')
         return
 
     username = str(profile.get("username") or f"id{target_user_id}")
     try:
         await context.bot.send_message(chat_id=int(target_user_id), text=dm_text)
     except Forbidden:
-        await update.message.reply_text(f'РќРµ СѓРґР°Р»РѕСЃСЊ РѕС‚РїСЂР°РІРёС‚СЊ Р›РЎ РїРѕР»СЊР·РѕРІР°С‚РµР»СЋ "{username}": РїРѕР»СЊР·РѕРІР°С‚РµР»СЊ Р·Р°Р±Р»РѕРєРёСЂРѕРІР°Р» Р±РѕС‚Р°.')
+        await update.message.reply_text(f'Не удалось отправить ЛС пользователю "{username}": пользователь заблокировал бота.')
         return
     except Exception:
-        await update.message.reply_text(f'РќРµ СѓРґР°Р»РѕСЃСЊ РѕС‚РїСЂР°РІРёС‚СЊ Р›РЎ РїРѕР»СЊР·РѕРІР°С‚РµР»СЋ "{username}".')
+        await update.message.reply_text(f'Не удалось отправить ЛС пользователю "{username}".')
         return
 
-    await update.message.reply_text(f'вњ…Р›РЎ СѓСЃРїРµС€РЅРѕ РѕС‚РїСЂР°РІР»РµРЅРѕ РїРѕР»СЊР·РѕРІР°С‚РµР»СЋ "{username}" (id_profile #{profile.get("id_profile")}).')
+    await update.message.reply_text(f'✅ЛС успешно отправлено пользователю "{username}" (id_profile #{profile.get("id_profile")}).')
 
 
 
@@ -2230,11 +2230,11 @@ async def kus_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
     if chat.type == ChatType.PRIVATE:
         active = context.application.bot_data.get("active_chats", {}).get(str(user.id))
         if not active or not active.get("active"):
-            await message.reply_text("РЈ РІР°СЃ РЅРµС‚ Р°РєС‚РёРІРЅРѕР№ РїРµСЂРµРїРёСЃРєРё.")
+            await message.reply_text("У вас нет активной переписки.")
             raise ApplicationHandlerStop
 
         if active.get("paused") or active.get("management_paused"):
-            await message.reply_text("РЎРµСЃСЃРёСЏ СЃРµР№С‡Р°СЃ РѕСЃС‚Р°РЅРѕРІР»РµРЅР°. РЎРЅР°С‡Р°Р»Р° РІРѕР·РѕР±РЅРѕРІРёС‚Рµ РѕР±С‰РµРЅРёРµ.")
+            await message.reply_text("Сессия сейчас остановлена. Сначала возобновите общение.")
             raise ApplicationHandlerStop
 
         admin_id = str(active.get("admin_id") or "")
@@ -2247,7 +2247,7 @@ async def kus_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         username_pz = str(user_profile.get("username") or active.get("topic_base_name") or f"id{user.id}")
 
         try:
-            await message.reply_text(f"Р’С‹ СѓРєСѓСЃРёР»Рё {admin_tag}")
+            await message.reply_text(f"Вы укусили {admin_tag}")
         except Exception:
             pass
 
@@ -2256,7 +2256,7 @@ async def kus_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
                 await context.bot.send_message(
                     chat_id=chat_id,
                     message_thread_id=topic_id,
-                    text=f"#RP рџ’•Р’Р°СЃ СѓРєСѓСЃРёР»(-Р°) {username_pz}",
+                    text=f"#RP 💕Вас укусил(-а) {username_pz}",
                 )
             except Exception:
                 pass
@@ -2269,18 +2269,18 @@ async def kus_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     topic_id = getattr(message, "message_thread_id", None)
     if topic_id is None:
-        await message.reply_text("РљРѕРјР°РЅРґР° РґРѕСЃС‚СѓРїРЅР° С‚РѕР»СЊРєРѕ РІ С‚РµРјРµ Р°РєС‚РёРІРЅРѕРіРѕ РґРёР°Р»РѕРіР°.")
+        await message.reply_text("Команда доступна только в теме активного диалога.")
         raise ApplicationHandlerStop
 
     topic_map = context.application.bot_data.get("topic_user_map", {}) or {}
     target_user_id = topic_map.get(topic_id) or topic_map.get(str(topic_id))
     active = (context.application.bot_data.get("active_chats", {}) or {}).get(str(target_user_id)) if target_user_id else None
     if not active or not active.get("active"):
-        await message.reply_text("РЈ РІР°СЃ РЅРµС‚ Р°РєС‚РёРІРЅРѕР№ РїРµСЂРµРїРёСЃРєРё.")
+        await message.reply_text("У вас нет активной переписки.")
         raise ApplicationHandlerStop
 
     if active.get("paused") or active.get("management_paused"):
-        await message.reply_text("РЎРµСЃСЃРёСЏ СЃРµР№С‡Р°СЃ РѕСЃС‚Р°РЅРѕРІР»РµРЅР°. РЎРЅР°С‡Р°Р»Р° РІРѕР·РѕР±РЅРѕРІРёС‚Рµ РѕР±С‰РµРЅРёРµ.")
+        await message.reply_text("Сессия сейчас остановлена. Сначала возобновите общение.")
         raise ApplicationHandlerStop
 
     admin_profile = _ensure_profile(context, str(user.id), user.username or f"id{user.id}")
@@ -2290,14 +2290,14 @@ async def kus_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
     username_pz = str(target_profile.get("username") or active.get("topic_base_name") or f"id{target_user_id}")
 
     try:
-        await message.reply_text(f"Р’С‹ СѓРєСѓСЃРёР»Рё {username_pz}")
+        await message.reply_text(f"Вы укусили {username_pz}")
     except Exception:
         pass
 
     try:
         await context.bot.send_message(
             chat_id=int(target_user_id),
-            text=f"Р’Р°СЃ СѓРєСѓСЃРёР»(-Р°) {admin_tag}",
+            text=f"Вас укусил(-а) {admin_tag}",
         )
     except Exception:
         pass
@@ -2317,7 +2317,7 @@ async def setprefix_command_handler(update: Update, context: ContextTypes.DEFAUL
         update.effective_user.username or f"id{update.effective_user.id}",
     )
     if int(issuer_profile.get("admin_level", 0) or 0) != 5:
-        await update.message.reply_text("РљРѕРјР°РЅРґР° РґРѕСЃС‚СѓРїРЅР° С‚РѕР»СЊРєРѕ Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂР°Рј 5 РєР°С‚РµРіРѕСЂРёРё.")
+        await update.message.reply_text("Команда доступна только администраторам 5 категории.")
         return
 
     raw_text = update.message.text or ""
@@ -2341,11 +2341,11 @@ async def setprefix_command_handler(update: Update, context: ContextTypes.DEFAUL
     target_identifier = parts[0]
     target_user_id, profile = _resolve_warn_target(context, target_identifier)
     if not profile:
-        await update.message.reply_text(f'РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ СЃ id_profile "{target_identifier}" РЅРµ РЅР°Р№РґРµРЅ.')
+        await update.message.reply_text(f'Пользователь с id_profile "{target_identifier}" не найден.')
         return
     if not _has_admin_rights_level_1_5(profile):
         await update.message.reply_text(
-            f'РќРµР»СЊР·СЏ РѕС‚РєСЂС‹С‚СЊ РїР°РЅРµР»СЊ: id_profile #{profile.get("id_profile")} РЅРµ РёРјРµРµС‚ Р°РґРјРёРЅ-РїСЂР°РІ 1-5 СѓСЂРѕРІРЅСЏ.'
+            f'Нельзя открыть панель: id_profile #{profile.get("id_profile")} не имеет админ-прав 1-5 уровня.'
         )
         return
 
@@ -2388,11 +2388,11 @@ async def setprefix_select_callback(update: Update, context: ContextTypes.DEFAUL
     pending_panels = context.application.bot_data.setdefault("pending_prefix_edit_panels", {})
     panel = pending_panels.get(panel_id)
     if not panel:
-        await update.callback_query.answer("РџР°РЅРµР»СЊ СЂРµРґР°РєС‚РёСЂРѕРІР°РЅРёСЏ СѓСЃС‚Р°СЂРµР»Р°", show_alert=True)
+        await update.callback_query.answer("Панель редактирования устарела", show_alert=True)
         return
 
     if str(update.effective_user.id) != str(panel.get("issuer_user_id")):
-        await update.callback_query.answer("РљРЅРѕРїРєР° РґРѕСЃС‚СѓРїРЅР° С‚РѕР»СЊРєРѕ Р°РІС‚РѕСЂСѓ РїР°РЅРµР»Рё", show_alert=True)
+        await update.callback_query.answer("Кнопка доступна только автору панели", show_alert=True)
         return
 
     issuer_profile = _ensure_profile(
@@ -2401,7 +2401,7 @@ async def setprefix_select_callback(update: Update, context: ContextTypes.DEFAUL
         update.effective_user.username or f"id{update.effective_user.id}",
     )
     if int(issuer_profile.get("admin_level", 0) or 0) != 5:
-        await update.callback_query.answer("РќРµРґРѕСЃС‚Р°С‚РѕС‡РЅРѕ РїСЂР°РІ", show_alert=True)
+        await update.callback_query.answer("Недостаточно прав", show_alert=True)
         return
 
     current = str(panel.get("selected_prefix_key") or "")
@@ -2421,11 +2421,11 @@ async def setprefix_apply_callback(update: Update, context: ContextTypes.DEFAULT
     pending_panels = context.application.bot_data.setdefault("pending_prefix_edit_panels", {})
     panel = pending_panels.get(panel_id)
     if not panel:
-        await update.callback_query.answer("РџР°РЅРµР»СЊ СЂРµРґР°РєС‚РёСЂРѕРІР°РЅРёСЏ СѓСЃС‚Р°СЂРµР»Р°", show_alert=True)
+        await update.callback_query.answer("Панель редактирования устарела", show_alert=True)
         return
 
     if str(update.effective_user.id) != str(panel.get("issuer_user_id")):
-        await update.callback_query.answer("РљРЅРѕРїРєР° РґРѕСЃС‚СѓРїРЅР° С‚РѕР»СЊРєРѕ Р°РІС‚РѕСЂСѓ РїР°РЅРµР»Рё", show_alert=True)
+        await update.callback_query.answer("Кнопка доступна только автору панели", show_alert=True)
         return
 
     issuer_profile = _ensure_profile(
@@ -2434,7 +2434,7 @@ async def setprefix_apply_callback(update: Update, context: ContextTypes.DEFAULT
         update.effective_user.username or f"id{update.effective_user.id}",
     )
     if int(issuer_profile.get("admin_level", 0) or 0) != 5:
-        await update.callback_query.answer("РќРµРґРѕСЃС‚Р°С‚РѕС‡РЅРѕ РїСЂР°РІ", show_alert=True)
+        await update.callback_query.answer("Недостаточно прав", show_alert=True)
         return
 
     target_user_id = str(panel.get("target_user_id"))
@@ -2454,10 +2454,10 @@ async def setprefix_apply_callback(update: Update, context: ContextTypes.DEFAULT
     _save_profile_record(context, target_user_id)
 
     target_id_profile = int(target_profile.get("id_profile", 0) or panel.get("target_id_profile", 0) or 0)
-    prefix_text = str(target_profile.get("prefix") or "РЅРµ СѓСЃС‚Р°РЅРѕРІР»РµРЅ")
+    prefix_text = str(target_profile.get("prefix") or "не установлен")
     try:
         await update.callback_query.message.edit_text(
-            f"вњ…РџСЂРµС„РёРєСЃ РґР»СЏ id_profile #{target_id_profile} РїСЂРёРјРµРЅРµРЅ: {prefix_text}"
+            f"✅Префикс для id_profile #{target_id_profile} применен: {prefix_text}"
         )
     except Exception:
         pass
@@ -2465,7 +2465,7 @@ async def setprefix_apply_callback(update: Update, context: ContextTypes.DEFAULT
     try:
         await context.bot.send_message(
             chat_id=int(target_user_id),
-            text=f"вњ…Р’Р°С€ Р°РґРјРёРЅ-РїСЂРµС„РёРєСЃ Р±С‹Р» РѕС‚СЂРµРґР°РєС‚РёСЂРѕРІР°РЅ. РўРµРїРµСЂСЊ РІР°С€ РїСЂРµС„РёРєСЃ: {prefix_text}",
+            text=f"✅Ваш админ-префикс был отредактирован. Теперь ваш префикс: {prefix_text}",
         )
     except Exception:
         pass
@@ -2479,7 +2479,7 @@ async def unwarn_command_handler(update: Update, context: ContextTypes.DEFAULT_T
         return
 
     if not _can_use_moderation_commands(context, str(update.effective_user.id)):
-        await update.message.reply_text("РљРѕРјР°РЅРґР° РґРѕСЃС‚СѓРїРЅР° С‚РѕР»СЊРєРѕ Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂР°Рј 2 РєР°С‚РµРіРѕСЂРёРё Рё РІС‹С€Рµ.")
+        await update.message.reply_text("Команда доступна только администраторам 2 категории и выше.")
         return
 
     raw_text = update.message.text or ""
@@ -2487,7 +2487,7 @@ async def unwarn_command_handler(update: Update, context: ContextTypes.DEFAULT_T
     cmd_len = cmd_entity.length if cmd_entity and cmd_entity.type == "bot_command" else len("/unwarn")
     args_text = raw_text[cmd_len:].strip()
     if not args_text:
-        await update.message.reply_text('РЈРєР°Р¶РёС‚Рµ id_profile: /unwarn "id_profile"')
+        await update.message.reply_text('Укажите id_profile: /unwarn "id_profile"')
         return
 
     try:
@@ -2497,33 +2497,33 @@ async def unwarn_command_handler(update: Update, context: ContextTypes.DEFAULT_T
         return
 
     if len(parts) < 1:
-        await update.message.reply_text('РЈРєР°Р¶РёС‚Рµ id_profile: /unwarn "id_profile"')
+        await update.message.reply_text('Укажите id_profile: /unwarn "id_profile"')
         return
 
     target_identifier = parts[0]
     target_user_id, profile = _resolve_warn_target(context, target_identifier)
     if not profile:
-        await update.message.reply_text(f'РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ СЃ id_profile "{target_identifier}" РЅРµ РЅР°Р№РґРµРЅ.')
+        await update.message.reply_text(f'Пользователь с id_profile "{target_identifier}" не найден.')
         return
 
     current_warn = int(profile.get("warn", 0) or 0)
     if current_warn <= 0:
-        await update.message.reply_text(f'РЈ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ id_profile #{profile.get("id_profile")} РЅРµС‚ РїСЂРµРґСѓРїСЂРµР¶РґРµРЅРёР№ РґР»СЏ СЃРЅСЏС‚РёСЏ.')
+        await update.message.reply_text(f'У пользователя id_profile #{profile.get("id_profile")} нет предупреждений для снятия.')
         return
 
     profile["warn"] = current_warn - 1
     if profile["warn"] <= 0:
-        profile["reason"] = "РЅРµС‚ РїСЂРёС‡РёРЅ"
+        profile["reason"] = "нет причин"
     _save_profile_record(context, str(target_user_id))
 
     await update.message.reply_text(
-        f'вњ…РџРѕР»СЊР·РѕРІР°С‚РµР»СЋ id_profile #{profile.get("id_profile")} СЃРЅСЏС‚Рѕ РїСЂРµРґСѓРїСЂРµР¶РґРµРЅРёРµ. РўРµРїРµСЂСЊ Сѓ РЅРµРіРѕ {profile["warn"]} warn(-РѕРІ).'
+        f'✅Пользователю id_profile #{profile.get("id_profile")} снято предупреждение. Теперь у него {profile["warn"]} warn(-ов).'
     )
 
     try:
         await context.bot.send_message(
             chat_id=int(target_user_id),
-            text=f'вњ…РЎ Р’Р°СЃ СЃРЅСЏР»Рё РїСЂРµРґСѓРїСЂРµР¶РґРµРЅРёРµ. РўРµРїРµСЂСЊ Сѓ РІР°СЃ {profile["warn"]} РїСЂРµРґСѓРїСЂРµР¶РґРµРЅРёР№',
+            text=f'✅С Вас сняли предупреждение. Теперь у вас {profile["warn"]} предупреждений',
         )
     except Exception:
         pass
@@ -2535,7 +2535,7 @@ async def ban_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
 
     if not _can_use_moderation_commands(context, str(update.effective_user.id)):
-        await update.message.reply_text("РљРѕРјР°РЅРґР° РґРѕСЃС‚СѓРїРЅР° С‚РѕР»СЊРєРѕ Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂР°Рј 2 РєР°С‚РµРіРѕСЂРёРё Рё РІС‹С€Рµ.")
+        await update.message.reply_text("Команда доступна только администраторам 2 категории и выше.")
         return
 
     raw_text = update.message.text or ""
@@ -2543,7 +2543,7 @@ async def ban_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
     cmd_len = cmd_entity.length if cmd_entity and cmd_entity.type == "bot_command" else len("/ban")
     args_text = raw_text[cmd_len:].strip()
     if not args_text:
-        await update.message.reply_text('РЈРєР°Р¶РёС‚Рµ id_profile Рё РїСЂРёС‡РёРЅСѓ: /ban "id_profile" "reason"')
+        await update.message.reply_text('Укажите id_profile и причину: /ban "id_profile" "reason"')
         return
 
     try:
@@ -2553,29 +2553,29 @@ async def ban_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
 
     if len(parts) < 2:
-        await update.message.reply_text('РЈРєР°Р¶РёС‚Рµ id_profile Рё РїСЂРёС‡РёРЅСѓ: /ban "id_profile" "reason"')
+        await update.message.reply_text('Укажите id_profile и причину: /ban "id_profile" "reason"')
         return
 
     target_identifier = parts[0]
     reason = " ".join(parts[1:]).strip()
     if not reason:
-        await update.message.reply_text("РЈРєР°Р¶РёС‚Рµ РїСЂРёС‡РёРЅСѓ Р±Р»РѕРєРёСЂРѕРІРєРё.")
+        await update.message.reply_text("Укажите причину блокировки.")
         return
 
     target_user_id, profile = _resolve_ban_target(context, target_identifier)
     if not profile:
-        await update.message.reply_text(f'РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ СЃ id_profile "{target_identifier}" РЅРµ РЅР°Р№РґРµРЅ.')
+        await update.message.reply_text(f'Пользователь с id_profile "{target_identifier}" не найден.')
         return
 
     if _has_admin_rights_level_1_5(profile) or _has_admin_ban_immunity(profile):
         await update.message.reply_text(
-            f'РќРµРІРѕР·РјРѕР¶РЅРѕ РІС‹РґР°С‚СЊ Р±Р°РЅ: id_profile #{profile.get("id_profile")} РёРјРµРµС‚ Р°РґРјРёРЅ-РїСЂР°РІР° 1-5 СѓСЂРѕРІРЅСЏ.'
+            f'Невозможно выдать бан: id_profile #{profile.get("id_profile")} имеет админ-права 1-5 уровня.'
         )
         return
 
     await _apply_ban(context, str(target_user_id), profile.get("username"), reason, "BAN")
     await update.message.reply_text(
-        f'в›”РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ id_profile #{profile.get("id_profile")} Р·Р°Р±Р»РѕРєРёСЂРѕРІР°РЅ. РџСЂРёС‡РёРЅР°: "{reason}"'
+        f'⛔Пользователь id_profile #{profile.get("id_profile")} заблокирован. Причина: "{reason}"'
     )
 
 
@@ -2585,7 +2585,7 @@ async def unban_command_handler(update: Update, context: ContextTypes.DEFAULT_TY
         return
 
     if not _can_use_moderation_commands(context, str(update.effective_user.id)):
-        await update.message.reply_text("РљРѕРјР°РЅРґР° РґРѕСЃС‚СѓРїРЅР° С‚РѕР»СЊРєРѕ Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂР°Рј 2 РєР°С‚РµРіРѕСЂРёРё Рё РІС‹С€Рµ.")
+        await update.message.reply_text("Команда доступна только администраторам 2 категории и выше.")
         return
 
     raw_text = update.message.text or ""
@@ -2593,7 +2593,7 @@ async def unban_command_handler(update: Update, context: ContextTypes.DEFAULT_TY
     cmd_len = cmd_entity.length if cmd_entity and cmd_entity.type == "bot_command" else len("/unban")
     args_text = raw_text[cmd_len:].strip()
     if not args_text:
-        await update.message.reply_text('РЈРєР°Р¶РёС‚Рµ id_profile: /unban "id_profile"')
+        await update.message.reply_text('Укажите id_profile: /unban "id_profile"')
         return
 
     try:
@@ -2603,26 +2603,26 @@ async def unban_command_handler(update: Update, context: ContextTypes.DEFAULT_TY
         return
 
     if len(parts) < 1:
-        await update.message.reply_text('РЈРєР°Р¶РёС‚Рµ id_profile: /unban "id_profile"')
+        await update.message.reply_text('Укажите id_profile: /unban "id_profile"')
         return
 
     target_identifier = parts[0]
     target_user_id, profile = _resolve_ban_target(context, target_identifier)
     if not profile:
-        await update.message.reply_text(f'РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ СЃ id_profile "{target_identifier}" РЅРµ РЅР°Р№РґРµРЅ.')
+        await update.message.reply_text(f'Пользователь с id_profile "{target_identifier}" не найден.')
         return
 
     banned_users = context.application.bot_data.setdefault("banned_users", {})
     if not banned_users.pop(str(target_user_id), None):
-        await update.message.reply_text(f'РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ id_profile #{profile.get("id_profile")} РЅРµ РЅР°С…РѕРґРёС‚СЃСЏ РІ Р±Р°РЅРµ.')
+        await update.message.reply_text(f'Пользователь id_profile #{profile.get("id_profile")} не находится в бане.')
         return
 
-    await update.message.reply_text(f'вњ…РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ id_profile #{profile.get("id_profile")} СЂР°Р·Р±Р°РЅРµРЅ.')
+    await update.message.reply_text(f'✅Пользователь id_profile #{profile.get("id_profile")} разбанен.')
 
     try:
         await context.bot.send_message(
             chat_id=int(target_user_id),
-            text="вњ…РЎ РІР°С€РµР№ СѓС‡РµС‚РЅРѕР№ Р·Р°РїРёСЃРё СЃРЅСЏС‚Р° Р±Р»РѕРєРёСЂРѕРІРєР°. Р¤СѓРЅРєС†РёРё Р±РѕС‚Р° СЃРЅРѕРІР° РґРѕСЃС‚СѓРїРЅС‹.",
+            text="✅С вашей учетной записи снята блокировка. Функции бота снова доступны.",
         )
     except Exception:
         pass
@@ -2637,9 +2637,9 @@ async def admin_take_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         update.effective_user.username or f"id{update.effective_user.id}",
     )
     if not _has_admin_rights_level_1_5(admin_profile):
-        await update.callback_query.answer("Р”РµР№СЃС‚РІРёРµ РґРѕСЃС‚СѓРїРЅРѕ С‚РѕР»СЊРєРѕ Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂР°Рј 1 РєР°С‚РµРіРѕСЂРёРё Рё РІС‹С€Рµ.", show_alert=True)
+        await update.callback_query.answer("Действие доступно только администраторам 1 категории и выше.", show_alert=True)
         return
-    await update.callback_query.answer("РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ РїСЂРёРЅСЏС‚")
+    await update.callback_query.answer("Пользователь принят")
     data = update.callback_query.data  # e.g. "take_user_12345"
     parts = data.split("_")
     if len(parts) < 3:
@@ -2673,10 +2673,10 @@ async def admin_take_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     requester_id_profile = requester_profile.get("id_profile")
 
     accept_text = (
-        f"рџ“ЉР’С‹ РЅР°С…РѕРґРёС‚РµСЃСЊ РІ РїРµСЂРµРїРёСЃРєРµ РЅР° С‚РµРјСѓ {mood}\n"
+        f"📊Вы находитесь в переписке на тему {mood}\n"
         f"РРјСЏ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ: {username}\n"
-        f"РђР№РґРё РїСЂРѕС„РёР»СЏ: {requester_id_profile}\n"
-        f"РђРґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂ {admin_username}"
+        f"Айди профиля: {requester_id_profile}\n"
+        f"Администратор {admin_username}"
     )
 
     try:
@@ -2705,28 +2705,28 @@ async def admin_take_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     # send user DM messages
     requester_chat_id = int(request_user_id)
     user_text_1 = (
-        "в•­в”Ђ вќЂ рќ“ўрќ”‚рќ“јрќ“Ѕрќ“®рќ“¶ в”Ђв•®\n\n"
-        f'вњ… "{admin_tag}" РїСЂРёРЅСЏР» РІР°С€ Р·Р°РїСЂРѕСЃ.\n\n'
-        "рџ’­ РђРґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂ СѓР¶Рµ РїРѕРґРєР»СЋС‡Р°РµС‚СЃСЏ Рє С‡Р°С‚Сѓ Рё СЃРѕРІСЃРµРј СЃРєРѕСЂРѕ РЅР°С‡РЅС‘С‚ РґРёР°Р»РѕРі СЃ РІР°РјРё.\n\n"
-        "рџ“Ё Р’СЃСЏ СѓРєР°Р·Р°РЅРЅР°СЏ РІР°РјРё РёРЅС„РѕСЂРјР°С†РёСЏ СѓР¶Рµ РїРµСЂРµРґР°РЅР° РµРјСѓ, РїРѕСЌС‚РѕРјСѓ РѕРЅ РЅРµРјРЅРѕРіРѕ Р·РЅР°РєРѕРј СЃ РІР°С€РµР№ СЃРёС‚СѓР°С†РёРµР№.\n\n"
-        "вЏі РџРѕР¶Р°Р»СѓР№СЃС‚Р°, РѕСЃС‚Р°РІР°Р№С‚РµСЃСЊ РІ С‡Р°С‚Рµ.\n\n"
-        "рџ’Њ Р•СЃР»Рё РѕР¶РёРґР°РЅРёРµ РЅРµРјРЅРѕРіРѕ Р·Р°С‚СЏРЅРµС‚СЃСЏ вЂ” РїСЂРѕСЃС‚Рѕ РѕС‚РїСЂР°РІСЊС‚Рµ Р»СЋР±РѕРµ СЃРѕРѕР±С‰РµРЅРёРµ. РђРґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂ РѕР±СЏР·Р°С‚РµР»СЊРЅРѕ РѕС‚РІРµС‚РёС‚.\n\n"
-        "в•°в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв•Ї"
+        "╭─ ❀ 𝓢𝔂𝓼𝓽𝓮𝓶 ─╮\n\n"
+        f'✅ "{admin_tag}" принял ваш запрос.\n\n'
+        "💭 Администратор уже подключается к чату и совсем скоро начнёт диалог с вами.\n\n"
+        "📨 Вся указанная вами информация уже передана ему, поэтому он немного знаком с вашей ситуацией.\n\n"
+        "⏳ Пожалуйста, оставайтесь в чате.\n\n"
+        "💌 Если ожидание немного затянется — просто отправьте любое сообщение. Администратор обязательно ответит.\n\n"
+        "╰────────────────╯"
     )
     user_text_2 = (
         "в•­в”Ђ рџ“Њ рќ“рќ“·рќ“Їрќ“ё в”Ђв•®\n\n"
-        "вљ™пёЏ Р’СЂРµРјРµРЅРЅРѕ РЅРµРґРѕСЃС‚СѓРїРЅР° РїРµСЂРµСЃС‹Р»РєР°:\n\n"
-        "вЂў рџ“· Р¤РѕС‚Рѕ\n"
-        "вЂў рџЋҐ Р’РёРґРµРѕ\n"
-        "вЂў рџЋћ GIF\n"
+        "⚙️ Временно недоступна пересылка:\n\n"
+        "• 📷 Фото\n"
+        "• 🎥 Видео\n"
+        "• 🎞 GIF\n"
         "вЂў рџЉ РЎС‚РёРєРµСЂРѕРІ\n"
-        "вЂў рџ“Ѓ Р¤Р°Р№Р»РѕРІ\n\n"
-        "Р­С‚Рѕ СЃРІСЏР·Р°РЅРѕ СЃ С‚РµС…РЅРёС‡РµСЃРєРѕР№ РѕС€РёР±РєРѕР№ РЅР° СЃС‚РѕСЂРѕРЅРµ СЃРµСЂРІРµСЂР°.\n\n"
-        "рџ›  РњС‹ СѓР¶Рµ Р·Р°РЅРёРјР°РµРјСЃСЏ РµС‘ СѓСЃС‚СЂР°РЅРµРЅРёРµРј. РЎРїР°СЃРёР±Рѕ Р·Р° С‚РµСЂРїРµРЅРёРµ!\n\n"
-        "в•°в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв•Ї"
+        "• 📁 Файлов\n\n"
+        "Это связано с технической ошибкой на стороне сервера.\n\n"
+        "🛠 Мы уже занимаемся её устранением. Спасибо за терпение!\n\n"
+        "╰────────────────╯"
     )
     bio_button = InlineKeyboardMarkup(
-        [[InlineKeyboardButton("рџ”­Р‘РёРѕРіСЂР°С„РёСЏ Р°РґРјРёРЅР°", callback_data=f"show_admin_bio_{request_user_id}")]]
+        [[InlineKeyboardButton("🔭Биография админа", callback_data=f"show_admin_bio_{request_user_id}")]]
     )
     try:
         sent_user_intro = await context.bot.send_message(chat_id=requester_chat_id, text=user_text_1, reply_markup=bio_button)
@@ -2775,11 +2775,11 @@ async def admin_take_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     try:
         kb = ReplyKeyboardMarkup(
-            [[KeyboardButton("рџ¤§РћС‚РєР°Р·Р°С‚СЊСЃСЏ РѕС‚ Р°РґРјРёРЅР°"), KeyboardButton("рџ’¤РџСЂРёРѕСЃС‚Р°РЅРѕРІРёС‚СЊ РѕР±С‰РµРЅРёРµ")]],
+            [[KeyboardButton("🤧Отказаться от админа"), KeyboardButton("💤Приостановить общение")]],
             resize_keyboard=True,
             one_time_keyboard=False,
         )
-        await context.bot.send_message(chat_id=requester_chat_id, text="Р•СЃР»Рё РІР°Рј Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂ РЅРµ РїРѕРЅСЂР°РІРёР»СЃСЏ, С‚Рѕ РІС‹ РјРѕР¶РµС‚Рµ РѕС‚РјРµРЅРёС‚СЊ РµРіРѕ РєРЅРѕРїРєРѕР№ РЅРёР¶Рµ.", reply_markup=kb)
+        await context.bot.send_message(chat_id=requester_chat_id, text="Если вам администратор не понравился, то вы можете отменить его кнопкой ниже.", reply_markup=kb)
     except Exception:
         pass
 
@@ -2789,7 +2789,7 @@ async def admin_take_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 async def show_user_profile_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not _can_use_moderation_commands(context, str(update.effective_user.id)):
-        await update.callback_query.answer("Р”РµР№СЃС‚РІРёРµ РґРѕСЃС‚СѓРїРЅРѕ С‚РѕР»СЊРєРѕ Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂР°Рј 2 РєР°С‚РµРіРѕСЂРёРё Рё РІС‹С€Рµ.", show_alert=True)
+        await update.callback_query.answer("Действие доступно только администраторам 2 категории и выше.", show_alert=True)
         return
 
     await update.callback_query.answer()
@@ -2801,13 +2801,13 @@ async def show_user_profile_callback(update: Update, context: ContextTypes.DEFAU
     request_user_id = parts[3]
     active = (context.application.bot_data.get("active_chats", {}) or {}).get(str(request_user_id))
     if not active or not active.get("active"):
-        await update.callback_query.answer("РўРµРјР° Р±РѕР»СЊС€Рµ РЅРµР°РєС‚СѓР°Р»СЊРЅР°", show_alert=True)
+        await update.callback_query.answer("Тема больше неактуальна", show_alert=True)
         return
 
     topic_id = getattr(update.callback_query.message, "message_thread_id", None)
     active_topic_id = active.get("topic_id")
     if topic_id is not None and active_topic_id is not None and str(topic_id) != str(active_topic_id):
-        await update.callback_query.answer("РўРµРјР° Р±РѕР»СЊС€Рµ РЅРµР°РєС‚СѓР°Р»СЊРЅР°", show_alert=True)
+        await update.callback_query.answer("Тема больше неактуальна", show_alert=True)
         return
 
     profile = _ensure_profile(context, str(request_user_id), active.get("topic_base_name") or f"id{request_user_id}")
@@ -2817,7 +2817,7 @@ async def show_user_profile_callback(update: Update, context: ContextTypes.DEFAU
 
 async def warn_user_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not _can_use_moderation_commands(context, str(update.effective_user.id)):
-        await update.callback_query.answer("Р”РµР№СЃС‚РІРёРµ РґРѕСЃС‚СѓРїРЅРѕ С‚РѕР»СЊРєРѕ Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂР°Рј 2 РєР°С‚РµРіРѕСЂРёРё Рё РІС‹С€Рµ.", show_alert=True)
+        await update.callback_query.answer("Действие доступно только администраторам 2 категории и выше.", show_alert=True)
         return
     await update.callback_query.answer()
     data = update.callback_query.data
@@ -2830,11 +2830,11 @@ async def warn_user_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     topic_id = getattr(update.callback_query.message, "message_thread_id", None)
     active = context.application.bot_data.get("active_chats", {}).get(str(request_user_id))
     if not active or not active.get("active"):
-        await update.callback_query.answer("РўРµРјР° Р±РѕР»СЊС€Рµ РЅРµР°РєС‚СѓР°Р»СЊРЅР°", show_alert=True)
+        await update.callback_query.answer("Тема больше неактуальна", show_alert=True)
         return
     active_topic_id = active.get("topic_id")
     if topic_id is not None and active_topic_id is not None and str(topic_id) != str(active_topic_id):
-        await update.callback_query.answer("РўРµРјР° Р±РѕР»СЊС€Рµ РЅРµР°РєС‚СѓР°Р»СЊРЅР°", show_alert=True)
+        await update.callback_query.answer("Тема больше неактуальна", show_alert=True)
         return
 
     app_requests = context.application.bot_data.setdefault("admin_requests", {})
@@ -2842,12 +2842,12 @@ async def warn_user_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     username = req_info.get("username") if req_info else f"id{request_user_id}"
 
     thread_id = getattr(update.callback_query.message, "message_thread_id", None)
-    prompt_text = f'Р’С‹ СЃРѕР±РёСЂР°РµС‚РµСЃСЊ РїСЂРµРґСѓРїСЂРµРґРёС‚СЊ СЃРІРѕРµРіРѕ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ "{username}"?'
+    prompt_text = f'Вы собираетесь предупредить своего пользователя "{username}"?'
     keyboard = InlineKeyboardMarkup(
         [
             [
-                InlineKeyboardButton("рџ”Ѓ РћС‚РјРµРЅР°", callback_data=f"cancel_warn_{request_user_id}"),
-                InlineKeyboardButton("Р’С‹РґР°С‚СЊ РїСЂРµРґСѓРїСЂРµР¶РґРµРЅРёРµ", callback_data=f"confirm_warn_{request_user_id}"),
+                InlineKeyboardButton("🔁 Отмена", callback_data=f"cancel_warn_{request_user_id}"),
+                InlineKeyboardButton("Выдать предупреждение", callback_data=f"confirm_warn_{request_user_id}"),
             ]
         ]
     )
@@ -2871,7 +2871,7 @@ async def warn_user_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 
 async def cancel_warn_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.callback_query.answer("РћС‚РјРµРЅР°")
+    await update.callback_query.answer("Отмена")
     try:
         await update.callback_query.message.delete()
     except Exception as e:
@@ -2898,8 +2898,8 @@ async def confirm_warn_callback(update: Update, context: ContextTypes.DEFAULT_TY
 
     thread_id = getattr(update.callback_query.message, "message_thread_id", None)
     prompt_text = (
-        "рџ“ЊРЈРєР°Р¶РёС‚Рµ РїСЂРёС‡РёРЅСѓ РІС‹РґР°С‡Рё РїСЂРµРґСѓРїСЂРµР¶РґРµРЅРёСЏ РїРѕР»СЊР·РѕРІР°С‚РµР»СЋ (РїСѓРЅРєС‚РѕРј)\n"
-        f"РџСЂР°РІРёР»Р° РјРѕР¶РЅРѕ РїРѕСЃРјРѕС‚СЂРµС‚СЊ Р·РґРµСЃСЊ {_topic_url(RULES_CHAT_ID, RULES_THREAD_ID)}"
+        "📌Укажите причину выдачи предупреждения пользователю (пунктом)\n"
+        f"Правила можно посмотреть здесь {_topic_url(RULES_CHAT_ID, RULES_THREAD_ID)}"
     )
     try:
         if thread_id is not None:
@@ -2938,7 +2938,7 @@ async def handle_warn_reason_message(update: Update, context: ContextTypes.DEFAU
     if not pending:
         return
 
-    reason = getattr(update.message, "text", None) or getattr(update.message, "caption", None) or "(Р±РµР· РїСЂРёС‡РёРЅС‹)"
+    reason = getattr(update.message, "text", None) or getattr(update.message, "caption", None) or "(без причины)"
     request_user_id = pending.get("request_user_id")
     username = pending.get("username") or f"id{request_user_id}"
 
@@ -2958,12 +2958,12 @@ async def handle_warn_reason_message(update: Update, context: ContextTypes.DEFAU
                 await context.bot.send_message(
                     chat_id=chat_id,
                     message_thread_id=thread_id,
-                    text="вќЊРЈ СЌС‚РѕРіРѕ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ Р±РѕР»СЊС€Рµ 3 РїСЂРµРґСѓРїСЂРµР¶РґРµРЅРёР№, Р±РѕР»СЊС€Рµ РІС‹РґР°С‚СЊ РЅРµР»СЊР·СЏ.",
+                    text="❌У этого пользователя больше 3 предупреждений, больше выдать нельзя.",
                 )
             else:
                 await context.bot.send_message(
                     chat_id=chat_id,
-                    text="вќЊРЈ СЌС‚РѕРіРѕ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ Р±РѕР»СЊС€Рµ 3 РїСЂРµРґСѓРїСЂРµР¶РґРµРЅРёР№, Р±РѕР»СЊС€Рµ РІС‹РґР°С‚СЊ РЅРµР»СЊР·СЏ.",
+                    text="❌У этого пользователя больше 3 предупреждений, больше выдать нельзя.",
                 )
         except Exception:
             pass
@@ -2975,8 +2975,8 @@ async def handle_warn_reason_message(update: Update, context: ContextTypes.DEFAU
     await enforce_autoban_if_needed(context, str(request_user_id), username)
 
     success_text = (
-        f'вњ…Р’С‹ СѓСЃРїРµС€РЅРѕ РІС‹РґР°Р»Рё РїСЂРµРґСѓРїСЂРµР¶РґРµРЅРёРµ РїРѕР»СЊР·РѕРІР°С‚РµР»СЋ "{username}" СЃ РїСЂРёС‡РёРЅРѕР№ "{reason}". '
-        f'РўРµРїРµСЂСЊ Сѓ РЅРµРіРѕ {profile["warn"]} РїСЂРµРґСѓРїСЂРµР¶РґРµРЅРёР№'
+        f'✅Вы успешно выдали предупреждение пользователю "{username}" с причиной "{reason}". '
+        f'Теперь у него {profile["warn"]} предупреждений'
     )
     try:
         if thread_id is not None:
@@ -2987,11 +2987,11 @@ async def handle_warn_reason_message(update: Update, context: ContextTypes.DEFAU
         logging.exception("handle_warn_reason_message success message failed: %s", e)
 
     user_text = (
-        "в•­в”Ђ рџљЁ рќ“ќрќ“ёрќ“Ѕрќ“Ірќ“¬рќ“® в”Ђв•®\n\n"
-        "вќ—пёЏР’С‹ РїРѕР»СѓС‡РёР»Рё РїСЂРµРґСѓРїСЂРµР¶РґРµРЅРёРµ РѕС‚ СЃРІРѕРµРіРѕ Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂР°.\n\n"
-        f"вњ¦ РџСЂРёС‡РёРЅР°: {reason}\n"
-        f"вњ¦ Р’СЃРµРіРѕ РїСЂРµРґСѓРїСЂРµР¶РґРµРЅРёР№: {profile['warn']}\n\n"
-        "в•°в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв•Ї"
+        "╭─ 🚨 𝓝𝓸𝓽𝓲𝓬𝓮 ─╮\n\n"
+        "❗️Вы получили предупреждение от своего администратора.\n\n"
+        f"✦ Причина: {reason}\n"
+        f"✦ Всего предупреждений: {profile['warn']}\n\n"
+        "╰────────────────╯"
     )
     try:
         await context.bot.send_message(chat_id=int(request_user_id), text=user_text)
@@ -3006,7 +3006,7 @@ async def handle_warn_reason_message(update: Update, context: ContextTypes.DEFAU
 
 async def admin_decline_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not _can_use_moderation_commands(context, str(update.effective_user.id)):
-        await update.callback_query.answer("Р”РµР№СЃС‚РІРёРµ РґРѕСЃС‚СѓРїРЅРѕ С‚РѕР»СЊРєРѕ Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂР°Рј 2 РєР°С‚РµРіРѕСЂРёРё Рё РІС‹С€Рµ.", show_alert=True)
+        await update.callback_query.answer("Действие доступно только администраторам 2 категории и выше.", show_alert=True)
         return
     await update.callback_query.answer()
     data = update.callback_query.data  # e.g. "decline_user_12345"
@@ -3019,11 +3019,11 @@ async def admin_decline_callback(update: Update, context: ContextTypes.DEFAULT_T
     topic_id = getattr(update.callback_query.message, "message_thread_id", None)
     active = context.application.bot_data.get("active_chats", {}).get(str(request_user_id))
     if not active or not active.get("active"):
-        await update.callback_query.answer("РўРµРјР° Р±РѕР»СЊС€Рµ РЅРµР°РєС‚СѓР°Р»СЊРЅР°", show_alert=True)
+        await update.callback_query.answer("Тема больше неактуальна", show_alert=True)
         return
     active_topic_id = active.get("topic_id")
     if topic_id is not None and active_topic_id is not None and str(topic_id) != str(active_topic_id):
-        await update.callback_query.answer("РўРµРјР° Р±РѕР»СЊС€Рµ РЅРµР°РєС‚СѓР°Р»СЊРЅР°", show_alert=True)
+        await update.callback_query.answer("Тема больше неактуальна", show_alert=True)
         return
 
     chat_id = update.effective_chat.id
@@ -3041,12 +3041,12 @@ async def admin_decline_callback(update: Update, context: ContextTypes.DEFAULT_T
             prompt = await context.bot.send_message(
                 chat_id=chat_id,
                 message_thread_id=thread_id,
-                text="рџ’¬РџРѕР¶Р°Р»СѓР№СЃС‚Р°, СѓРєР°Р¶РёС‚Рµ РїСЂРёС‡РёРЅСѓ РїРѕС‡РµРјСѓ РІС‹ СЃРѕР±РёСЂР°РµС‚РµСЃСЊ РѕС‚РєР°Р·Р°С‚СЊСЃСЏ РѕС‚ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ",
+                text="💬Пожалуйста, укажите причину почему вы собираетесь отказаться от пользователя",
             )
         else:
             prompt = await context.bot.send_message(
                 chat_id=chat_id,
-                text="рџ’¬РџРѕР¶Р°Р»СѓР№СЃС‚Р°, СѓРєР°Р¶РёС‚Рµ РїСЂРёС‡РёРЅСѓ РїРѕС‡РµРјСѓ РІС‹ СЃРѕР±РёСЂР°РµС‚РµСЃСЊ РѕС‚РєР°Р·Р°С‚СЊСЃСЏ РѕС‚ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ",
+                text="💬Пожалуйста, укажите причину почему вы собираетесь отказаться от пользователя",
             )
     except Exception as e:
         logging.exception("admin_decline_callback failed to send prompt: %s", e)
@@ -3072,7 +3072,7 @@ async def admin_decline_callback(update: Update, context: ContextTypes.DEFAULT_T
 
 async def admin_decline_request_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not _can_use_moderation_commands(context, str(update.effective_user.id)):
-        await update.callback_query.answer("Р”РµР№СЃС‚РІРёРµ РґРѕСЃС‚СѓРїРЅРѕ С‚РѕР»СЊРєРѕ Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂР°Рј 2 РєР°С‚РµРіРѕСЂРёРё Рё РІС‹С€Рµ.", show_alert=True)
+        await update.callback_query.answer("Действие доступно только администраторам 2 категории и выше.", show_alert=True)
         return
     await update.callback_query.answer()
     data = update.callback_query.data  # e.g. "decline_request_12345"
@@ -3085,11 +3085,11 @@ async def admin_decline_request_callback(update: Update, context: ContextTypes.D
     app_requests = context.application.bot_data.setdefault("admin_requests", {})
     req_check = app_requests.get(str(request_user_id))
     if not req_check:
-        await update.callback_query.answer("РўРµРјР° Р±РѕР»СЊС€Рµ РЅРµР°РєС‚СѓР°Р»СЊРЅР°", show_alert=True)
+        await update.callback_query.answer("Тема больше неактуальна", show_alert=True)
         return
     req_topic_id = req_check.get("topic_id")
     if topic_id is not None and req_topic_id is not None and str(topic_id) != str(req_topic_id):
-        await update.callback_query.answer("РўРµРјР° Р±РѕР»СЊС€Рµ РЅРµР°РєС‚СѓР°Р»СЊРЅР°", show_alert=True)
+        await update.callback_query.answer("Тема больше неактуальна", show_alert=True)
         return
 
     chat_id = update.effective_chat.id
@@ -3103,19 +3103,19 @@ async def admin_decline_request_callback(update: Update, context: ContextTypes.D
 
     try:
         cancel_button = InlineKeyboardMarkup(
-            [[InlineKeyboardButton("РѕС‚РјРµРЅР°", callback_data=f"cancel_decline_request_{request_user_id}")]]
+            [[InlineKeyboardButton("отмена", callback_data=f"cancel_decline_request_{request_user_id}")]]
         )
         if thread_id is not None:
             prompt = await context.bot.send_message(
                 chat_id=chat_id,
                 message_thread_id=thread_id,
-                text="в„№пёЏР’РІРµРґРёС‚Рµ РїСЂРёС‡РёРЅСѓ С‡С‚РѕР±С‹ РѕС‚РєР°Р·Р°С‚СЊ Р·Р°РїСЂРѕСЃ РІ РїРѕРёСЃРєРµ Р°РґРјРёРЅР°",
+                text="ℹ️Введите причину чтобы отказать запрос в поиске админа",
                 reply_markup=cancel_button,
             )
         else:
             prompt = await context.bot.send_message(
                 chat_id=chat_id,
-                text="в„№пёЏР’РІРµРґРёС‚Рµ РїСЂРёС‡РёРЅСѓ С‡С‚РѕР±С‹ РѕС‚РєР°Р·Р°С‚СЊ Р·Р°РїСЂРѕСЃ РІ РїРѕРёСЃРєРµ Р°РґРјРёРЅР°",
+                text="ℹ️Введите причину чтобы отказать запрос в поиске админа",
                 reply_markup=cancel_button,
             )
     except Exception as e:
@@ -3141,7 +3141,7 @@ async def admin_decline_request_callback(update: Update, context: ContextTypes.D
 
 
 async def cancel_decline_request_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.callback_query.answer("РћС‚РјРµРЅР°")
+    await update.callback_query.answer("Отмена")
     data = update.callback_query.data
     parts = data.split("_")
     if len(parts) < 4:
@@ -3223,12 +3223,12 @@ async def handle_decline_input_message(update: Update, context: ContextTypes.DEF
                 await context.bot.send_message(
                     chat_id=chat_id,
                     message_thread_id=thread_id,
-                    text="РўР°РєРѕРµ РЅРµР»СЊР·СЏ РЅР°Р·РІР°С‚СЊ РїСЂРёС‡РёРЅРѕР№. РћС‚РїСЂР°РІСЊС‚Рµ С‚РѕР»СЊРєРѕ С‚РµРєСЃС‚ Р±РµР· СЃСЃС‹Р»РѕРє.",
+                    text="Такое нельзя назвать причиной. Отправьте только текст без ссылок.",
                 )
             else:
                 await context.bot.send_message(
                     chat_id=chat_id,
-                    text="РўР°РєРѕРµ РЅРµР»СЊР·СЏ РЅР°Р·РІР°С‚СЊ РїСЂРёС‡РёРЅРѕР№. РћС‚РїСЂР°РІСЊС‚Рµ С‚РѕР»СЊРєРѕ С‚РµРєСЃС‚ Р±РµР· СЃСЃС‹Р»РѕРє.",
+                    text="Такое нельзя назвать причиной. Отправьте только текст без ссылок.",
                 )
         except Exception:
             pass
@@ -3266,7 +3266,7 @@ async def handle_decline_input_message(update: Update, context: ContextTypes.DEF
                 await context.bot.edit_forum_topic(
                     chat_id=chat_id,
                     message_thread_id=topic_id,
-                    name=f"{username} (Р—Р°РєСЂС‹С‚Рѕ СЃРёСЃС‚РµРјРѕР№)",
+                    name=f"{username} (Закрыто системой)",
                 )
             except Exception:
                 pass
@@ -3280,7 +3280,7 @@ async def handle_decline_input_message(update: Update, context: ContextTypes.DEF
                 await context.bot.send_message(
                     chat_id=chat_id,
                     message_thread_id=topic_id,
-                    text="вњ…РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ СѓСЃРїРµС€РЅРѕ РїРѕР»СѓС‡РёР» СѓРІРµРґРѕРјР»РµРЅРёРµ Рѕ РѕС‚РєР°Р·Рµ РІ РїРѕРёСЃРєРµ Р°РґРјРёРЅР°",
+                    text="✅Пользователь успешно получил уведомление о отказе в поиске админа",
                 )
             except Exception:
                 pass
@@ -3288,7 +3288,7 @@ async def handle_decline_input_message(update: Update, context: ContextTypes.DEF
             try:
                 await context.bot.send_message(
                     chat_id=chat_id,
-                    text="вњ…РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ СѓСЃРїРµС€РЅРѕ РїРѕР»СѓС‡РёР» СѓРІРµРґРѕРјР»РµРЅРёРµ Рѕ РѕС‚РєР°Р·Рµ РІ РїРѕРёСЃРєРµ Р°РґРјРёРЅР°",
+                    text="✅Пользователь успешно получил уведомление о отказе в поиске админа",
                 )
             except Exception:
                 pass
@@ -3296,7 +3296,7 @@ async def handle_decline_input_message(update: Update, context: ContextTypes.DEF
         try:
             await context.bot.send_message(
                 chat_id=LOG_CHAT_ID,
-                text=f'в­•пёЏРђРґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂ "{pending.get("admin_username")}" Р·Р°РєСЂС‹Р» Р·Р°РїСЂРѕСЃ Рѕ РїРѕРёСЃРєРµ Р°РґРјРёРЅР° РїРѕР»СЊР·РѕРІР°С‚РµР»СЋ "{username}"',
+                text=f'⭕️Администратор "{pending.get("admin_username")}" закрыл запрос о поиске админа пользователю "{username}"',
             )
         except Exception:
             pass
@@ -3305,11 +3305,11 @@ async def handle_decline_input_message(update: Update, context: ContextTypes.DEF
             await context.bot.send_message(
                 chat_id=int(request_user_id),
                 text=(
-                    "рџЊё **Р—Р°РїСЂРѕСЃ Р±С‹Р» РѕС‚РєР°Р·Р°РЅ**\n\n"
-                    "Рљ СЃРѕР¶Р°Р»РµРЅРёСЋ, СЃРµР№С‡Р°СЃ РјС‹ РЅРµ РјРѕР¶РµРј РЅР°Р№С‚Рё РґР»СЏ Р’Р°СЃ Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂР°.\n\n"
-                    f'Р­С‚Рѕ РЅРµ СЃРІСЏР·Р°РЅРѕ СЃ Р’Р°РјРё Р»РёС‡РЅРѕ вЂ” РїСЂРѕСЃС‚Рѕ РІ РґР°РЅРЅС‹Р№ РјРѕРјРµРЅС‚ РІР°С€ Р·Р°РїСЂРѕСЃ Р±С‹Р» РѕС‚РєР»РѕРЅРµРЅ РїРѕ РїСЂРёС‡РёРЅРµ "{text_reason}"\n\n'
-                    "РџРѕР¶Р°Р»СѓР№СЃС‚Р°, РїРѕРїСЂРѕР±СѓР№С‚Рµ СЃРЅРѕРІР° С‡РµСЂРµР· РЅРµРєРѕС‚РѕСЂРѕРµ РІСЂРµРјСЏ. Р’РѕР·РјРѕР¶РЅРѕ, С‡РµСЂРµР· С‡Р°СЃ РёР»Рё 2.\n\n"
-                    "Р‘РµСЂРµРіРёС‚Рµ СЃРµР±СЏ. РњС‹ РїРѕРјРЅРёРј Рѕ Р’Р°СЃ! рџ’›"
+                    "🌸 **Запрос был отказан**\n\n"
+                    "К сожалению, сейчас мы не можем найти для Вас администратора.\n\n"
+                    f'Это не связано с Вами лично — просто в данный момент ваш запрос был отклонен по причине "{text_reason}"\n\n'
+                    "Пожалуйста, попробуйте снова через некоторое время. Возможно, через час или 2.\n\n"
+                    "Берегите себя. Мы помним о Вас! 💛"
                 ),
                 parse_mode=ParseMode.MARKDOWN,
             )
@@ -3318,7 +3318,7 @@ async def handle_decline_input_message(update: Update, context: ContextTypes.DEF
 
         try:
             kb = _build_main_menu_keyboard(context, int(request_user_id), profile.get("username"))
-            await context.bot.send_message(chat_id=int(request_user_id), text="Р’С‹Р±РµСЂРёС‚Рµ РґРµР№СЃС‚РІРёРµ РІ РјРµРЅСЋ РЅРёР¶Рµ:", reply_markup=kb)
+            await context.bot.send_message(chat_id=int(request_user_id), text="Выберите действие в меню ниже:", reply_markup=kb)
         except Exception:
             pass
 
@@ -3341,12 +3341,12 @@ async def handle_decline_input_message(update: Update, context: ContextTypes.DEF
             await context.bot.send_message(
                 chat_id=chat_id,
                 message_thread_id=thread_id,
-                text="вњ…Р’Р°С€ Р·Р°РїСЂРѕСЃ РЅР° РѕС‚РєР°Р· РѕС‚ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ Р±С‹Р» РѕС‚РїСЂР°РІР»РµРЅ СЃС‚Р°СЂС€РµР№ Р°РґРјРёРЅРёСЃС‚СЂР°С†РёРё, РѕР¶РёРґР°Р№С‚Рµ.",
+                text="✅Ваш запрос на отказ от пользователя был отправлен старшей администрации, ожидайте.",
             )
         else:
             await context.bot.send_message(
                 chat_id=chat_id,
-                text="вњ…Р’Р°С€ Р·Р°РїСЂРѕСЃ РЅР° РѕС‚РєР°Р· РѕС‚ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ Р±С‹Р» РѕС‚РїСЂР°РІР»РµРЅ СЃС‚Р°СЂС€РµР№ Р°РґРјРёРЅРёСЃС‚СЂР°С†РёРё, РѕР¶РёРґР°Р№С‚Рµ.",
+                text="✅Ваш запрос на отказ от пользователя был отправлен старшей администрации, ожидайте.",
             )
     except Exception:
         pass
@@ -3356,15 +3356,15 @@ async def handle_decline_input_message(update: Update, context: ContextTypes.DEF
     review_id = str(seq)
 
     review_text = (
-        f'вљ пёЏР—Р°РїСЂРѕСЃ РЅР° РѕС‚РєР°Р· РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ РѕС‚ "{pending.get("admin_username")}"\n\n'
-        f'РџСЂРёС€Р»Рѕ СѓРІРµРґРѕРјР»РµРЅРёРµ, С‡С‚Рѕ Р°РґРјРёРЅ "{pending.get("admin_username")}" С…РѕС‡РµС‚ РѕС‚РєР°Р·Р°С‚СЊСЃСЏ РѕС‚ СЃРІРѕРµРіРѕ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ "{pending.get("username")}" РїРѕ РїСЂРёС‡РёРЅРµ "{pending.get("reason_otkaz_ot_username")}".\n\n'
-        "Р’С‹Р±РµСЂРёС‚Рµ РєРЅРѕРїРєСѓ РЅРёР¶Рµв¬‡пёЏ"
+        f'⚠️Запрос на отказ пользователя от "{pending.get("admin_username")}"\n\n'
+        f'Пришло уведомление, что админ "{pending.get("admin_username")}" хочет отказаться от своего пользователя "{pending.get("username")}" по причине "{pending.get("reason_otkaz_ot_username")}".\n\n'
+        "Выберите кнопку ниже⬇️"
     )
     review_kb = InlineKeyboardMarkup(
         [
             [
-                InlineKeyboardButton("рџџўРћРґРѕР±СЂРёС‚СЊ", callback_data=f"approve_decline_{review_id}"),
-                InlineKeyboardButton("рџ”ґРћС‚РєР°Р·Р°С‚СЊ", callback_data=f"reject_decline_{review_id}"),
+                InlineKeyboardButton("🟢Одобрить", callback_data=f"approve_decline_{review_id}"),
+                InlineKeyboardButton("🔴Отказать", callback_data=f"reject_decline_{review_id}"),
             ]
         ]
     )
@@ -3407,7 +3407,7 @@ async def approve_decline_callback(update: Update, context: ContextTypes.DEFAULT
     if not review:
         return
 
-    approved_text = review.get("review_text", "") + "\n\nРћРґРѕР±СЂРµРЅРѕрџџ©"
+    approved_text = review.get("review_text", "") + "\n\nОдобрено🟩"
     try:
         await update.callback_query.message.edit_text(approved_text)
     except Exception as e:
@@ -3416,7 +3416,7 @@ async def approve_decline_callback(update: Update, context: ContextTypes.DEFAULT
     chat_id = review.get("chat_id")
     thread_id = review.get("thread_id")
     try:
-        msg = f'рџ’”Р—Р°РїСЂРѕСЃ РЅР° РѕС‚РєР°Р· РѕС‚ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ "{review.get("username")}" Р±С‹Р» СѓСЃРїРµС€РЅРѕ РѕРґРѕР±СЂРµРЅ СЂСѓРєРѕРІРѕРґСЃС‚РІРѕРј Р±РѕС‚Р°, РѕРЅ Р±РѕР»СЊС€Рµ РЅРµ Р±СѓРґРµС‚ РїРѕР»СѓС‡Р°С‚СЊ РѕС‚ РІР°СЃ СЃРѕРѕР±С‰РµРЅРёРµ.'
+        msg = f'💔Запрос на отказ от пользователя "{review.get("username")}" был успешно одобрен руководством бота, он больше не будет получать от вас сообщение.'
         if thread_id is not None:
             await context.bot.send_message(chat_id=chat_id, message_thread_id=thread_id, text=msg)
         else:
@@ -3446,7 +3446,7 @@ async def approve_decline_callback(update: Update, context: ContextTypes.DEFAULT
             await context.bot.edit_forum_topic(
                 chat_id=chat_id,
                 message_thread_id=topic_id,
-                name=f'{review.get("username") or f"id{user_id}"} (Р—Р°РєСЂС‹С‚Рѕ Р°РґРјРёРЅРѕРј)',
+                name=f'{review.get("username") or f"id{user_id}"} (Закрыто админом)',
             )
         except Exception as e:
             logging.exception("approve_decline_callback topic rename failed: %s", e)
@@ -3462,17 +3462,17 @@ async def approve_decline_callback(update: Update, context: ContextTypes.DEFAULT
         pass
 
     user_text = (
-        "рџ™Џ **РђРґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂ РѕС‚РєР°Р·Р°Р»СЃСЏ РѕС‚ РІР°СЃ.**\n\n"
-        "Рљ СЃРѕР¶Р°Р»РµРЅРёСЋ, РЅР°С€ СЃРїРµС†РёР°Р»РёСЃС‚ РЅРµ СЃРјРѕРі РїСЂРѕРґРѕР»Р¶РёС‚СЊ РѕР±С‰РµРЅРёРµ СЃ Р’Р°РјРё.\n\n"
-        "Р­С‚Рѕ СЃР»СѓС‡Р°РµС‚СЃСЏ РІ СЂР°Р±РѕС‚Рµ - РёРЅРѕРіРґР° РїСЂРѕСЃС‚Рѕ РЅРµ СЃРѕРІРїР°Р» С…Р°СЂР°РєС‚РµСЂ, РёР»Рё РІС‹ РЅР°СЂСѓС€Р°Р»Рё РїСЂР°РІРёР»Р° Р°РЅРѕРЅРёРјРЅРѕСЃС‚Рё РёР»Рё РґСЂСѓРіРѕРµ.\n\n"
-        "РќРµ РїСЂРёРЅРёРјР°Р№С‚Рµ СЌС‚Рѕ РЅР° СЃРІРѕР№ СЃС‡С‘С‚. Р’С‹ вЂ” Р·Р°РјРµС‡Р°С‚РµР»СЊРЅС‹Р№ СЃРѕР±РµСЃРµРґРЅРёРє, Рё РјС‹ СѓРІРµСЂРµРЅС‹, С‡С‚Рѕ РґСЂСѓРіРѕР№ Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂ СЃ СЂР°РґРѕСЃС‚СЊСЋ Р’Р°СЃ РїСЂРёРјРµС‚.\n\n"
-        "Р’С‹ РІСЃРµ РµС‰Рµ РјРѕР¶РµС‚Рµ РЅР°Р№С‚Рё РґСЂСѓРіРѕРіРѕ Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂР° РЅР° СЃРІРѕР№ РІРєСѓСЃ.\n\n"
-        "вќ¤пёЏ РњС‹ РІСЃРµРіРґР° СЂСЏРґРѕРј."
+        "🙏 **Администратор отказался от вас.**\n\n"
+        "К сожалению, наш специалист не смог продолжить общение с Вами.\n\n"
+        "Это случается в работе - иногда просто не совпал характер, или вы нарушали правила анонимности или другое.\n\n"
+        "Не принимайте это на свой счёт. Вы — замечательный собеседник, и мы уверены, что другой администратор с радостью Вас примет.\n\n"
+        "Вы все еще можете найти другого администратора на свой вкус.\n\n"
+        "❤️ Мы всегда рядом."
     )
     try:
         kb = _build_main_menu_keyboard(context, int(user_id), review.get("username"))
         await context.bot.send_message(chat_id=int(user_id), text=user_text, parse_mode=ParseMode.MARKDOWN, reply_markup=kb)
-        await context.bot.send_message(chat_id=int(user_id), text="Р’С‹Р±РµСЂРёС‚Рµ РґРµР№СЃС‚РІРёРµ РІ РјРµРЅСЋ РЅРёР¶Рµ:", reply_markup=kb)
+        await context.bot.send_message(chat_id=int(user_id), text="Выберите действие в меню ниже:", reply_markup=kb)
     except Exception as e:
         logging.exception("approve_decline_callback notify user failed: %s", e)
 
@@ -3493,14 +3493,14 @@ async def reject_decline_callback(update: Update, context: ContextTypes.DEFAULT_
     if not review:
         return
 
-    rejected_text = review.get("review_text", "") + "\n\nРћС‚РєР°Р·Р°РЅРѕрџџҐ"
+    rejected_text = review.get("review_text", "") + "\n\nОтказано🟥"
     try:
         await update.callback_query.message.edit_text(rejected_text)
     except Exception as e:
         logging.exception("reject_decline_callback edit failed: %s", e)
 
     try:
-        msg = f'вќЊР—Р°РїСЂРѕСЃ РЅР° РѕС‚РєР°Р· РѕС‚ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ "{review.get("username")}" РѕС‚РєР»РѕРЅРµРЅ СЂСѓРєРѕРІРѕРґСЃС‚РІРѕРј.'
+        msg = f'❌Запрос на отказ от пользователя "{review.get("username")}" отклонен руководством.'
         if review.get("thread_id") is not None:
             await context.bot.send_message(chat_id=review.get("chat_id"), message_thread_id=review.get("thread_id"), text=msg)
         else:
@@ -3525,7 +3525,7 @@ async def unknown_chat_guard(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
 
     try:
-        await context.bot.send_message(chat_id=chat.id, text="рџљ«РЇ РЅРµ РјРѕРіСѓ Р·РґРµСЃСЊ РЅР°С…РѕРґРёС‚СЊСЃСЏ, РїРѕРєРёРґР°СЋ С‡Р°С‚..")
+        await context.bot.send_message(chat_id=chat.id, text="🚫Я не могу здесь находиться, покидаю чат..")
     except Exception:
         pass
 
@@ -3546,7 +3546,7 @@ async def dump_maps_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         if requester.id != OWNER_ID:
             try:
-                await update.message.reply_text("Р”РѕСЃС‚СѓРї Р·Р°РїСЂРµС‰С‘РЅ.")
+                await update.message.reply_text("Доступ запрещён.")
             except Exception:
                 pass
             return
@@ -3582,9 +3582,9 @@ async def dump_maps_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             try:
                 await context.bot.send_message(chat_id=LOG_CHAT_ID, text=text)
-                await update.message.reply_text(f"РќРµ СѓРґР°Р»РѕСЃСЊ РѕС‚РїСЂР°РІРёС‚СЊ Р»РёС‡РЅРѕРµ СЃРѕРѕР±С‰РµРЅРёРµ. Р”Р°РјРї РѕС‚РїСЂР°РІР»РµРЅ РІ Р»РѕРі-С‡Р°С‚ {LOG_CHAT_ID}.")
+                await update.message.reply_text(f"Не удалось отправить личное сообщение. Дамп отправлен в лог-чат {LOG_CHAT_ID}.")
             except Exception:
-                await update.message.reply_text("РќРµ СѓРґР°Р»РѕСЃСЊ РѕС‚РїСЂР°РІРёС‚СЊ РґР°РјРї РєР°СЂС‚ РЅРё РІ Р»РёС‡РєСѓ, РЅРё РІ Р»РѕРі-С‡Р°С‚.")
+                await update.message.reply_text("Не удалось отправить дамп карт ни в личку, ни в лог-чат.")
     except Exception as e:
         logging.exception("dump_maps_handler failed: %s", e)
 
@@ -3594,12 +3594,12 @@ async def add_rules_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.id != LOG_CHAT_ID:
         return
     if not update.effective_user or not _is_topic_admin(context, str(update.effective_user.id)):
-        await update.message.reply_text("РљРѕРјР°РЅРґР° РґРѕСЃС‚СѓРїРЅР° С‚РѕР»СЊРєРѕ Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂР°Рј 4 РєР°С‚РµРіРѕСЂРёРё Рё РІС‹С€Рµ.")
+        await update.message.reply_text("Команда доступна только администраторам 4 категории и выше.")
         return
 
     existing = context.application.bot_data.get("global_rules_text")
     if existing:
-        await update.message.reply_text("РџСЂР°РІРёР»Р° СѓР¶Рµ СЃСѓС‰РµСЃС‚РІСѓСЋС‚, С‡С‚РѕР±С‹ РёС… СѓРґР°Р»РёС‚СЊ РЅР°РїРёС€РёС‚Рµ /delrules")
+        await update.message.reply_text("Правила уже существуют, чтобы их удалить напишите /delrules")
         return
 
     raw_text = update.message.text or ""
@@ -3610,11 +3610,11 @@ async def add_rules_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         rules_text = rules_text[1:]
 
     if not rules_text.strip():
-        await update.message.reply_text("РЈРєР°Р¶РёС‚Рµ С‚РµРєСЃС‚ РїСЂР°РІРёР» РїРѕСЃР»Рµ РєРѕРјР°РЅРґС‹ /addrules")
+        await update.message.reply_text("Укажите текст правил после команды /addrules")
         return
 
     context.application.bot_data["global_rules_text"] = rules_text
-    await update.message.reply_text("рџ“ЌРџСЂР°РІРёР»Р° СѓСЃРїРµС€РЅРѕ СЃРјРµРЅРµРЅС‹")
+    await update.message.reply_text("📍Правила успешно сменены")
 
     rules_thread_id = context.application.bot_data.get("rules_thread_id", RULES_THREAD_ID)
 
@@ -3630,7 +3630,7 @@ async def add_rules_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         # Repair rules topic automatically when stored thread id is stale.
         try:
-            new_topic = await context.bot.create_forum_topic(chat_id=RULES_CHAT_ID, name="РџСЂР°РІРёР»Р°")
+            new_topic = await context.bot.create_forum_topic(chat_id=RULES_CHAT_ID, name="Правила")
             rules_thread_id = new_topic.message_thread_id
             context.application.bot_data["rules_thread_id"] = rules_thread_id
             sent = await context.bot.send_message(
@@ -3661,7 +3661,7 @@ async def del_rule_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.id != LOG_CHAT_ID:
         return
     if not update.effective_user or not _is_topic_admin(context, str(update.effective_user.id)):
-        await update.message.reply_text("РљРѕРјР°РЅРґР° РґРѕСЃС‚СѓРїРЅР° С‚РѕР»СЊРєРѕ Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂР°Рј 4 РєР°С‚РµРіРѕСЂРёРё Рё РІС‹С€Рµ.")
+        await update.message.reply_text("Команда доступна только администраторам 4 категории и выше.")
         return
 
     existing_rules_text = context.application.bot_data.get("global_rules_text")
@@ -3684,7 +3684,7 @@ async def del_rule_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logging.exception("del_rule_handler delete_forum_topic failed: %s", e)
 
     try:
-        new_topic = await context.bot.create_forum_topic(chat_id=RULES_CHAT_ID, name="РџСЂР°РІРёР»Р°")
+        new_topic = await context.bot.create_forum_topic(chat_id=RULES_CHAT_ID, name="Правила")
         context.application.bot_data["rules_thread_id"] = new_topic.message_thread_id
     except Exception as e:
         logging.exception("del_rule_handler create_forum_topic failed: %s", e)
@@ -3738,7 +3738,7 @@ async def admin_group_message_handler(update: Update, context: ContextTypes.DEFA
             await context.bot.send_message(
                 chat_id=update.effective_chat.id,
                 message_thread_id=topic_id,
-                text=f"в›”пёЏР’С‹ РЅР°С…РѕРґРёС‚РµСЃСЊ РІ РјСѓС‚Рµ РµС‰Рµ {remaining_minutes} РјРёРЅ. РЎРѕРѕР±С‰РµРЅРёРµ РЅРµ РѕС‚РїСЂР°РІР»РµРЅРѕ.",
+                text=f"⛔️Вы находитесь в муте еще {remaining_minutes} мин. Сообщение не отправлено.",
             )
         except Exception:
             pass
@@ -3816,20 +3816,20 @@ async def admin_group_message_handler(update: Update, context: ContextTypes.DEFA
             await context.bot.send_message(
                 chat_id=update.effective_chat.id,
                 message_thread_id=topic_id,
-                text="вљ пёЏРЎРѕРѕР±С‰РµРЅРёРµ СЏРІР»СЏРµС‚СЃСЏ РїРѕРґРѕР·СЂРёС‚РµР»СЊРЅС‹Рј Рё РѕС‚РїСЂР°РІР»РµРЅРѕ РЅР° РїСЂРѕРІРµСЂРєСѓ СЃС‚Р°СЂС€РµР№ Р°РґРјРёРЅРёСЃС‚СЂР°С†РёРё.",
+                text="⚠️Сообщение является подозрительным и отправлено на проверку старшей администрации.",
             )
         except Exception:
             pass
 
         review_text = (
-            "рџ’¬РџРѕРґРѕР·СЂРёС‚РµР»СЊРЅРѕРµ СЃРѕРѕР±С‰РµРЅРёРµ\n\n"
-            f'РђРґРјРёРЅ "{admin_username}" РїРѕРїС‹С‚Р°Р»СЃСЏ РѕС‚РїСЂР°РІРёС‚СЊ СЃРѕРѕР±С‰РµРЅРёРµ РІ С‚РµРјСѓ "{topic_link}" СЃ С‚РµРєСЃС‚РѕРј "{suspicious_text}"\n\n'
-            "Р’С‹Р±РµСЂРёС‚Рµ РґРµР№СЃС‚РІРёРµ РЅРёР¶Рµв¬‡пёЏ"
+            "💬Подозрительное сообщение\n\n"
+            f'Админ "{admin_username}" попытался отправить сообщение в тему "{topic_link}" с текстом "{suspicious_text}"\n\n'
+            "Выберите действие ниже⬇️"
         )
         review_kb = InlineKeyboardMarkup(
             [[
-                InlineKeyboardButton("рџџўРћС‚РїСЂР°РІРёС‚СЊ СЃРѕРѕР±С‰РµРЅРёРµ", callback_data=f"susp_admin_allow_{review_id}"),
-                InlineKeyboardButton("рџ”ґРќРµ РѕС‚РїСЂР°РІР»СЏС‚СЊ СЃРѕРѕР±С‰РµРЅРёРµ", callback_data=f"susp_admin_deny_{review_id}"),
+                InlineKeyboardButton("🟢Отправить сообщение", callback_data=f"susp_admin_allow_{review_id}"),
+                InlineKeyboardButton("🔴Не отправлять сообщение", callback_data=f"susp_admin_deny_{review_id}"),
             ]]
         )
         try:
@@ -3907,22 +3907,22 @@ async def warn_user_cancel_callback(update: Update, context: ContextTypes.DEFAUL
     user_id = review.get("user_id")
     profile = _ensure_profile(context, str(user_id), review.get("username") or f"id{user_id}")
     profile["warn"] += 1
-    profile["reason"] = "РќР°СЂСѓС€РµРЅРёРµ РїСЂР°РІРёР» РѕС‚РєР°Р·Р° РѕС‚ Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂР° РѕС‚ СЂСѓРєРѕРІРѕРґСЃС‚РІР° Р±РѕС‚Р°"
+    profile["reason"] = "Нарушение правил отказа от администратора от руководства бота"
     await enforce_autoban_if_needed(context, str(user_id), review.get("username"))
 
     try:
         await context.bot.send_message(
             chat_id=int(user_id),
-            text=f'вќ—пёЏР’С‹ РїРѕР»СѓС‡РёР»Рё РїСЂРµРґСѓРїСЂРµР¶РґРµРЅРёРµ СЃ РїСЂРёС‡РёРЅРѕР№ "РќР°СЂСѓС€РµРЅРёРµ РїСЂР°РІРёР» РѕС‚РєР°Р·Р° РѕС‚ Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂР°" РѕС‚ СЂСѓРєРѕРІРѕРґСЃС‚РІР° Р±РѕС‚Р°. РўРµРїРµСЂСЊ Сѓ РІР°СЃ РїСЂРµРґСѓРїСЂРµР¶РґРµРЅРёР№ {profile["warn"]}',
+            text=f'❗️Вы получили предупреждение с причиной "Нарушение правил отказа от администратора" от руководства бота. Теперь у вас предупреждений {profile["warn"]}',
         )
     except Exception as e:
         logging.exception("warn_user_cancel_callback failed to notify user: %s", e)
 
     edited_text = (
-        "рџџҐРћС‚РєР°Р· РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ РѕС‚ Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂР°\n\n"
-        f'РџСЂРёС€Р»Рѕ СѓРІРµРґРѕРјР»РµРЅРёРµ, С‡С‚Рѕ РїРѕР»СЊР·РѕРІР°С‚РµР»СЊ РЅР°С€РµРіРѕ Р±РѕС‚Р° "{review.get("username")}" РѕС‚РєР°Р·Р°Р»СЃСЏ РѕС‚ Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂР° "{review.get("admin_username")}" '
-        f'РїРѕ РїСЂРёС‡РёРЅРµ "{review.get("reason_otkazik")}"\n\n'
-        "РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ РїРѕР»СѓС‡РёР» РїСЂРµРґСѓРїСЂРµР¶РґРµРЅРёРµвњ…"
+        "🟥Отказ пользователя от администратора\n\n"
+        f'Пришло уведомление, что пользователь нашего бота "{review.get("username")}" отказался от администратора "{review.get("admin_username")}" '
+        f'по причине "{review.get("reason_otkazik")}"\n\n'
+        "Пользователь получил предупреждение✅"
     )
     try:
         await update.callback_query.message.edit_text(edited_text)
@@ -3964,7 +3964,7 @@ async def suspicious_admin_allow_callback(update: Update, context: ContextTypes.
             session["suspicious_bypass_admin_to_user_until"] = time.time() + 15 * 60
             context.application.bot_data["total_admin_replies"] = int(context.application.bot_data.get("total_admin_replies", 0) or 0) + 1
         try:
-            await update.callback_query.message.edit_text((update.callback_query.message.text or "") + "\n\nвњ…Р Р°Р·СЂРµС€РµРЅРѕ")
+            await update.callback_query.message.edit_text((update.callback_query.message.text or "") + "\n\n✅Разрешено")
         except Exception:
             pass
 
@@ -3984,13 +3984,13 @@ async def suspicious_admin_deny_callback(update: Update, context: ContextTypes.D
         await context.bot.send_message(
             chat_id=review.get("chat_id"),
             message_thread_id=review.get("topic_id"),
-            text="в›”РџСЂРѕРІРµСЂРєР° РЅРµ РїСЂРѕР№РґРµРЅР°, СЃРѕРѕР±С‰РµРЅРёРµ РЅРµ РѕС‚РїСЂР°РІРёС‚СЃСЏ РїРѕР»СЊР·РѕРІР°С‚РµР»СЋ РІ Р›РЎ.",
+            text="⛔Проверка не пройдена, сообщение не отправится пользователю в ЛС.",
         )
     except Exception:
         pass
 
     try:
-        await update.callback_query.message.edit_text((update.callback_query.message.text or "") + "\n\nвќЊРќРµ РѕС‚РїСЂР°РІР»РµРЅРѕ")
+        await update.callback_query.message.edit_text((update.callback_query.message.text or "") + "\n\n❌Не отправлено")
     except Exception:
         pass
 
@@ -4034,13 +4034,13 @@ async def suspicious_user_allow_callback(update: Update, context: ContextTypes.D
         try:
             await context.bot.send_message(
                 chat_id=int(review.get("user_id")),
-                text="вњ…РџСЂРѕРІРµСЂРєР° РїСЂРѕР№РґРµРЅР°, СЃРѕРѕР±С‰РµРЅРёРµ РѕС‚РїСЂР°РІР»РµРЅРѕ Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂСѓ.",
+                text="✅Проверка пройдена, сообщение отправлено администратору.",
             )
         except Exception:
             pass
 
         try:
-            await update.callback_query.message.edit_text((update.callback_query.message.text or "") + "\n\nвњ…Р Р°Р·СЂРµС€РµРЅРѕ")
+            await update.callback_query.message.edit_text((update.callback_query.message.text or "") + "\n\n✅Разрешено")
         except Exception:
             pass
 
@@ -4059,13 +4059,13 @@ async def suspicious_user_deny_callback(update: Update, context: ContextTypes.DE
     try:
         await context.bot.send_message(
             chat_id=int(review.get("user_id")),
-            text="в›”РЎРѕРѕР±С‰РµРЅРёРµ СЏРІР»СЏРµС‚СЃСЏ РЅР°СЂСѓС€РµРЅРёРµРј Р±РѕС‚Р° Рё РЅРµ Р±С‹Р»Рѕ РѕС‚РїСЂР°РІР»РµРЅРѕ Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂСѓ.",
+            text="⛔Сообщение является нарушением бота и не было отправлено администратору.",
         )
     except Exception:
         pass
 
     try:
-        await update.callback_query.message.edit_text((update.callback_query.message.text or "") + "\n\nвќЊРќРµ РѕС‚РїСЂР°РІР»РµРЅРѕ")
+        await update.callback_query.message.edit_text((update.callback_query.message.text or "") + "\n\n❌Не отправлено")
     except Exception:
         pass
 
@@ -4084,20 +4084,20 @@ async def suspicious_user_warn_callback(update: Update, context: ContextTypes.DE
     user_id = str(review.get("user_id"))
     profile = _ensure_profile(context, user_id, review.get("username") or f"id{user_id}")
     profile["warn"] = int(profile.get("warn", 0) or 0) + 1
-    profile["reason"] = "РџРѕРґРѕР·СЂРёС‚РµР»СЊРЅРѕРµ СЃРѕРѕР±С‰РµРЅРёРµ СЃ С‡СѓР¶РёРј username"
+    profile["reason"] = "Подозрительное сообщение с чужим username"
     await enforce_autoban_if_needed(context, user_id, profile.get("username"))
     _save_profile_record(context, user_id)
 
     try:
         await context.bot.send_message(
             chat_id=int(user_id),
-            text="в›”РЎРѕРѕР±С‰РµРЅРёРµ РЅРµ Р±С‹Р»Рѕ РѕС‚РїСЂР°РІР»РµРЅРѕ Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂСѓ. Р’С‹ РїРѕР»СѓС‡РёР»Рё РїСЂРµРґСѓРїСЂРµР¶РґРµРЅРёРµ.",
+            text="⛔Сообщение не было отправлено администратору. Вы получили предупреждение.",
         )
     except Exception:
         pass
 
     try:
-        await update.callback_query.message.edit_text((update.callback_query.message.text or "") + "\n\nРџРѕР»СЊР·РѕРІР°С‚РµР»СЊ РїРѕР»СѓС‡РёР» РїСЂРµРґСѓРїСЂРµР¶РґРµРЅРёРµ")
+        await update.callback_query.message.edit_text((update.callback_query.message.text or "") + "\n\nПользователь получил предупреждение")
     except Exception:
         pass
 
@@ -4115,7 +4115,7 @@ async def approve_candidate_callback(update: Update, context: ContextTypes.DEFAU
     user_id = str(review.get("user_id"))
     profile = _ensure_profile(context, user_id, review.get("username") or f"id{user_id}")
     profile["admin_level"] = 1
-    profile["admin_rank"] = "РЎС‚Р°Р¶РµСЂ"
+    profile["admin_rank"] = "Стажер"
     profile["admin_candidate"] = False
     profile["admin_candidate_status"] = "approved"
     _save_profile_record(context, user_id)
@@ -4126,13 +4126,13 @@ async def approve_candidate_callback(update: Update, context: ContextTypes.DEFAU
     try:
         await context.bot.send_message(
             chat_id=int(user_id),
-            text="вњ…Р’Р°С€Р° РєР°РЅРґРёРґР°С‚СѓСЂР° РѕРґРѕР±СЂРµРЅР°. Р’Р°Рј РІС‹РґР°РЅС‹ РїСЂР°РІР° РєР°С‚РµРіРѕСЂРёРё 1.",
+            text="✅Ваша кандидатура одобрена. Вам выданы права категории 1.",
         )
     except Exception:
         pass
 
     try:
-        await update.callback_query.message.edit_text((update.callback_query.message.text or "") + "\n\nвњ…РљР°РЅРґРёРґР°С‚ РѕРґРѕР±СЂРµРЅ")
+        await update.callback_query.message.edit_text((update.callback_query.message.text or "") + "\n\n✅Кандидат одобрен")
     except Exception:
         pass
 
@@ -4149,11 +4149,11 @@ async def reject_candidate_callback(update: Update, context: ContextTypes.DEFAUL
         return
 
     prompt_kb = InlineKeyboardMarkup(
-        [[InlineKeyboardButton("РѕС‚РјРµРЅР°", callback_data=f"cancel_candidate_reject_{review_id}")]]
+        [[InlineKeyboardButton("отмена", callback_data=f"cancel_candidate_reject_{review_id}")]]
     )
     prompt = await context.bot.send_message(
         chat_id=LOG_CHAT_ID,
-        text="РЈРєР°Р¶РёС‚Рµ РїСЂРёС‡РёРЅСѓ РѕС‚РєР°Р·Р° РєР°РЅРґРёРґР°С‚Сѓ:",
+        text="Укажите причину отказа кандидату:",
         reply_markup=prompt_kb,
     )
 
@@ -4169,7 +4169,7 @@ async def reject_candidate_callback(update: Update, context: ContextTypes.DEFAUL
 
 
 async def cancel_candidate_reject_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.callback_query.answer("РћС‚РјРµРЅР°")
+    await update.callback_query.answer("Отмена")
     review_id = (update.callback_query.data or "").split("_")[-1]
     pending_reject = context.application.bot_data.setdefault("pending_candidate_rejections", {})
     pending_reject.pop(review_id, None)
@@ -4201,7 +4201,7 @@ async def candidate_reject_reason_message_handler(update: Update, context: Conte
 
     reason = (update.message.text or "").strip()
     if not reason:
-        await update.message.reply_text("РџСЂРёС‡РёРЅР° РЅРµ РјРѕР¶РµС‚ Р±С‹С‚СЊ РїСѓСЃС‚РѕР№.")
+        await update.message.reply_text("Причина не может быть пустой.")
         raise ApplicationHandlerStop
 
     candidate_user_id = str(review.get("candidate_user_id"))
@@ -4225,14 +4225,14 @@ async def candidate_reject_reason_message_handler(update: Update, context: Conte
     try:
         await context.bot.send_message(
             chat_id=int(candidate_user_id),
-            text=f'вќЊР—Р°СЏРІРєР° РЅРµ Р±С‹Р»Р° РїСЂРёРЅСЏС‚Р°. РџСЂРёС‡РёРЅР°: "{reason}"\n\nРќР°С‡РЅРёС‚Рµ Р·Р°РЅРѕРІРѕ СЃ СЌС‚Р°РїР° 1.',
+            text=f'❌Заявка не была принята. Причина: "{reason}"\n\nНачните заново с этапа 1.',
         )
         await _send_candidate_stage_1(context, int(candidate_user_id))
     except Exception:
         pass
 
     try:
-        await update.message.reply_text("вњ…РЎРѕРѕР±С‰РµРЅРёРµ РѕС‚РїСЂР°РІР»РµРЅРѕ РєР°РЅРґРёРґР°С‚Сѓ РІ Р›РЎ.")
+        await update.message.reply_text("✅Сообщение отправлено кандидату в ЛС.")
     except Exception:
         pass
 
