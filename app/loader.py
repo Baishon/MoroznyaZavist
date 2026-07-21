@@ -1,0 +1,273 @@
+"""Application assembly: builds the python-telegram-bot Application and registers
+every handler. This module intentionally imports handler functions by name
+(mirroring the original single-file bot.py) so the registration list below
+stays a straightforward, auditable 1:1 mapping of command/callback -> handler.
+"""
+import logging
+
+from telegram import BotCommand
+from telegram.ext import ApplicationBuilder, CallbackQueryHandler, CommandHandler, MessageHandler, filters
+
+from app import logging_setup  # noqa: F401  (side effect: attaches Telegram log handler)
+from app.config import COOPERATION_CHAT_ID, LOG_CHAT_ID, TOKEN, WORK_CHAT_ID
+from app.database.requests import _init_persistent_storage
+from app.handlers.admin import (
+    add_rules_handler,
+    admin_group_message_handler,
+    admin_mute_guard_handler,
+    admin_take_callback,
+    amute_command_handler,
+    anpiar_command_handler,
+    approve_candidate_callback,
+    approve_decline_callback,
+    astats_active_pz_callback,
+    astats_bio_cancel_callback,
+    astats_bio_change_callback,
+    astats_bio_view_callback,
+    astats_command_handler,
+    astats_gender_back_callback,
+    astats_gender_menu_callback,
+    astats_gender_set_callback,
+    astats_tag_cancel_callback,
+    astats_tag_change_callback,
+    astats_tip_apply_callback,
+    astats_tip_menu_callback,
+    astats_tip_toggle_callback,
+    ban_command_handler,
+    cancel_candidate_reject_callback,
+    cancel_decline_request_callback,
+    cancel_warn_callback,
+    candidate_reject_reason_message_handler,
+    confirm_warn_callback,
+    cooperation_admin_command_guard,
+    del_rule_handler,
+    admin_decline_callback,
+    admin_decline_request_callback,
+    dump_maps_handler,
+    fullstats_command_handler,
+    handle_astats_bio_input_message,
+    handle_astats_tag_input_message,
+    handle_decline_input_message,
+    handle_warn_reason_message,
+    info_topic_cancel_callback,
+    info_topic_close_callback,
+    info_topic_close_confirm_callback,
+    info_topic_command_handler,
+    info_topic_resume_callback,
+    info_topic_stop_callback,
+    info_topic_stop_confirm_callback,
+    kus_command_handler,
+    log_command_router,
+    makeadmin_command_handler,
+    pm_command_handler,
+    prava_command_handler,
+    reject_candidate_callback,
+    reject_decline_callback,
+    sendpiar_command_handler,
+    sendpiar_media_router,
+    setprefix_apply_callback,
+    setprefix_command_handler,
+    setprefix_select_callback,
+    show_user_profile_callback,
+    stats_command_handler,
+    suspicious_admin_allow_callback,
+    suspicious_admin_deny_callback,
+    suspicious_user_allow_callback,
+    suspicious_user_deny_callback,
+    suspicious_user_warn_callback,
+    topic_command_handler,
+    unban_command_handler,
+    unknown_chat_guard,
+    unmute_command_handler,
+    unwarn_command_handler,
+    warn_command_handler,
+    warn_user_callback,
+    warn_user_cancel_callback,
+)
+from app.handlers.candidates import candidate_gender_callback, candidate_tip_next_callback, candidate_tip_toggle_callback
+from app.handlers.user import (
+    admin_cancel_confirm_callback,
+    admin_cancel_deny_callback,
+    ask_cancel_admin,
+    bug_report_cancel_callback,
+    bug_report_confirm_callback,
+    bug_report_reject_callback,
+    bug_report_text_input_handler,
+    cancel_nickname_change_callback,
+    cancel_search_callback,
+    change_nickname_callback,
+    choose_admin_gender_callback,
+    choose_mood_callback,
+    complaint_admin_menu_handler,
+    complaint_bug_menu_handler,
+    confirm_cancel_callback,
+    deny_cancel_callback,
+    find_admin_menu_callback,
+    handle_decline_reason_reply,
+    pause_session_cancel_callback,
+    pause_session_confirm_callback,
+    pause_session_request,
+    resume_session_callback,
+    restart_command_handler,
+    send_admin_profile,
+    send_profile,
+    settings_back_handler,
+    settings_complaint_menu_handler,
+    settings_disable_ad_handler,
+    settings_enable_ad_handler,
+    settings_menu_handler,
+    show_admin_bio_callback,
+    start,
+    user_private_message_handler,
+)
+
+
+async def _post_init(app) -> None:
+    try:
+        await app.bot.set_my_commands(
+            [
+                BotCommand("start", "Запустить бота"),
+                BotCommand("restart", "Обновить текущее подменю"),
+            ]
+        )
+    except Exception:
+        logging.exception("Failed to set bot commands")
+
+
+def build_application():
+    app = ApplicationBuilder().token(TOKEN).post_init(_post_init).build()
+    _init_persistent_storage(app)
+    app.add_handler(
+        MessageHandler(
+            (filters.PHOTO | filters.VIDEO)
+            & filters.CaptionRegex(r"^/sendpiar(?:@[\w_]+)?(?:\s+.*)?$"),
+            sendpiar_media_router,
+        ),
+        group=-3,
+    )
+    app.add_handler(MessageHandler(filters.ALL & (filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), unknown_chat_guard), group=-2)
+    app.add_handler(
+        MessageHandler(
+            filters.TEXT
+            & ~filters.Regex(r"^/sendpiar(?:@[\w_]+)?(?:\s+.*)?$")
+            & filters.Chat(COOPERATION_CHAT_ID),
+            cooperation_admin_command_guard,
+        ),
+        group=-1,
+    )
+    app.add_handler(MessageHandler(filters.TEXT & filters.Chat(LOG_CHAT_ID), log_command_router), group=-1)
+    app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND & (filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), admin_mute_guard_handler), group=-1)
+    app.add_handler(CommandHandler("addrules", add_rules_handler), group=-1)
+    app.add_handler(CommandHandler("delrules", del_rule_handler), group=-1)
+    app.add_handler(CommandHandler("makeadmin", makeadmin_command_handler, filters=filters.ChatType.PRIVATE | filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), group=-1)
+    app.add_handler(CommandHandler("setprefix", setprefix_command_handler, filters=filters.ChatType.PRIVATE | filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), group=-1)
+    app.add_handler(CommandHandler("anpiar", anpiar_command_handler, filters=filters.ChatType.PRIVATE | filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), group=-1)
+    app.add_handler(CommandHandler("fullstats", fullstats_command_handler, filters=filters.ChatType.PRIVATE | filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), group=-1)
+    app.add_handler(CommandHandler("sendpiar", sendpiar_command_handler, filters=filters.ChatType.PRIVATE | filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), group=-1)
+    app.add_handler(CommandHandler("pm", pm_command_handler, filters=filters.ChatType.PRIVATE | filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), group=-1)
+    app.add_handler(CommandHandler("prava", prava_command_handler, filters=filters.ChatType.PRIVATE | filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), group=-1)
+    app.add_handler(CommandHandler("ban", ban_command_handler, filters=filters.ChatType.PRIVATE | filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), group=-1)
+    app.add_handler(CommandHandler("unban", unban_command_handler, filters=filters.ChatType.PRIVATE | filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), group=-1)
+    app.add_handler(CommandHandler("amute", amute_command_handler, filters=filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), group=-1)
+    app.add_handler(CommandHandler("aunmute", unmute_command_handler, filters=filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), group=-1)
+    app.add_handler(CommandHandler("warn", warn_command_handler, filters=filters.ChatType.PRIVATE | filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), group=-1)
+    app.add_handler(CommandHandler("unwarn", unwarn_command_handler, filters=filters.ChatType.PRIVATE | filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), group=-1)
+    app.add_handler(CommandHandler("stats", stats_command_handler, filters=filters.ChatType.PRIVATE | filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), group=-1)
+    app.add_handler(CommandHandler("astats", astats_command_handler, filters=filters.ChatType.PRIVATE | filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), group=-1)
+    app.add_handler(CommandHandler("info_topic", info_topic_command_handler, filters=filters.ChatType.GROUP | filters.ChatType.SUPERGROUP | filters.ChatType.CHANNEL), group=-1)
+    app.add_handler(CommandHandler("topic", topic_command_handler, filters=filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), group=-1)
+    app.add_handler(CommandHandler("start", start, filters=filters.ChatType.PRIVATE))
+    app.add_handler(CommandHandler("restart", restart_command_handler, filters=filters.ChatType.PRIVATE))
+    app.add_handler(CallbackQueryHandler(cancel_search_callback, pattern=r"^cancel_search_\d+$"))
+    app.add_handler(CallbackQueryHandler(confirm_cancel_callback, pattern=r"^confirm_cancel_\d+$"))
+    app.add_handler(CallbackQueryHandler(deny_cancel_callback, pattern=r"^deny_cancel_\d+$"))
+    app.add_handler(CallbackQueryHandler(admin_take_callback, pattern=r"^take_user_\d+$"))
+    app.add_handler(CallbackQueryHandler(warn_user_callback, pattern=r"^warn_user_\d+$"))
+    app.add_handler(CallbackQueryHandler(cancel_warn_callback, pattern=r"^cancel_warn_\d+$"))
+    app.add_handler(CallbackQueryHandler(confirm_warn_callback, pattern=r"^confirm_warn_\d+$"))
+    app.add_handler(CallbackQueryHandler(show_admin_bio_callback, pattern=r"^show_admin_bio_\d+$"))
+    app.add_handler(CallbackQueryHandler(show_user_profile_callback, pattern=r"^show_user_profile_\d+$"))
+    app.add_handler(CallbackQueryHandler(admin_decline_request_callback, pattern=r"^decline_request_\d+$"))
+    app.add_handler(CallbackQueryHandler(admin_decline_callback, pattern=r"^decline_user_\d+$"))
+    app.add_handler(CallbackQueryHandler(cancel_decline_request_callback, pattern=r"^cancel_decline_request_\d+$"))
+    app.add_handler(CallbackQueryHandler(approve_decline_callback, pattern=r"^approve_decline_\d+$"))
+    app.add_handler(CallbackQueryHandler(reject_decline_callback, pattern=r"^reject_decline_\d+$"))
+    app.add_handler(CallbackQueryHandler(warn_user_cancel_callback, pattern=r"^warn_user_cancel_\d+$"))
+    app.add_handler(CallbackQueryHandler(approve_candidate_callback, pattern=r"^approve_candidate_\d+$"))
+    app.add_handler(CallbackQueryHandler(reject_candidate_callback, pattern=r"^reject_candidate_\d+$"))
+    app.add_handler(CallbackQueryHandler(candidate_tip_toggle_callback, pattern=r"^candidate_tip_toggle_\d+_(chat|support|flirt)$"))
+    app.add_handler(CallbackQueryHandler(candidate_tip_next_callback, pattern=r"^candidate_tip_next_\d+$"))
+    app.add_handler(CallbackQueryHandler(candidate_gender_callback, pattern=r"^candidate_gender_\d+_(male|female)$"))
+    app.add_handler(CallbackQueryHandler(cancel_candidate_reject_callback, pattern=r"^cancel_candidate_reject_\d+$"))
+    app.add_handler(CallbackQueryHandler(suspicious_admin_allow_callback, pattern=r"^susp_admin_allow_\d+$"))
+    app.add_handler(CallbackQueryHandler(suspicious_admin_deny_callback, pattern=r"^susp_admin_deny_\d+$"))
+    app.add_handler(CallbackQueryHandler(suspicious_user_allow_callback, pattern=r"^susp_user_allow_\d+$"))
+    app.add_handler(CallbackQueryHandler(suspicious_user_deny_callback, pattern=r"^susp_user_deny_\d+$"))
+    app.add_handler(CallbackQueryHandler(suspicious_user_warn_callback, pattern=r"^susp_user_warn_\d+$"))
+    app.add_handler(CallbackQueryHandler(pause_session_confirm_callback, pattern=r"^pause_confirm_\d+$"))
+    app.add_handler(CallbackQueryHandler(pause_session_cancel_callback, pattern=r"^pause_cancel_\d+$"))
+    app.add_handler(CallbackQueryHandler(resume_session_callback, pattern=r"^resume_session_\d+$"))
+    app.add_handler(CallbackQueryHandler(setprefix_select_callback, pattern=r"^prefix_select_\d+_[a-z]+$"))
+    app.add_handler(CallbackQueryHandler(setprefix_apply_callback, pattern=r"^prefix_apply_\d+$"))
+    app.add_handler(CallbackQueryHandler(astats_tag_change_callback, pattern=r"^astats_tag_change_\d+$"))
+    app.add_handler(CallbackQueryHandler(astats_tag_cancel_callback, pattern=r"^astats_tag_cancel_\d+$"))
+    app.add_handler(CallbackQueryHandler(astats_bio_change_callback, pattern=r"^astats_bio_change_\d+$"))
+    app.add_handler(CallbackQueryHandler(astats_bio_cancel_callback, pattern=r"^astats_bio_cancel_\d+$"))
+    app.add_handler(CallbackQueryHandler(astats_bio_view_callback, pattern=r"^astats_bio_view_\d+$"))
+    app.add_handler(CallbackQueryHandler(astats_active_pz_callback, pattern=r"^astats_active_pz_\d+$"))
+    app.add_handler(CallbackQueryHandler(astats_tip_menu_callback, pattern=r"^astats_tip_menu_\d+$"))
+    app.add_handler(CallbackQueryHandler(astats_tip_toggle_callback, pattern=r"^astats_tip_toggle_\d+_(chat|support|flirt)$"))
+    app.add_handler(CallbackQueryHandler(astats_tip_apply_callback, pattern=r"^astats_tip_apply_\d+$"))
+    app.add_handler(CallbackQueryHandler(astats_gender_menu_callback, pattern=r"^astats_gender_menu_\d+$"))
+    app.add_handler(CallbackQueryHandler(astats_gender_set_callback, pattern=r"^astats_gender_set_\d+_(male|female)$"))
+    app.add_handler(CallbackQueryHandler(astats_gender_back_callback, pattern=r"^astats_gender_back_\d+$"))
+    app.add_handler(CallbackQueryHandler(info_topic_close_callback, pattern=r"^info_topic_close_\d+$"))
+    app.add_handler(CallbackQueryHandler(info_topic_stop_callback, pattern=r"^info_topic_stop_\d+$"))
+    app.add_handler(CallbackQueryHandler(info_topic_cancel_callback, pattern=r"^info_topic_cancel_\d+$"))
+    app.add_handler(CallbackQueryHandler(info_topic_close_confirm_callback, pattern=r"^info_topic_close_confirm_\d+$"))
+    app.add_handler(CallbackQueryHandler(info_topic_stop_confirm_callback, pattern=r"^info_topic_stop_confirm_\d+$"))
+    app.add_handler(CallbackQueryHandler(info_topic_resume_callback, pattern=r"^info_topic_resume_\d+$"))
+    app.add_handler(CallbackQueryHandler(change_nickname_callback, pattern=r"^change_nickname_\d+$"))
+    app.add_handler(CallbackQueryHandler(cancel_nickname_change_callback, pattern=r"^cancel_nickname_change_\d+$"))
+    app.add_handler(CallbackQueryHandler(admin_cancel_confirm_callback, pattern=r"^confirm_admin_cancel_\d+$"))
+    app.add_handler(CallbackQueryHandler(admin_cancel_deny_callback, pattern=r"^deny_admin_cancel_\d+$"))
+    app.add_handler(CallbackQueryHandler(bug_report_cancel_callback, pattern=r"^bug_report_cancel_\d+$"))
+    app.add_handler(CallbackQueryHandler(bug_report_confirm_callback, pattern=r"^bug_report_confirm_\d+$"))
+    app.add_handler(CallbackQueryHandler(bug_report_reject_callback, pattern=r"^bug_report_reject_\d+$"))
+    app.add_handler(MessageHandler(filters.Regex("^👤 Найти админа$") & filters.ChatType.PRIVATE, find_admin_menu_callback))
+    app.add_handler(MessageHandler(filters.Regex("^⚙️Настройки$") & filters.ChatType.PRIVATE, settings_menu_handler))
+    app.add_handler(MessageHandler(filters.Regex("^💬Отправить жалобу$") & filters.ChatType.PRIVATE, settings_complaint_menu_handler))
+    app.add_handler(MessageHandler(filters.Regex("^👨‍🔧Сообщить о баге$") & filters.ChatType.PRIVATE, complaint_bug_menu_handler))
+    app.add_handler(MessageHandler(filters.Regex("^👮‍♀️Пожаловаться на админа$") & filters.ChatType.PRIVATE, complaint_admin_menu_handler))
+    app.add_handler(MessageHandler(filters.Regex("^↩️В настройки$") & filters.ChatType.PRIVATE, settings_menu_handler))
+    app.add_handler(MessageHandler(filters.Regex("^🔕Отключить рекламу$") & filters.ChatType.PRIVATE, settings_disable_ad_handler))
+    app.add_handler(MessageHandler(filters.Regex("^🔔Включить рекламу$") & filters.ChatType.PRIVATE, settings_enable_ad_handler))
+    app.add_handler(MessageHandler(filters.Regex("^↩️Назад$") & filters.ChatType.PRIVATE, settings_back_handler))
+    app.add_handler(MessageHandler(filters.Regex("^👤 Профиль$"), send_profile))
+    app.add_handler(MessageHandler(filters.Regex("^🔰Админ-профиль$") & filters.ChatType.PRIVATE, send_admin_profile))
+    app.add_handler(MessageHandler(filters.Regex("^🤧Отказаться от админа$") & filters.ChatType.PRIVATE, ask_cancel_admin))
+    app.add_handler(MessageHandler(filters.Regex("^💤Приостановить общение$") & filters.ChatType.PRIVATE, pause_session_request))
+    app.add_handler(MessageHandler(filters.Regex("^👨 Мальчик$|^👩 Девочка$|^◀️ Назад$") & filters.ChatType.PRIVATE, choose_admin_gender_callback))
+    app.add_handler(MessageHandler(filters.Regex("^🗣️ Общение$|^❤️ Поддержка$|^🔥 Флирт$|^◀️ Назад$") & filters.ChatType.PRIVATE, choose_mood_callback))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE, bug_report_text_input_handler), group=-2)
+    # Moderation input handlers must run before generic forwarding.
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & (filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), handle_astats_bio_input_message), group=-4)
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & (filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), handle_astats_tag_input_message), group=-3)
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & (filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), candidate_reject_reason_message_handler), group=0)
+    app.add_handler(MessageHandler(filters.ALL & (filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), handle_decline_input_message), group=0)
+    app.add_handler(MessageHandler(filters.ALL & (filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), handle_warn_reason_message), group=0)
+    app.add_handler(MessageHandler(filters.ALL & (filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), admin_group_message_handler), group=1)
+    app.add_handler(MessageHandler(
+        filters.TEXT & filters.Regex(r"^/кусь(?:@[\w_]+)?(?:\s+.*)?$") & (filters.ChatType.PRIVATE | filters.Chat(WORK_CHAT_ID)),
+        kus_command_handler,
+    ), group=-1)
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.REPLY & filters.ChatType.PRIVATE, user_private_message_handler))
+    # Handler for admin replies to the bot's "Введите причину отклонения запроса" prompt
+    app.add_handler(MessageHandler(filters.TEXT & filters.REPLY & (filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), handle_decline_reason_reply))
+    app.add_handler(CommandHandler("dump_maps", dump_maps_handler))
+    return app
+
+
+def main() -> None:
+    app = build_application()
+    app.run_polling(close_loop=False)
