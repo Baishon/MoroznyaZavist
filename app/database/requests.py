@@ -111,8 +111,8 @@ def _init_persistent_storage(app) -> None:
         conn.execute(statement)
 
     app.bot_data["_state_db_connection"] = conn
-    profiles = app.bot_data.setdefault("profiles", {})
-    banned_users = app.bot_data.setdefault("banned_users", {})
+    app.bot_data.setdefault("profiles", {})
+    app.bot_data.setdefault("banned_users", {})
 
     try:
         row = conn.execute("SELECT data FROM runtime_state WHERE id = 1").fetchone()
@@ -125,6 +125,10 @@ def _init_persistent_storage(app) -> None:
             except Exception:
                 logging.exception("Failed to load runtime snapshot")
 
+        # Read directly from app.bot_data (not a cached local) — the runtime_state
+        # snapshot applied above may have just replaced these dicts wholesale.
+        profiles = app.bot_data.setdefault("profiles", {})
+        banned_users = app.bot_data.setdefault("banned_users", {})
         for user_id, data in conn.execute("SELECT user_id, data FROM profiles"):
             try:
                 profiles[str(user_id)] = json.loads(data)
