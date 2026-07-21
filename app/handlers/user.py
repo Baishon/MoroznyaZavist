@@ -16,7 +16,7 @@ from telegram.constants import ChatType, ParseMode
 from telegram.error import BadRequest
 from telegram.ext import ApplicationHandlerStop, ContextTypes
 
-from app.config import ADMIN_LEVEL_TITLES, LOG_CHAT_ID
+from app.config import ADMIN_LEVEL_TITLES, LOG_CHAT_ID, WORK_CHAT_ID
 from app.database.requests import _save_profile_record, _save_runtime_snapshot
 from app.handlers.candidates import _send_candidate_stage_1, admin_candidate_private_flow
 from app.keyboards.inline import (
@@ -722,7 +722,7 @@ async def choose_mood_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Отменить", callback_data=f"cancel_search_{user.id}")]]),
         )
 
-        chat_id = -1004417963273
+        chat_id = WORK_CHAT_ID
         username = f"@{user.username}" if user.username else f"id{user.id}"
         admin_gender = "Мальчик" if context.user_data.get("admin_gender") == "male" else "Девочка"
         mood = context.user_data.get("mood", "не выбран")

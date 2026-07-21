@@ -2899,7 +2899,7 @@ async def confirm_warn_callback(update: Update, context: ContextTypes.DEFAULT_TY
     thread_id = getattr(update.callback_query.message, "message_thread_id", None)
     prompt_text = (
         "рџ“ЊРЈРєР°Р¶РёС‚Рµ РїСЂРёС‡РёРЅСѓ РІС‹РґР°С‡Рё РїСЂРµРґСѓРїСЂРµР¶РґРµРЅРёСЏ РїРѕР»СЊР·РѕРІР°С‚РµР»СЋ (РїСѓРЅРєС‚РѕРј)\n"
-        "РџСЂР°РІРёР»Р° РјРѕР¶РЅРѕ РїРѕСЃРјРѕС‚СЂРµС‚СЊ Р·РґРµСЃСЊ https://t.me/c/4417963273/209"
+        f"РџСЂР°РІРёР»Р° РјРѕР¶РЅРѕ РїРѕСЃРјРѕС‚СЂРµС‚СЊ Р·РґРµСЃСЊ {_topic_url(RULES_CHAT_ID, RULES_THREAD_ID)}"
     )
     try:
         if thread_id is not None:
@@ -3712,8 +3712,7 @@ async def admin_group_message_handler(update: Update, context: ContextTypes.DEFA
     )
 
     # Only consider messages in the designated special group and in a forum topic
-    SPECIAL_GROUP_ID = -1004417963273
-    if update.effective_chat.id != SPECIAL_GROUP_ID:
+    if update.effective_chat.id != WORK_CHAT_ID:
         return
 
     # Ignore bots
