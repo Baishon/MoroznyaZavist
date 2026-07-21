@@ -1,0 +1,11 @@
+.git
+.gitignore
+.idea
+.venv
+venv
+__pycache__/
+*.pyc
+bot_storage/
+.env
+config/.env
+README.md
