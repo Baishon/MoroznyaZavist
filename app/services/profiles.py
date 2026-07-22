@@ -110,6 +110,19 @@ def _ensure_profile(context: ContextTypes.DEFAULT_TYPE, user_id: str, username_h
     return profile
 
 
+def _find_admin_profile_by_tag_admin(context: ContextTypes.DEFAULT_TYPE, tag: str):
+    normalized = str(tag or "").strip().lower()
+    if not normalized:
+        return None, None
+
+    profiles = context.application.bot_data.setdefault("profiles", {})
+    for user_id, profile in profiles.items():
+        stored_tag = str(profile.get("tag_admin") or "").strip().lower()
+        if stored_tag and stored_tag == normalized:
+            return str(user_id), profile
+    return None, None
+
+
 def _set_last_admin_tag_for_user(context: ContextTypes.DEFAULT_TYPE, user_id: str | int, admin_tag: str | None) -> None:
     value = str(admin_tag or "").strip()
     if not value:

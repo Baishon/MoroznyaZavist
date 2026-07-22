@@ -82,6 +82,18 @@ def _build_complaint_menu_keyboard() -> ReplyKeyboardMarkup:
     )
 
 
+def _build_complaint_admin_menu_keyboard() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        [
+            [KeyboardButton("✏️Написать тег админа")],
+            [KeyboardButton("🕓Выбрать последнего админа")],
+            [KeyboardButton("↩️В раздел жалоб")],
+        ],
+        resize_keyboard=True,
+        one_time_keyboard=False,
+    )
+
+
 def _build_active_dialog_admin_keyboard(request_user_id: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [

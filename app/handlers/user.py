@@ -30,6 +30,7 @@ from app.handlers.candidates import _send_candidate_stage_1, admin_candidate_pri
 from app.keyboards.inline import (
     _build_candidate_gender_keyboard,
     _build_candidate_tip_keyboard,
+    _build_complaint_admin_menu_keyboard,
     _build_complaint_menu_keyboard,
     _build_main_menu_keyboard,
     _build_settings_menu_keyboard,
@@ -39,6 +40,7 @@ from app.services.messaging import deliver_message_to_user
 from app.services.profiles import (
     _candidate_block_text,
     _ensure_profile,
+    _find_admin_profile_by_tag_admin,
     _has_admin_rights_level_1_5,
     _is_active_admin_candidate,
     _is_user_nickname_taken,
@@ -290,7 +292,175 @@ async def complaint_admin_menu_handler(update: Update, context: ContextTypes.DEF
     if await block_if_banned(update, context):
         return
 
-    await update.message.reply_text("📝Раздел 'Пожаловаться на админа' открыт. Опишите жалобу следующим сообщением.")
+    user_id = str(update.effective_user.id)
+    pending = context.application.bot_data.setdefault("pending_admin_complaints", {})
+    pending.pop(user_id, None)
+
+    await update.message.reply_text(
+        "👮‍♀️Раздел 'Пожаловаться на админа'\n\nВыберите способ подачи жалобы.",
+        reply_markup=_build_complaint_admin_menu_keyboard(),
+    )
+
+
+
+async def complaint_admin_back_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or update.effective_chat.type != ChatType.PRIVATE:
+        return
+    if await block_if_banned(update, context):
+        return
+
+    user_id = str(update.effective_user.id)
+    pending = context.application.bot_data.setdefault("pending_admin_complaints", {})
+    pending.pop(user_id, None)
+
+    await update.message.reply_text("💬Раздел жалоб", reply_markup=_build_complaint_menu_keyboard())
+
+
+
+async def complaint_admin_write_tag_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or update.effective_chat.type != ChatType.PRIVATE:
+        return
+    if await block_if_banned(update, context):
+        return
+
+    user_id = str(update.effective_user.id)
+    pending = context.application.bot_data.setdefault("pending_admin_complaints", {})
+    pending[user_id] = {"state": "await_tag"}
+
+    await update.message.reply_text(
+        "🏷Напишите тег администратора, на которого хотите пожаловаться.\n"
+        "Тег должен начинаться с # в начале сообщения, например: #акира",
+        reply_markup=InlineKeyboardMarkup(
+            [[InlineKeyboardButton("отмена", callback_data=f"admin_complaint_cancel_{user_id}")]]
+        ),
+    )
+
+
+
+async def complaint_admin_last_admin_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or update.effective_chat.type != ChatType.PRIVATE:
+        return
+    if await block_if_banned(update, context):
+        return
+
+    user_id = str(update.effective_user.id)
+    profile = _ensure_profile(context, user_id, update.effective_user.username or f"id{user_id}")
+    last_tag = str(profile.get("last_admin_tag") or "").strip()
+    if not last_tag or last_tag == "не указан":
+        await update.message.reply_text("ℹ️У вас пока нет последнего администратора, на которого можно пожаловаться.")
+        return
+
+    pending = context.application.bot_data.setdefault("pending_admin_complaints", {})
+    pending[user_id] = {
+        "state": "await_complaint",
+        "admin_tag": last_tag,
+        "via_last_admin": True,
+    }
+
+    await update.message.reply_text(
+        f"📝Опишите, в чем администратор {last_tag} не прав и почему он должен быть наказан. Отправьте это следующим сообщением.",
+        reply_markup=InlineKeyboardMarkup(
+            [[InlineKeyboardButton("отмена", callback_data=f"admin_complaint_cancel_{user_id}")]]
+        ),
+    )
+
+
+
+async def admin_complaint_cancel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.callback_query.answer("Отмена")
+    user_id = (update.callback_query.data or "").split("_")[-1]
+    if str(update.effective_user.id) != str(user_id):
+        await update.callback_query.answer("Кнопка доступна только владельцу запроса", show_alert=True)
+        return
+
+    pending = context.application.bot_data.setdefault("pending_admin_complaints", {})
+    pending.pop(str(user_id), None)
+
+    try:
+        await update.callback_query.message.reply_text(
+            "Отменено. Возврат в раздел 'Пожаловаться на админа'.",
+            reply_markup=_build_complaint_admin_menu_keyboard(),
+        )
+    except Exception:
+        pass
+
+
+
+async def admin_complaint_text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or update.effective_chat.type != ChatType.PRIVATE or not update.effective_user:
+        return
+    if update.effective_user.is_bot:
+        return
+
+    pending = context.application.bot_data.setdefault("pending_admin_complaints", {})
+    user_id = str(update.effective_user.id)
+    entry = pending.get(user_id)
+    if not entry:
+        return
+
+    state = str(entry.get("state") or "")
+
+    if state == "await_tag":
+        text = (update.message.text or "").strip()
+        if not text or not text.startswith("#"):
+            await update.message.reply_text("⚠️Тег написан неправильно. В начале сообщения должен быть #. Пример: #акира")
+            raise ApplicationHandlerStop
+
+        target_user_id, target_profile = _find_admin_profile_by_tag_admin(context, text)
+        if not target_profile:
+            await update.message.reply_text("⚠️Администратор с таким тегом не найден. Проверьте тег и попробуйте снова.")
+            raise ApplicationHandlerStop
+
+        entry["state"] = "await_complaint"
+        entry["admin_tag"] = text
+        entry["admin_user_id"] = target_user_id
+        entry["via_last_admin"] = False
+
+        await update.message.reply_text(
+            f"📝Опишите, в чем администратор {text} не прав и почему он должен быть наказан. Отправьте это следующим сообщением.",
+            reply_markup=InlineKeyboardMarkup(
+                [[InlineKeyboardButton("отмена", callback_data=f"admin_complaint_cancel_{user_id}")]]
+            ),
+        )
+        raise ApplicationHandlerStop
+
+    if state == "await_complaint":
+        complaint_text = (update.message.text or "").strip()
+        if not complaint_text:
+            await update.message.reply_text("Текст жалобы не должен быть пустым.")
+            raise ApplicationHandlerStop
+
+        profile = _ensure_profile(context, user_id, update.effective_user.username or f"id{user_id}")
+        id_profile = int(profile.get("id_profile", 0) or 0)
+        admin_tag = str(entry.get("admin_tag") or "не указан")
+        via_last_admin = bool(entry.get("via_last_admin", False))
+
+        if via_last_admin:
+            notification_text = (
+                f"👮‍♀️Поступила жалоба на администратора {admin_tag} \n\n"
+                f"От пользователя #{id_profile} (Являлась ПЗ этого админа)\n"
+                f"Суть жалобы: {complaint_text}"
+            )
+        else:
+            notification_text = (
+                f"👮‍♀️Поступила жалоба на администратора {admin_tag}\n\n"
+                f"От пользователя #{id_profile}\n"
+                f"Суть жалобы: {complaint_text}"
+            )
+
+        try:
+            await context.bot.send_message(chat_id=LOG_CHAT_ID, text=notification_text)
+        except Exception:
+            logging.exception("admin complaint send failed")
+
+        pending.pop(user_id, None)
+        await update.message.reply_text(
+            "✅Жалоба отправлена руководству.",
+            reply_markup=_build_complaint_menu_keyboard(),
+        )
+        raise ApplicationHandlerStop
+
+    return
 
 
 

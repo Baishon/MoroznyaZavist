@@ -88,6 +88,8 @@ from app.handlers.candidates import candidate_gender_callback, candidate_tip_nex
 from app.handlers.user import (
     admin_cancel_confirm_callback,
     admin_cancel_deny_callback,
+    admin_complaint_cancel_callback,
+    admin_complaint_text_input_handler,
     ask_cancel_admin,
     bug_report_cancel_callback,
     bug_report_confirm_callback,
@@ -98,7 +100,10 @@ from app.handlers.user import (
     change_nickname_callback,
     choose_admin_gender_callback,
     choose_mood_callback,
+    complaint_admin_back_handler,
+    complaint_admin_last_admin_handler,
     complaint_admin_menu_handler,
+    complaint_admin_write_tag_handler,
     complaint_bug_menu_handler,
     confirm_cancel_callback,
     deny_cancel_callback,
@@ -234,11 +239,15 @@ def build_application():
     app.add_handler(CallbackQueryHandler(bug_report_cancel_callback, pattern=r"^bug_report_cancel_\d+$"))
     app.add_handler(CallbackQueryHandler(bug_report_confirm_callback, pattern=r"^bug_report_confirm_\d+$"))
     app.add_handler(CallbackQueryHandler(bug_report_reject_callback, pattern=r"^bug_report_reject_\d+$"))
+    app.add_handler(CallbackQueryHandler(admin_complaint_cancel_callback, pattern=r"^admin_complaint_cancel_\d+$"))
     app.add_handler(MessageHandler(filters.Regex("^👤 Найти админа$") & filters.ChatType.PRIVATE, find_admin_menu_callback))
     app.add_handler(MessageHandler(filters.Regex("^⚙️Настройки$") & filters.ChatType.PRIVATE, settings_menu_handler))
     app.add_handler(MessageHandler(filters.Regex("^💬Отправить жалобу$") & filters.ChatType.PRIVATE, settings_complaint_menu_handler))
     app.add_handler(MessageHandler(filters.Regex("^👨‍🔧Сообщить о баге$") & filters.ChatType.PRIVATE, complaint_bug_menu_handler))
     app.add_handler(MessageHandler(filters.Regex("^👮‍♀️Пожаловаться на админа$") & filters.ChatType.PRIVATE, complaint_admin_menu_handler))
+    app.add_handler(MessageHandler(filters.Regex("^✏️Написать тег админа$") & filters.ChatType.PRIVATE, complaint_admin_write_tag_handler))
+    app.add_handler(MessageHandler(filters.Regex("^🕓Выбрать последнего админа$") & filters.ChatType.PRIVATE, complaint_admin_last_admin_handler))
+    app.add_handler(MessageHandler(filters.Regex("^↩️В раздел жалоб$") & filters.ChatType.PRIVATE, complaint_admin_back_handler))
     app.add_handler(MessageHandler(filters.Regex("^↩️В настройки$") & filters.ChatType.PRIVATE, settings_menu_handler))
     app.add_handler(MessageHandler(filters.Regex("^🔕Отключить рекламу$") & filters.ChatType.PRIVATE, settings_disable_ad_handler))
     app.add_handler(MessageHandler(filters.Regex("^🔔Включить рекламу$") & filters.ChatType.PRIVATE, settings_enable_ad_handler))
@@ -250,6 +259,7 @@ def build_application():
     app.add_handler(MessageHandler(filters.Regex("^👨 Мальчик$|^👩 Девочка$|^◀️ Назад$") & filters.ChatType.PRIVATE, choose_admin_gender_callback))
     app.add_handler(MessageHandler(filters.Regex("^🗣️ Общение$|^❤️ Поддержка$|^🔥 Флирт$|^◀️ Назад$") & filters.ChatType.PRIVATE, choose_mood_callback))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE, bug_report_text_input_handler), group=-2)
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE, admin_complaint_text_input_handler), group=-6)
     # Moderation input handlers must run before generic forwarding.
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & (filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), handle_astats_bio_input_message), group=-4)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & (filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), handle_astats_tag_input_message), group=-3)
