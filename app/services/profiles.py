@@ -232,6 +232,39 @@ def _has_admin_rights_level_1_5(profile: dict | None) -> bool:
         return False
 
 
+def _admin_supports_mood(profile: dict | None, mood: str | None) -> bool:
+    """Check whether an admin's selected dialogue types (tip_admin) include the
+    requested mood (e.g. "общение", "поддержка", "флирт"). Used to prevent an
+    admin from taking a request for a communication type they didn't select
+    on their profile."""
+    mood_normalized = str(mood or "").strip().lower()
+    if not mood_normalized:
+        return True
+
+    tip_admin = str((profile or {}).get("tip_admin") or "").strip().lower()
+    if not tip_admin or tip_admin == "не указано":
+        return False
+
+    return mood_normalized in tip_admin
+
+
+def _admin_matches_gender(profile: dict | None, requested_gender: str | None) -> bool:
+    """Check whether the requesting user's desired admin gender ("male"/"female")
+    matches the admin's own gender set on their profile (admin_gender). Used to
+    prevent e.g. a male admin from taking a request meant for a female admin."""
+    requested_normalized = str(requested_gender or "").strip().lower()
+    if requested_normalized not in {"male", "female"}:
+        return True
+
+    admin_gender = str((profile or {}).get("admin_gender") or "").strip().lower()
+    if not admin_gender:
+        return False
+
+    if requested_normalized == "male":
+        return "мальчик" in admin_gender
+    return "девочка" in admin_gender
+
+
 def _admin_default_prefix(level: int) -> str | None:
     return {
         1: "🧸Стажер",

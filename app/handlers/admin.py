@@ -57,6 +57,8 @@ from app.services.mutes import (
 )
 from app.services.profiles import (
     _admin_default_prefix,
+    _admin_matches_gender,
+    _admin_supports_mood,
     _build_admin_stats_text,
     _build_user_stats_text,
     _candidate_tip_value,
@@ -2658,12 +2660,36 @@ async def admin_take_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     if not _has_admin_rights_level_1_5(admin_profile):
         await update.callback_query.answer("Действие доступно только администраторам 1 категории и выше.", show_alert=True)
         return
-    await update.callback_query.answer("Пользователь принят")
     data = update.callback_query.data  # e.g. "take_user_12345"
     parts = data.split("_")
     if len(parts) < 3:
         return
     request_user_id = parts[2]
+
+    # find the request info
+    app_requests = context.application.bot_data.setdefault("admin_requests", {})
+    req_info = app_requests.get(str(request_user_id))
+    if not req_info:
+        await update.callback_query.answer("Заявка более недоступна", show_alert=True)
+        return
+
+    mood = req_info.get("mood")
+    if not _admin_supports_mood(admin_profile, mood):
+        await update.callback_query.answer(
+            "❌Вы не можете взять данного пользователя, так как этот тип общения не указан в вашем профиле.",
+            show_alert=True,
+        )
+        return
+
+    requested_gender = req_info.get("gender")
+    if not _admin_matches_gender(admin_profile, requested_gender):
+        await update.callback_query.answer(
+            "❌Вы не можете взять данного пользователя, так как ваш пол не соответствует запрошенному.",
+            show_alert=True,
+        )
+        return
+
+    await update.callback_query.answer("Пользователь принят")
 
     # delete the original admin request panel
     try:
@@ -2671,22 +2697,10 @@ async def admin_take_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     except Exception:
         pass
 
-    # find the request info
-    app_requests = context.application.bot_data.setdefault("admin_requests", {})
-    req_info = app_requests.get(str(request_user_id))
-    if not req_info:
-        return
-
     chat_id = req_info.get("chat_id")
     topic_id = req_info.get("topic_id")
     username = req_info.get("username")
-    mood = req_info.get("mood")
     admin_username = f"@{update.effective_user.username}" if update.effective_user.username else f"id{update.effective_user.id}"
-    admin_profile = _ensure_profile(
-        context,
-        str(update.effective_user.id),
-        update.effective_user.username or f"id{update.effective_user.id}",
-    )
     admin_tag = str(admin_profile.get("tag_admin") or admin_username)
     requester_profile = _ensure_profile(context, str(request_user_id), username)
     requester_id_profile = requester_profile.get("id_profile")
