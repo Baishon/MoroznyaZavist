@@ -902,7 +902,8 @@ async def choose_mood_callback(update: Update, context: ContextTypes.DEFAULT_TYP
 
         chat_id = WORK_CHAT_ID
         username = f"@{user.username}" if user.username else f"id{user.id}"
-        admin_gender = "Мальчик" if context.user_data.get("admin_gender") == "male" else "Девочка"
+        gender_key = context.user_data.get("admin_gender")
+        admin_gender = "Мальчик" if gender_key == "male" else "Девочка"
         mood = context.user_data.get("mood", "не выбран")
         topic_name = username if user.username else f"user_{user.id}"
 
@@ -955,6 +956,7 @@ async def choose_mood_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             "first_confirmation_message_id": first_confirmation.message_id,
             "username": username,
             "mood": mood,
+            "gender": gender_key,
         }
 
         app_requests = context.application.bot_data.setdefault("admin_requests", {})
@@ -966,6 +968,7 @@ async def choose_mood_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             "first_confirmation_message_id": first_confirmation.message_id,
             "username": username,
             "mood": mood,
+            "gender": gender_key,
         }
         _save_runtime_snapshot(context)
     elif choice == "◀️ Назад":
