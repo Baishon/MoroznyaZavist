@@ -4,6 +4,9 @@ every handler. This module intentionally imports handler functions by name
 stays a straightforward, auditable 1:1 mapping of command/callback -> handler.
 """
 import logging
+import os
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 
 from telegram import BotCommand
 from telegram.ext import ApplicationBuilder, CallbackQueryHandler, CommandHandler, MessageHandler, filters
@@ -278,6 +281,30 @@ def build_application():
     return app
 
 
+class _HealthCheckHandler(BaseHTTPRequestHandler):
+    def do_GET(self) -> None:
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"OK")
+
+    def log_message(self, format: str, *args) -> None:  # noqa: A002 - stdlib signature
+        pass
+
+
+def _start_health_check_server() -> None:
+    """Bind a dummy HTTP server to $PORT so Render's port scan succeeds.
+
+    Render's free web-service tier expects the process to listen on a port;
+    this bot only needs outbound polling, so this thread exists purely to
+    satisfy that health check.
+    """
+    port = int(os.environ.get("PORT", "10000"))
+    server = HTTPServer(("0.0.0.0", port), _HealthCheckHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+
+
 def main() -> None:
+    _start_health_check_server()
     app = build_application()
     app.run_polling(close_loop=False)
