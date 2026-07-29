@@ -1000,6 +1000,16 @@ async def pause_session_request(update: Update, context: ContextTypes.DEFAULT_TY
         await update.message.reply_text("💤Сессия уже приостановлена.", reply_markup=resume_kb)
         return
 
+    cooldown_until = float(active.get("pause_cooldown_until", 0) or 0)
+    if time.time() < cooldown_until:
+        remaining = int(cooldown_until - time.time()) + 1
+        minutes, seconds = divmod(remaining, 60)
+        remaining_text = f"{minutes} мин. {seconds} сек." if minutes else f"{seconds} сек."
+        await update.message.reply_text(
+            f"⏳Подождите {remaining_text} перед повторным использованием этой кнопки."
+        )
+        return
+
     confirm_kb = InlineKeyboardMarkup(
         [[
             InlineKeyboardButton("Уверен(-а)", callback_data=f"pause_confirm_{user.id}"),
@@ -1154,6 +1164,7 @@ async def resume_session_callback(update: Update, context: ContextTypes.DEFAULT_
         return
 
     active["paused"] = False
+    active["pause_cooldown_until"] = time.time() + 600
     chat_id = active.get("chat_id")
     topic_id = active.get("topic_id")
     base_name = active.get("topic_base_name") or f"id{user_id}"
@@ -1677,7 +1688,7 @@ async def admin_cancel_deny_callback(update: Update, context: ContextTypes.DEFAU
         return
 
     try:
-        await update.callback_query.message.edit_text("Отмена отменена. Если потребуется, нажмите кнопку снова.")
+        await update.callback_query.message.edit_text("Отмена успешна. Если потребуется, нажмите кнопку снова.")
     except BadRequest:
         pass
 
