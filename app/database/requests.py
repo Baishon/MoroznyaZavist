@@ -1,16 +1,17 @@
-"""Raw sqlite3-backed persistence for bot_data (profiles, bans, runtime snapshot).
+"""Persistence for bot_data (profiles, bans, runtime snapshot).
 
 State is kept in ``context.application.bot_data`` at runtime and mirrored to
-``bot_storage/bot_state.sqlite3`` so it survives restarts.
+either Postgres (when ``DATABASE_URL`` is set) or the local
+``bot_storage/bot_state.sqlite3`` file, so it survives restarts.
 """
 import json
 import logging
 import os
-import sqlite3
 
 from telegram.ext import ContextTypes
 
-from app.config import STATE_DB_PATH, STATE_DIR
+from app.config import DATABASE_URL, STATE_DB_PATH, STATE_DIR
+from app.database import db
 from app.database.models import ALL_SCHEMA_STATEMENTS
 
 
@@ -41,7 +42,8 @@ def _save_runtime_snapshot(context: ContextTypes.DEFAULT_TYPE) -> None:
     }
     try:
         conn.execute(
-            "INSERT OR REPLACE INTO runtime_state (id, data) VALUES (1, ?)",
+            "INSERT INTO runtime_state (id, data) VALUES (1, ?) "
+            "ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data",
             (json.dumps(snapshot, ensure_ascii=False),),
         )
         conn.commit()
@@ -56,7 +58,8 @@ def _save_profile_seq(context: ContextTypes.DEFAULT_TYPE, seq: int | None = None
     value = int(seq if seq is not None else context.application.bot_data.get("profile_seq", 0) or 0)
     try:
         conn.execute(
-            "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
+            "INSERT INTO meta (key, value) VALUES (?, ?) "
+            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
             ("profile_seq", str(value)),
         )
         conn.commit()
@@ -75,7 +78,8 @@ def _save_profile_record(context: ContextTypes.DEFAULT_TYPE, user_id: str | int)
             conn.execute("DELETE FROM profiles WHERE user_id = ?", (str(user_id),))
         else:
             conn.execute(
-                "INSERT OR REPLACE INTO profiles (user_id, data) VALUES (?, ?)",
+                "INSERT INTO profiles (user_id, data) VALUES (?, ?) "
+                "ON CONFLICT (user_id) DO UPDATE SET data = EXCLUDED.data",
                 (str(user_id), json.dumps(profile, ensure_ascii=False)),
             )
         conn.commit()
@@ -94,7 +98,8 @@ def _save_ban_record(context: ContextTypes.DEFAULT_TYPE, user_id: str | int) -> 
             conn.execute("DELETE FROM banned_users WHERE user_id = ?", (str(user_id),))
         else:
             conn.execute(
-                "INSERT OR REPLACE INTO banned_users (user_id, data) VALUES (?, ?)",
+                "INSERT INTO banned_users (user_id, data) VALUES (?, ?) "
+                "ON CONFLICT (user_id) DO UPDATE SET data = EXCLUDED.data",
                 (str(user_id), json.dumps(banned, ensure_ascii=False)),
             )
         conn.commit()
@@ -104,11 +109,12 @@ def _save_ban_record(context: ContextTypes.DEFAULT_TYPE, user_id: str | int) -> 
 
 
 def _init_persistent_storage(app) -> None:
-    os.makedirs(STATE_DIR, exist_ok=True)
-    conn = sqlite3.connect(STATE_DB_PATH)
-    conn.execute("PRAGMA journal_mode=WAL")
+    if not DATABASE_URL:
+        os.makedirs(STATE_DIR, exist_ok=True)
+    conn = db.connect(DATABASE_URL, STATE_DB_PATH)
     for statement in ALL_SCHEMA_STATEMENTS:
         conn.execute(statement)
+    conn.commit()
 
     app.bot_data["_state_db_connection"] = conn
     app.bot_data.setdefault("profiles", {})
