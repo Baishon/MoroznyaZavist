@@ -3,6 +3,7 @@ every handler. This module intentionally imports handler functions by name
 (mirroring the original single-file bot.py) so the registration list below
 stays a straightforward, auditable 1:1 mapping of command/callback -> handler.
 """
+import asyncio
 import logging
 import os
 import threading
@@ -12,7 +13,7 @@ from telegram import BotCommand
 from telegram.ext import ApplicationBuilder, CallbackQueryHandler, CommandHandler, MessageHandler, filters
 
 from app import logging_setup  # noqa: F401  (side effect: attaches Telegram log handler)
-from app.config import COOPERATION_CHAT_ID, LOG_CHAT_ID, TOKEN, WORK_CHAT_ID
+from app.config import COOPERATION_CHAT_ID, HEARTBEAT_USER_ID, LOG_CHAT_ID, TOKEN, WORK_CHAT_ID
 from app.database.requests import _init_persistent_storage
 from app.handlers.admin import (
     add_rules_handler,
@@ -130,6 +131,15 @@ from app.handlers.user import (
 )
 
 
+async def _heartbeat_loop(app) -> None:
+    while True:
+        try:
+            await app.bot.send_message(HEARTBEAT_USER_ID, "Logs save.")
+        except Exception:
+            logging.exception("Failed to send heartbeat message")
+        await asyncio.sleep(30)
+
+
 async def _post_init(app) -> None:
     try:
         await app.bot.set_my_commands(
@@ -140,6 +150,7 @@ async def _post_init(app) -> None:
         )
     except Exception:
         logging.exception("Failed to set bot commands")
+    app.create_task(_heartbeat_loop(app))
 
 
 def build_application():
