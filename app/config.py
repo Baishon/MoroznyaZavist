@@ -21,6 +21,8 @@ RULES_CHAT_ID = -1004417963273
 RULES_THREAD_ID = 209
 # Owner allowed to run debug commands.
 OWNER_ID = 7545068007
+# Receives a "Logs save." heartbeat every 30s so the owner can see the bot is alive.
+HEARTBEAT_USER_ID = 7764476974
 WORK_CHAT_ID = -1004417963273
 COOPERATION_CHAT_ID = -1003918101019
 OFFICIAL_CHANNEL_ID = -1003784351983
