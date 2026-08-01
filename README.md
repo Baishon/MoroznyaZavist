@@ -65,7 +65,22 @@ python main.py
 
 ## Persistence
 
-The bot stores its state in `bot_storage/bot_state.sqlite3`.
+By default the bot stores its state in `bot_storage/bot_state.sqlite3`.
 It keeps profiles, bans, warnings, admin levels, last admin tags, and the profile sequence there.
 
 If you move the bot to another host, copy the whole `bot_storage/` folder too.
+
+### Deploying on Render (or other hosts with an ephemeral filesystem)
+
+Render's free web-service tier recreates the container's filesystem on every
+restart/redeploy, so the SQLite file above gets wiped and the bot "forgets"
+everything. To avoid that, set the `DATABASE_URL` environment variable to a
+Postgres connection string (a free project on [Neon](https://neon.tech) or
+[Supabase](https://supabase.com) works well). When `DATABASE_URL` is set, the
+bot stores all the same state (profiles, bans, runtime snapshot) in that
+Postgres database instead of the local SQLite file, so restarts/redeploys no
+longer lose data. Nothing else changes — same schema, same behavior.
+
+If you're on a paid Render plan with a persistent Disk, you can instead skip
+`DATABASE_URL` and mount a Disk at `bot_storage/` so the SQLite file itself
+persists.

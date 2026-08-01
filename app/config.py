@@ -34,5 +34,11 @@ ADMIN_LEVEL_TITLES = {
 }
 
 # Local SQLite persistence (kept at the project root as `bot_storage/`).
+# Fallback used when DATABASE_URL is not set (e.g. running locally).
 STATE_DIR = os.path.join(BASE_DIR, "bot_storage")
 STATE_DB_PATH = os.path.join(STATE_DIR, "bot_state.sqlite3")
+
+# When set (e.g. on Render, pointing at a free Neon/Supabase Postgres instance),
+# persistence uses this database instead of the local SQLite file, so state
+# survives restarts/redeploys on hosts with an ephemeral filesystem.
+DATABASE_URL = os.environ.get("DATABASE_URL")
