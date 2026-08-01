@@ -19,18 +19,42 @@ except ImportError:  # pragma: no cover - optional dependency for local SQLite-o
 
 
 class _PostgresConnection:
-    """Adapts a psycopg2 connection to sqlite3.Connection's execute()/commit() surface."""
+    """Adapts a psycopg2 connection to sqlite3.Connection's execute()/commit() surface.
 
-    def __init__(self, conn):
-        self._conn = conn
+    Neon (and similar serverless Postgres) suspends its compute after a few
+    minutes of inactivity and drops the underlying TCP connection, so a
+    long-lived connection can go stale between bot actions. Transparently
+    reconnect once when that happens instead of surfacing an OperationalError.
+    """
+
+    def __init__(self, database_url: str):
+        self._database_url = database_url
+        self._conn = psycopg2.connect(database_url)
+
+    def _reconnect(self) -> None:
+        try:
+            self._conn.close()
+        except Exception:
+            pass
+        self._conn = psycopg2.connect(self._database_url)
 
     def execute(self, sql: str, params=()):
-        cur = self._conn.cursor()
-        cur.execute(sql.replace("?", "%s"), params)
-        return cur
+        pg_sql = sql.replace("?", "%s")
+        try:
+            cur = self._conn.cursor()
+            cur.execute(pg_sql, params)
+            return cur
+        except (psycopg2.OperationalError, psycopg2.InterfaceError):
+            self._reconnect()
+            cur = self._conn.cursor()
+            cur.execute(pg_sql, params)
+            return cur
 
     def commit(self) -> None:
-        self._conn.commit()
+        try:
+            self._conn.commit()
+        except (psycopg2.OperationalError, psycopg2.InterfaceError):
+            self._reconnect()
 
     def close(self) -> None:
         self._conn.close()
@@ -44,7 +68,7 @@ def connect(database_url: str | None, sqlite_path: str):
                 "DATABASE_URL is set but psycopg2 is not installed. "
                 "Add psycopg2-binary to requirements.txt."
             )
-        return _PostgresConnection(psycopg2.connect(database_url))
+        return _PostgresConnection(database_url)
 
     conn = sqlite3.connect(sqlite_path)
     conn.execute("PRAGMA journal_mode=WAL")
