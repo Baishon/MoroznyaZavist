@@ -81,7 +81,11 @@ from app.services.topics import (
     _is_rp_action_text,
     _is_special_admin_chat,
     _next_suspicious_review_id,
+    _parse_rp_trigger_text,
     _parse_topic_url,
+    _render_rp_action_message,
+    _rp_display_name_admin,
+    _rp_display_name_user,
     _set_topic_state,
     _special_admin_chat_ids,
     _topic_url,
@@ -3874,6 +3878,36 @@ async def admin_group_message_handler(update: Update, context: ContextTypes.DEFA
             await context.bot.send_message(chat_id=LOG_CHAT_ID, text=review_text, reply_markup=review_kb)
         except Exception as e:
             logging.exception("admin suspicious review send failed: %s", e)
+        return
+
+    rp_trigger = _parse_rp_trigger_text(getattr(message, "text", None) or getattr(message, "caption", None))
+    if rp_trigger:
+        trigger_name, template = rp_trigger
+        admin_profile = _ensure_profile(context, str(update.effective_user.id), update.effective_user.username or f"id{update.effective_user.id}")
+        target_profile = _ensure_profile(context, str(target_user), active_target.get("topic_base_name") or f"id{target_user}")
+        admin_name = _rp_display_name_admin(admin_profile, fallback_username=update.effective_user.username, fallback_user_id=update.effective_user.id)
+        user_name = _rp_display_name_user(target_profile, fallback_username=active_target.get("topic_base_name") or target_profile.get("username"), fallback_user_id=target_user)
+        rendered = _render_rp_action_message(
+            template,
+            sender_is_admin=True,
+            name_admin=admin_name,
+            name_user=user_name,
+            trigger_name=trigger_name,
+        )
+        wrapped_text = f"💞RP : {rendered}"
+        try:
+            await context.bot.send_message(chat_id=update.effective_chat.id, message_thread_id=topic_id, text=wrapped_text)
+        except Exception:
+            pass
+        try:
+            await context.bot.send_message(chat_id=int(target_user), text=wrapped_text)
+        except Exception:
+            pass
+        _set_user_blocked_bot_state(context, str(target_user), False)
+        if active_target:
+            active_target["msg_topic_admin"] = int(active_target.get("msg_topic_admin", 0) or 0) + 1
+            active_target["rp_topic"] = int(active_target.get("rp_topic", 0) or 0) + 1
+            context.application.bot_data["total_admin_replies"] = int(context.application.bot_data.get("total_admin_replies", 0) or 0) + 1
         return
 
     # Forward the message to the user's private chat.

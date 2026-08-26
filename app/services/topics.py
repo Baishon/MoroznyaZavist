@@ -125,6 +125,110 @@ async def _is_member_of_chat(context: ContextTypes.DEFAULT_TYPE, chat_id: int, u
         return False
 
 
+def _rp_action_templates() -> dict[str, str]:
+    return {
+        "поздороваться": "{name_admin} дружески помахал рукой и поздоровался с {name_user}",
+        "обнять": "{name_admin} крепко и со всей теплотой обнял {name_user}",
+        "поцеловать": "{name_admin} нежно поцеловал в щеку {name_user}",
+        "улыбнуться": "{name_admin} искренне и тепло улыбнулся {name_user}",
+        "пожать руку": "{name_admin} уверенно и крепко пожал руку {name_user}",
+        "дать пять": "{name_admin} звонко дал «пять» {name_user}",
+        "подмигнуть": "{name_admin} задорно подмигнул {name_user}",
+        "похвалить": "{name_admin} искренне похвалил за отличную работу {name_user}",
+        "налить чай": "{name_admin} налил чашечку горячего ароматного чая для {name_user}",
+        "угостить кофе": "{name_admin} приготовил крепкий бодрящий кофе для {name_user}",
+        "поделиться печеньем": "{name_admin} протянул самую вкусную шоколадную печеньку {name_user}",
+        "укрыть пледом": "{name_admin} заботливо укутал в теплый мягкий плед {name_user}",
+        "позвать гулять": "{name_admin} предложил {name_user} бросить все дела и пойти прогуляться",
+        "включить фильм": "{name_admin} притащил попкорн и включил интересный фильм вместе с {name_user}",
+        "сделать кусь": "{name_admin} тихонько подкрался и сделал кусь за ушко {name_user}",
+        "погладить по голове": "{name_admin} ласково потрепал по волосам и погладил по голове {name_user}",
+        "пощекотать": "{name_admin} внезапно напал и начал нещадно щекотать {name_user}",
+        "дать леща": "{name_admin} выдал профилактический отрезвляющий подзатыльник {name_user}",
+        "оседлать": "{name_admin} с разбегу запрыгнул на спину и оседлал {name_user}",
+        "спрятаться": "{name_admin} испуганно залез под диван и спрятался от {name_user}",
+        "кинуть снежок": "{name_admin} идеально слепил снежок и запустил точно в {name_user}",
+        "подарить звезду": "{name_admin} достал с неба самую яркую звезду и вручил {name_user}",
+        "вызвать на дуэль": "{name_admin} пафосно бросил перчатку и вызвал на дуэль {name_user}",
+        "связать": "{name_admin} аккуратно, но крепко связал шелковой веревкой {name_user}",
+        "взять в заложники": "{name_admin} внезапно застал врасплох и взял в заложники {name_user}",
+        "ограбить": "{name_admin} незаметно проверил карманы и мастерски ограбил {name_user}",
+        "поставить в угол": "{name_admin} строго нахмурился и отправил стоять в угол {name_user}",
+        "наколдовать котика": "{name_admin} взмахнул волшебной палочкой и призвал пушистого кота на колени до {name_user}",
+        "страстно поцеловать": "{name_admin} резко притянул к себе и страстно поцеловал в губы {name_user}",
+        "повалить на кровать": "{name_admin} внезапно толкнул на мягкую кровать и навис сверху над {name_user}",
+        "прижать к стене": "{name_admin} грубо заблокировал руками все пути к отступлению и прижал к стене {name_user}",
+        "укусить за губу": "{name_admin} во время поцелуя слегка и игриво укусил за нижнюю губу {name_user}",
+        "сорвать одежду": "{name_admin} резким движением в порыве страсти сорвал верхнюю одежду с {name_user}",
+        "посадить на колени": "{name_admin} уверенно взял за талию и усадил к себе на колени {name_user}",
+        "шептать на ушко": "{name_admin} медленно подошел со спины и горячо прошептал пошлую шутку на ушко {name_user}",
+        "наказать": "{name_admin} строго посмотрел в глаза и сурово наказал за непослушание {name_user}",
+        "приказать": "{name_admin} властным тоном отдал жесткий приказ, который должен выполнить {name_user}",
+        "заставить подчиниться": "{name_admin} применил силу и полностью подчинил своей воле {name_user}",
+        "шлепнуть": "{name_admin} замахнулся и звонко шлепнул по мягкому месту {name_user}",
+        "изнасиловать": "{name_admin} жестко надругался над {name_user}",
+        "выебать": "{name_admin} принудил к жёсткому интиму {name_user}",
+        "трахнуть": "{name_admin} принудил к интиму {name_user}",
+    }
+
+
+def _normalize_rp_trigger_text(text: str | None) -> str:
+    value = (text or "").strip()
+    return re.sub(r"\s+", " ", value).lower()
+
+
+def _parse_rp_trigger_text(text: str | None) -> tuple[str, str] | None:
+    normalized = _normalize_rp_trigger_text(text)
+    if not normalized:
+        return None
+    template = _rp_action_templates().get(normalized)
+    if not template:
+        return None
+    return (normalized, template)
+
+
+def _rp_display_name_admin(profile: dict | None, fallback_username: str | None = None, fallback_user_id: str | int | None = None) -> str:
+    tag_value = str((profile or {}).get("tag_admin") or "").strip()
+    if tag_value:
+        return tag_value.lstrip("@")
+
+    fallback = str(fallback_username or "").strip()
+    if fallback:
+        return fallback if fallback.startswith("@") else f"@{fallback}"
+    if fallback_user_id is not None:
+        return f"id{fallback_user_id}"
+    return "админ"
+
+
+def _rp_display_name_user(profile: dict | None, fallback_username: str | None = None, fallback_user_id: str | int | None = None) -> str:
+    nickname = str((profile or {}).get("user_nickname") or "").strip()
+    if nickname:
+        return nickname
+
+    fallback = str(fallback_username or "").strip()
+    if fallback:
+        return fallback if fallback.startswith("@") else f"@{fallback}"
+    if fallback_user_id is not None:
+        return f"id{fallback_user_id}"
+    return "пользователь"
+
+
+def _render_rp_action_message(template: str, sender_is_admin: bool, name_admin: str, name_user: str, trigger_name: str | None = None) -> str:
+    display_name_admin = str(name_admin or "админ").strip().lstrip("@")
+    display_name_user = str(name_user or "пользователь").strip().lstrip("@")
+
+    text = template.replace("{name_admin}", "__ADMIN__").replace("{name_user}", "__USER__")
+    if sender_is_admin:
+        return text.replace("__ADMIN__", display_name_admin).replace("__USER__", display_name_user)
+
+    swapped = text.replace("__ADMIN__", "__SWAP__").replace("__USER__", "__ADMIN__").replace("__SWAP__", "__USER__")
+    return swapped.replace("__ADMIN__", display_name_admin).replace("__USER__", display_name_user)
+
+
 def _is_rp_action_text(text: str | None) -> bool:
-    value = (text or "").strip().lower()
-    return value.startswith("/me ") or value.startswith("*")
+    value = _normalize_rp_trigger_text(text)
+    if not value:
+        return False
+    if value.startswith("/me ") or value.startswith("*"):
+        return True
+    return value in _rp_action_templates()
