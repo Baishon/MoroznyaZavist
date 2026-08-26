@@ -28,6 +28,7 @@ from app.config import ADMIN_LEVEL_TITLES, LOG_CHAT_ID, WORK_CHAT_ID
 from app.database.requests import _save_profile_record, _save_runtime_snapshot
 from app.handlers.candidates import _send_candidate_stage_1, admin_candidate_private_flow
 from app.keyboards.inline import (
+    _build_active_session_keyboard,
     _build_candidate_gender_keyboard,
     _build_candidate_tip_keyboard,
     _build_complaint_admin_menu_keyboard,
@@ -52,6 +53,10 @@ from app.services.topics import (
     _has_suspicious_username,
     _is_rp_action_text,
     _next_suspicious_review_id,
+    _parse_rp_trigger_text,
+    _render_rp_action_message,
+    _rp_display_name_admin,
+    _rp_display_name_user,
     _topic_url,
 )
 
@@ -167,6 +172,30 @@ async def send_main_submenu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Выберите действие в меню ниже:", reply_markup=menu_keyboard)
 
 
+async def send_active_session_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or update.effective_chat.type != ChatType.PRIVATE:
+        return
+    if await block_if_banned(update, context):
+        return
+    active = (context.application.bot_data.get("active_chats", {}) or {}).get(str(update.effective_user.id)) if update.effective_user else None
+    if not active or not active.get("active"):
+        await update.message.reply_text("У вас нет активной сессии с администратором.")
+        await send_main_submenu(update, context)
+        return
+    await update.message.reply_text("Кнопки диалога:", reply_markup=_build_active_session_keyboard())
+
+
+async def return_to_main_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or update.effective_chat.type != ChatType.PRIVATE:
+        return
+    if await block_if_banned(update, context):
+        return
+    await send_main_submenu(update, context)
+
+
+async def return_to_dialog_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await send_active_session_menu(update, context)
+
 
 async def settings_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or update.effective_chat.type != ChatType.PRIVATE:
@@ -242,6 +271,44 @@ async def settings_enable_ad_handler(update: Update, context: ContextTypes.DEFAU
 
 
 
+def _complaint_cooldown_duration(profile: dict) -> int:
+    warn_count = int(profile.get("warn", 0) or 0)
+    return 30 * 60 + (3 * 60 * 60 if warn_count > 0 else 0)
+
+
+def _format_cooldown_left(seconds_left: int) -> str:
+    total = max(0, seconds_left)
+    hours, remainder = divmod(total, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    if hours:
+        return f"{hours} ч. {minutes} мин."
+    if minutes:
+        return f"{minutes} мин. {seconds} сек."
+    return f"{seconds} сек."
+
+
+def _check_complaint_cooldown(context: ContextTypes.DEFAULT_TYPE, user_id: str, profile: dict, cooldown_key: str, label: str):
+    now = time.time()
+    cooldown_until = float(profile.get(cooldown_key, 0) or 0)
+    if cooldown_until <= now:
+        return False, ""
+
+    warn_count = int(profile.get("warn", 0) or 0)
+    if warn_count > 0:
+        profile[cooldown_key] = cooldown_until + (3 * 60 * 60)
+        _save_profile_record(context, user_id)
+    remaining = max(0, int(float(profile.get(cooldown_key, now)) - now))
+    waiting_text = _format_cooldown_left(remaining)
+    return True, f"⏳Вы сможете использовать «{label}» снова через {waiting_text}."
+
+
+def _activate_complaint_cooldown(context: ContextTypes.DEFAULT_TYPE, user_id: str, profile: dict, cooldown_key: str) -> None:
+    now = time.time()
+    duration = _complaint_cooldown_duration(profile)
+    profile[cooldown_key] = now + duration
+    _save_profile_record(context, user_id)
+
+
 async def settings_complaint_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or update.effective_chat.type != ChatType.PRIVATE:
         return
@@ -262,6 +329,12 @@ async def complaint_bug_menu_handler(update: Update, context: ContextTypes.DEFAU
         return
 
     user_id = str(update.effective_user.id)
+    profile = _ensure_profile(context, user_id, update.effective_user.username or f"id{user_id}")
+    blocked, message_text = _check_complaint_cooldown(context, user_id, profile, "bug_report_cooldown_until", "Сообщить о баге")
+    if blocked:
+        await update.message.reply_text(message_text)
+        return
+
     pending = context.application.bot_data.setdefault("pending_bug_reports", {})
     pending[user_id] = {
         "state": "await_text",
@@ -293,6 +366,12 @@ async def complaint_admin_menu_handler(update: Update, context: ContextTypes.DEF
         return
 
     user_id = str(update.effective_user.id)
+    profile = _ensure_profile(context, user_id, update.effective_user.username or f"id{user_id}")
+    blocked, message_text = _check_complaint_cooldown(context, user_id, profile, "admin_complaint_cooldown_until", "Пожаловаться на админа")
+    if blocked:
+        await update.message.reply_text(message_text)
+        return
+
     pending = context.application.bot_data.setdefault("pending_admin_complaints", {})
     pending.pop(user_id, None)
 
@@ -324,6 +403,12 @@ async def complaint_admin_write_tag_handler(update: Update, context: ContextType
         return
 
     user_id = str(update.effective_user.id)
+    profile = _ensure_profile(context, user_id, update.effective_user.username or f"id{user_id}")
+    blocked, message_text = _check_complaint_cooldown(context, user_id, profile, "admin_complaint_cooldown_until", "Пожаловаться на админа")
+    if blocked:
+        await update.message.reply_text(message_text)
+        return
+
     pending = context.application.bot_data.setdefault("pending_admin_complaints", {})
     pending[user_id] = {"state": "await_tag"}
 
@@ -345,6 +430,11 @@ async def complaint_admin_last_admin_handler(update: Update, context: ContextTyp
 
     user_id = str(update.effective_user.id)
     profile = _ensure_profile(context, user_id, update.effective_user.username or f"id{user_id}")
+    blocked, message_text = _check_complaint_cooldown(context, user_id, profile, "admin_complaint_cooldown_until", "Пожаловаться на админа")
+    if blocked:
+        await update.message.reply_text(message_text)
+        return
+
     last_tag = str(profile.get("last_admin_tag") or "").strip()
     if not last_tag or last_tag == "не указан":
         await update.message.reply_text("ℹ️У вас пока нет последнего администратора, на которого можно пожаловаться.")
@@ -430,37 +520,99 @@ async def admin_complaint_text_input_handler(update: Update, context: ContextTyp
             await update.message.reply_text("Текст жалобы не должен быть пустым.")
             raise ApplicationHandlerStop
 
-        profile = _ensure_profile(context, user_id, update.effective_user.username or f"id{user_id}")
-        id_profile = int(profile.get("id_profile", 0) or 0)
-        admin_tag = str(entry.get("admin_tag") or "не указан")
-        via_last_admin = bool(entry.get("via_last_admin", False))
-
-        if via_last_admin:
-            notification_text = (
-                f"👮‍♀️Поступила жалоба на администратора {admin_tag} \n\n"
-                f"От пользователя #{id_profile} (Являлась ПЗ этого админа)\n"
-                f"Суть жалобы: {complaint_text}"
-            )
-        else:
-            notification_text = (
-                f"👮‍♀️Поступила жалоба на администратора {admin_tag}\n\n"
-                f"От пользователя #{id_profile}\n"
-                f"Суть жалобы: {complaint_text}"
-            )
-
-        try:
-            await context.bot.send_message(chat_id=LOG_CHAT_ID, text=notification_text)
-        except Exception:
-            logging.exception("admin complaint send failed")
-
-        pending.pop(user_id, None)
+        entry["draft_text"] = complaint_text
+        entry["state"] = "await_proof"
         await update.message.reply_text(
-            "✅Жалоба отправлена руководству.",
-            reply_markup=_build_complaint_menu_keyboard(),
+            "📎Пришлите изображение-доказательство (скрин/фото) или нажмите «Далее», если доказательство не нужно.\n\n"
+            "После этого жалоба будет отправлена руководству.",
+            reply_markup=InlineKeyboardMarkup(
+                [[InlineKeyboardButton("Далее", callback_data=f"admin_complaint_confirm_{user_id}")], [InlineKeyboardButton("отмена", callback_data=f"admin_complaint_cancel_{user_id}")]]
+            ),
         )
         raise ApplicationHandlerStop
 
     return
+
+
+async def admin_complaint_photo_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or update.effective_chat.type != ChatType.PRIVATE or not update.effective_user:
+        return
+    if update.effective_user.is_bot:
+        return
+
+    pending = context.application.bot_data.setdefault("pending_admin_complaints", {})
+    user_id = str(update.effective_user.id)
+    entry = pending.get(user_id)
+    if not entry:
+        return
+    if str(entry.get("state")) not in {"await_proof", "await_confirm"}:
+        return
+
+    photo = update.message.photo[-1] if update.message.photo else None
+    if photo is None:
+        return
+
+    entry["photo_file_id"] = photo.file_id
+    entry["state"] = "await_confirm"
+    await update.message.reply_text(
+        "✅Изображение-доказательство добавлено. Нажмите «Далее», чтобы отправить жалобу.",
+        reply_markup=InlineKeyboardMarkup(
+            [[InlineKeyboardButton("Далее", callback_data=f"admin_complaint_confirm_{user_id}")], [InlineKeyboardButton("отмена", callback_data=f"admin_complaint_cancel_{user_id}")]]
+        ),
+    )
+    raise ApplicationHandlerStop
+
+
+async def admin_complaint_confirm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.callback_query.answer()
+    user_id = (update.callback_query.data or "").split("_")[-1]
+    if str(update.effective_user.id) != str(user_id):
+        await update.callback_query.answer("Кнопка доступна только владельцу запроса", show_alert=True)
+        return
+
+    pending = context.application.bot_data.setdefault("pending_admin_complaints", {})
+    entry = pending.get(str(user_id))
+    if not entry or str(entry.get("state")) not in {"await_proof", "await_confirm"}:
+        await update.callback_query.answer("Заявка устарела", show_alert=True)
+        return
+
+    profile = _ensure_profile(context, str(user_id), update.effective_user.username or f"id{user_id}")
+    id_profile = int(profile.get("id_profile", 0) or 0)
+    admin_tag = str(entry.get("admin_tag") or "не указан")
+    via_last_admin = bool(entry.get("via_last_admin", False))
+    complaint_text = str(entry.get("draft_text") or "").strip()
+    photo_file_id = entry.get("photo_file_id")
+
+    if via_last_admin:
+        notification_text = (
+            f"👮‍♀️Поступила жалоба на администратора {admin_tag} \n\n"
+            f"От пользователя #{id_profile} (Являлась ПЗ этого админа)\n"
+            f"Суть жалобы: {complaint_text}"
+        )
+    else:
+        notification_text = (
+            f"👮‍♀️Поступила жалоба на администратора {admin_tag}\n\n"
+            f"От пользователя #{id_profile}\n"
+            f"Суть жалобы: {complaint_text}"
+        )
+
+    try:
+        if photo_file_id:
+            await context.bot.send_photo(chat_id=LOG_CHAT_ID, photo=photo_file_id, caption=notification_text)
+        else:
+            await context.bot.send_message(chat_id=LOG_CHAT_ID, text=notification_text)
+        _activate_complaint_cooldown(context, str(user_id), profile, "admin_complaint_cooldown_until")
+    except Exception:
+        logging.exception("admin complaint send failed")
+
+    pending.pop(str(user_id), None)
+    try:
+        await update.callback_query.message.reply_text(
+            "✅Жалоба отправлена руководству.",
+            reply_markup=_build_complaint_menu_keyboard(),
+        )
+    except Exception:
+        pass
 
 
 
@@ -494,7 +646,7 @@ async def bug_report_confirm_callback(update: Update, context: ContextTypes.DEFA
 
     pending = context.application.bot_data.setdefault("pending_bug_reports", {})
     entry = pending.get(str(user_id))
-    if not entry or str(entry.get("state")) != "await_confirm":
+    if not entry or str(entry.get("state")) not in {"await_proof", "await_confirm"}:
         await update.callback_query.answer("Заявка устарела", show_alert=True)
         return
 
@@ -507,18 +659,25 @@ async def bug_report_confirm_callback(update: Update, context: ContextTypes.DEFA
     profile = _ensure_profile(context, str(user_id), update.effective_user.username or f"id{user_id}")
     id_profile = int(profile.get("id_profile", 0) or 0)
     username = str(profile.get("username") or f"id{user_id}")
+    photo_file_id = entry.get("photo_file_id")
+    text_block = (
+        "🛠Новая жалоба о баге\n\n"
+        f"id_profile: #{id_profile}\n"
+        f"username: {username}\n"
+        f"user_id: {user_id}\n\n"
+        f"Текст: {report_text}"
+    )
 
     try:
-        await context.bot.send_message(
-            chat_id=LOG_CHAT_ID,
-            text=(
-                "🛠Новая жалоба о баге\n\n"
-                f"id_profile: #{id_profile}\n"
-                f"username: {username}\n"
-                f"user_id: {user_id}\n\n"
-                f"Текст: {report_text}"
-            ),
-        )
+        if photo_file_id:
+            await context.bot.send_photo(
+                chat_id=LOG_CHAT_ID,
+                photo=photo_file_id,
+                caption=text_block,
+            )
+        else:
+            await context.bot.send_message(chat_id=LOG_CHAT_ID, text=text_block)
+        _activate_complaint_cooldown(context, str(user_id), profile, "bug_report_cooldown_until")
     except Exception:
         pass
 
@@ -580,15 +739,46 @@ async def bug_report_text_input_handler(update: Update, context: ContextTypes.DE
         await update.message.reply_text("Текст не должен быть пустым.")
         raise ApplicationHandlerStop
 
-    entry["state"] = "await_confirm"
+    entry["state"] = "await_proof"
     entry["draft_text"] = report_text
     await update.message.reply_text(
-        "🛠Вы уверены что хотите отправить этот текст техническому специалисту?",
+        "📎Пришлите изображение-доказательство (скрин/фото) или нажмите «Далее», если доказательство не нужно.\n\n"
+        "После этого жалоба будет отправлена в технический раздел.",
         reply_markup=InlineKeyboardMarkup(
             [[
-                InlineKeyboardButton("уверен", callback_data=f"bug_report_confirm_{user_id}"),
-                InlineKeyboardButton("не уверен", callback_data=f"bug_report_reject_{user_id}"),
+                InlineKeyboardButton("Далее", callback_data=f"bug_report_confirm_{user_id}"),
+            ], [
+                InlineKeyboardButton("отмена", callback_data=f"bug_report_cancel_{user_id}"),
             ]]
+        ),
+    )
+    raise ApplicationHandlerStop
+
+
+async def bug_report_photo_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or update.effective_chat.type != ChatType.PRIVATE or not update.effective_user:
+        return
+    if update.effective_user.is_bot:
+        return
+
+    pending = context.application.bot_data.setdefault("pending_bug_reports", {})
+    user_id = str(update.effective_user.id)
+    entry = pending.get(user_id)
+    if not entry:
+        return
+    if str(entry.get("state")) not in {"await_proof", "await_confirm"}:
+        return
+
+    photo = update.message.photo[-1] if update.message.photo else None
+    if photo is None:
+        return
+
+    entry["photo_file_id"] = photo.file_id
+    entry["state"] = "await_confirm"
+    await update.message.reply_text(
+        "✅Изображение-доказательство добавлено. Нажмите «Далее», чтобы отправить жалобу.",
+        reply_markup=InlineKeyboardMarkup(
+            [[InlineKeyboardButton("Далее", callback_data=f"bug_report_confirm_{user_id}")], [InlineKeyboardButton("отмена", callback_data=f"bug_report_cancel_{user_id}")]]
         ),
     )
     raise ApplicationHandlerStop
@@ -614,15 +804,7 @@ async def restart_command_handler(update: Update, context: ContextTypes.DEFAULT_
             )
             return
 
-        session_kb = ReplyKeyboardMarkup(
-            [[KeyboardButton("🤧Отказаться от админа"), KeyboardButton("💤Приостановить общение")]],
-            resize_keyboard=True,
-            one_time_keyboard=False,
-        )
-        await update.message.reply_text(
-            "Вы в активной сессии. Используйте кнопки ниже для управления текущим диалогом.",
-            reply_markup=session_kb,
-        )
+        await send_active_session_menu(update, context)
         return
 
     state = (context.application.bot_data.get("admin_candidate_state", {}) or {}).get(user_id)
@@ -1603,6 +1785,38 @@ async def user_private_message_handler(update: Update, context: ContextTypes.DEF
     chat_id = active.get("chat_id")
     topic_id = active.get("topic_id")
     profile = _ensure_profile(context, user_id, update.effective_user.username or f"id{update.effective_user.id}")
+
+    rp_trigger = _parse_rp_trigger_text(update.message.text or update.message.caption)
+    if rp_trigger:
+        trigger_name, template = rp_trigger
+        admin_profile = _ensure_profile(context, str(active.get("admin_id")), active.get("admin_username") or f"id{active.get('admin_id')}")
+        admin_name = _rp_display_name_admin(admin_profile, fallback_username=active.get("admin_username"), fallback_user_id=active.get("admin_id"))
+        user_name = _rp_display_name_user(profile, fallback_username=update.effective_user.username, fallback_user_id=update.effective_user.id)
+        rendered = _render_rp_action_message(
+            template,
+            sender_is_admin=False,
+            name_admin=admin_name,
+            name_user=user_name,
+            trigger_name=trigger_name,
+        )
+        wrapped_text = f"💞RP : {rendered}"
+        try:
+            await context.bot.send_message(chat_id=int(chat_id), message_thread_id=topic_id if topic_id else None, text=wrapped_text)
+        except Exception:
+            try:
+                await context.bot.send_message(chat_id=int(chat_id), text=wrapped_text)
+            except Exception:
+                pass
+        admin_id = active.get("admin_id")
+        if admin_id:
+            try:
+                await context.bot.send_message(chat_id=int(admin_id), text=wrapped_text)
+            except Exception:
+                pass
+        profile["message_user"] = int(profile.get("message_user", 0) or 0) + 1
+        active["msg_topic_user"] = int(active.get("msg_topic_user", 0) or 0) + 1
+        active["rp_topic"] = int(active.get("rp_topic", 0) or 0) + 1
+        return
 
     try:
         copied = await context.bot.copy_message(

@@ -11,6 +11,8 @@ The wrapper exposes the small ``execute``/``commit``/``close`` surface that
 which engine is active.
 """
 import sqlite3
+import os
+import logging
 
 try:
     import psycopg2
@@ -61,14 +63,21 @@ class _PostgresConnection:
 
 
 def connect(database_url: str | None, sqlite_path: str):
-    """Return a connection to Postgres (if configured) or the local SQLite file."""
+    """Return a connection to Postgres (if configured) or the local SQLite file.
+
+    If DATABASE_URL is set but psycopg2 isn't installed, fall back to a local
+    SQLite file and emit a warning so the process doesn't crash in non-prod envs.
+    """
     if database_url:
         if psycopg2 is None:
-            raise RuntimeError(
-                "DATABASE_URL is set but psycopg2 is not installed. "
-                "Add psycopg2-binary to requirements.txt."
+            logging.warning(
+                "DATABASE_URL is set but psycopg2 is not installed; falling back to "
+                "SQLite at %s. To use Postgres, add psycopg2-binary to requirements.txt.",
+                sqlite_path,
             )
-        return _PostgresConnection(database_url)
+            # fall back to sqlite
+        else:
+            return _PostgresConnection(database_url)
 
     conn = sqlite3.connect(sqlite_path)
     conn.execute("PRAGMA journal_mode=WAL")

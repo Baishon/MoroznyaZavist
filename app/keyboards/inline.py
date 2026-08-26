@@ -45,8 +45,27 @@ def _build_candidate_gender_keyboard(user_id: str) -> InlineKeyboardMarkup:
 def _build_main_menu_keyboard(context: ContextTypes.DEFAULT_TYPE, user_id: int | str, username_hint: str | None = None) -> ReplyKeyboardMarkup:
     profile = _ensure_profile(context, str(user_id), username_hint or f"id{user_id}")
     profile_button = "🔰Админ-профиль" if _has_admin_rights_level_1_5(profile) else "👤 Профиль"
+    rows = [
+        [KeyboardButton("👤 Найти админа")],
+        [KeyboardButton(profile_button)],
+    ]
+    active = (context.application.bot_data.get("active_chats", {}) or {}).get(str(user_id))
+    if active and active.get("active"):
+        rows.append([KeyboardButton("↩️Вернуться к кнопкам диалога")])
+    rows.append([KeyboardButton("⚙️Настройки")])
     return ReplyKeyboardMarkup(
-        [[KeyboardButton("👤 Найти админа")], [KeyboardButton(profile_button)], [KeyboardButton("⚙️Настройки")]],
+        rows,
+        resize_keyboard=True,
+        one_time_keyboard=False,
+    )
+
+
+def _build_active_session_keyboard() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        [
+            [KeyboardButton("🤧Отказаться от админа"), KeyboardButton("💤Приостановить общение")],
+            [KeyboardButton("↪️Вернуться в главное меню")],
+        ],
         resize_keyboard=True,
         one_time_keyboard=False,
     )
@@ -197,6 +216,7 @@ def _prefix_options() -> list[tuple[str, str]]:
         ("logs", "👁Logs"),
         ("cooperation", "💎Сотрудничество"),
         ("tech", "👨‍💻Технический специалист"),
+        ("montajer", "🔧Монтажер"),
         ("owner", "💋Владелец"),
         ("deputy", "💘Заместитель владельца"),
         ("queen", "👑Королева"),
