@@ -114,6 +114,138 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+# ==== Agreement enforcement helpers ====
+AGREEMENT_TEXT = (
+    "╭─────────────── ✦ ───────────────╮\n"
+    "          🤍 ДОБРО ПОЖАЛОВАТЬ\n"
+    "╰─────────────── ✦ ───────────────╯\n\n"
+    "Прежде чем продолжить знакомство с ботом, пожалуйста, ознакомьтесь с **Пользовательским соглашением** и **Политикой обработки персональных данных**. 📖\n\n"
+    "Здесь собраны основные правила использования сервиса, права и обязанности сторон, а также информация об ответственности.\n\n"
+    "𓂃 ˖ ☁️ Чтобы продолжить, внимательно ознакомьтесь с документами и подтвердите своё согласие, нажав кнопку **«Принять»**.\n\n"
+    "⚠️ Если вы не принимаете условия, к функционалу бота получить доступ не получится.\n\n"
+    "Нажимая **«Принять»**, вы подтверждаете, что ознакомились с текстом Соглашения и Политики обработки персональных данных в полном объёме и принимаете их условия."
+)
+
+
+def _agreement_markup() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[InlineKeyboardButton("✅ Принять", callback_data="agreement_accept")]])
+
+
+async def _send_agreement_message_for_user(chat_id: int, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        await context.bot.send_message(chat_id=chat_id, text=AGREEMENT_TEXT, parse_mode=ParseMode.MARKDOWN, reply_markup=_agreement_markup())
+    except Exception:
+        try:
+            # fallback without markdown
+            await context.bot.send_message(chat_id=chat_id, text=AGREEMENT_TEXT, reply_markup=_agreement_markup())
+        except Exception:
+            pass
+
+
+async def agreement_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Intercepts any private chat message when user hasn't accepted the agreement yet
+    if not update.message or not update.effective_user:
+        return
+    if update.effective_chat.type != ChatType.PRIVATE:
+        return
+
+    user_id = str(update.effective_user.id)
+    profile = _ensure_profile(context, user_id, update.effective_user.username or f"id{user_id}")
+    agreed = int(profile.get("agreed_terms", 0) or 0)
+    if agreed == 1:
+        return
+
+    # Send agreement message and stop further processing
+    await _send_agreement_message_for_user(int(user_id), context)
+    raise ApplicationHandlerStop
+
+
+async def agreement_callback_guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Guard for callback queries in private chat: if user not agreed, show agreement and stop.
+    query = update.callback_query
+    if not query or not update.effective_user:
+        return
+    if update.effective_chat and update.effective_chat.type != ChatType.PRIVATE:
+        return
+
+    data = (query.data or "").strip()
+    if data == "agreement_accept":
+        # let the specific accept handler process it
+        return
+
+    user_id = str(update.effective_user.id)
+    profile = _ensure_profile(context, user_id, update.effective_user.username or f"id{user_id}")
+    agreed = int(profile.get("agreed_terms", 0) or 0)
+    if agreed == 1:
+        return
+
+    try:
+        await query.answer()
+    except Exception:
+        pass
+    await _send_agreement_message_for_user(int(user_id), context)
+    raise ApplicationHandlerStop
+
+
+async def agreement_accept_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # User pressed Accept — set flag and send /start welcome messages
+    query = update.callback_query
+    if not query or not update.effective_user:
+        return
+    user_id = str(update.effective_user.id)
+    profile = _ensure_profile(context, user_id, update.effective_user.username or f"id{user_id}")
+    profile["agreed_terms"] = 1
+    try:
+        _save_profile_record(context, user_id)
+    except Exception:
+        pass
+
+    # delete the agreement message if possible
+    try:
+        if query.message:
+            await query.message.delete()
+    except Exception:
+        pass
+
+    # send the same initial /start content
+    try:
+        text = (
+            "☀️ <b>Лучик, привет! Я так ждал тебя!</b>\n\n"
+            "Посмотри на себя — ты уже сделал(а) большое дело! Ты пришел(ла) в место, где тебя поймут. "
+            "Здесь нет оценок, нет \"правильных\" и \"неправильных\" ответов. Есть только ты и твой собеседник, "
+            "и вы вместе разберете все твои чувства по полочкам.\n\n"
+            "Иногда наши эмоции похожи на воздушные шарики: если их слишком много внутри, они могут лопнуть или улететь. "
+            "А если их выпускать по одному и рассматривать, то становится легко и даже весело! "
+            "Ты будешь учиться выпускать их с помощью общения или игр!\n\n"
+            "Торопись быстрее, ведь администратор уже заждался тебя! Вы сможете:\n"
+            "🧸 Послать тебе обнимашку в ответ на твою грусть;\n"
+            "🌬️ Показать, как дышать, чтобы улетучилась вся тревога;\n"
+            "💬 Или просто поговорить о твоем дне. Им правда-правда интересно!\n\n"
+            "А еще, смотри, какие здесь кнопки Они как порталы в разные волшебные миры. Попробуй нажать на одну из них, "
+            "и я сразу покажу тебе что-то интересное. Помни: ты самый важный человек для админов. Все будет супер! 🦋"
+        )
+        keyboard = InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton("⭐ Канал бота", url="https://t.me/Icyenvy_channel"),
+                    InlineKeyboardButton("❓ Помощь", callback_data="help")
+                ]
+            ]
+        )
+        await context.bot.send_message(chat_id=int(user_id), text=text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
+
+        menu_keyboard = _build_main_menu_keyboard(context, int(user_id), update.effective_user.username)
+        await context.bot.send_message(chat_id=int(user_id), text="Выберите действие в меню ниже:", reply_markup=menu_keyboard)
+    except Exception:
+        pass
+
+    try:
+        await query.answer("Спасибо! Вы приняли условия.")
+    except Exception:
+        pass
+
+    raise ApplicationHandlerStop
+
 async def help_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await block_if_banned(update, context):
         return

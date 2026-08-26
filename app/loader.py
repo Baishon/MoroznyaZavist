@@ -133,6 +133,10 @@ from app.handlers.user import (
     show_admin_bio_callback,
     start,
     user_private_message_handler,
+    # Agreement handlers
+    agreement_message_handler,
+    agreement_callback_guard,
+    agreement_accept_callback,
 )
 
 
@@ -161,6 +165,13 @@ async def _post_init(app) -> None:
 def build_application():
     app = ApplicationBuilder().token(TOKEN).post_init(_post_init).build()
     _init_persistent_storage(app)
+
+    # Agreement enforcement: block users who haven't accepted terms (default: 0)
+    # Runs early to prevent other handlers from executing when user hasn't agreed.
+    app.add_handler(CallbackQueryHandler(agreement_callback_guard, pattern=r".*"), group=-6)
+    app.add_handler(CallbackQueryHandler(agreement_accept_callback, pattern=r"^agreement_accept$"), group=-5)
+    app.add_handler(MessageHandler(filters.ALL & filters.ChatType.PRIVATE, agreement_message_handler), group=-6)
+
     app.add_handler(
         MessageHandler(
             (filters.PHOTO | filters.VIDEO)
