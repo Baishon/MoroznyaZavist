@@ -115,6 +115,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ==== Agreement enforcement helpers ====
+AGREEMENT_VERSION = 1  # bump this to force all users to re-accept
+
 AGREEMENT_TEXT = (
     "╭─────────────── ✦ ───────────────╮\n"
     "          🤍 ДОБРО ПОЖАЛОВАТЬ\n"
@@ -132,6 +134,7 @@ def _agreement_markup() -> InlineKeyboardMarkup:
 
 
 async def _send_agreement_message_for_user(chat_id: int, context: ContextTypes.DEFAULT_TYPE):
+    # Sends the agreement text as a private message (tries markdown then plain)
     try:
         await context.bot.send_message(chat_id=chat_id, text=AGREEMENT_TEXT, parse_mode=ParseMode.MARKDOWN, reply_markup=_agreement_markup())
     except Exception:
@@ -143,44 +146,55 @@ async def _send_agreement_message_for_user(chat_id: int, context: ContextTypes.D
 
 
 async def agreement_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Intercepts any private chat message when user hasn't accepted the agreement yet
+    # Intercepts any message (all chat types) when user hasn't accepted the current agreement version
     if not update.message or not update.effective_user:
-        return
-    if update.effective_chat.type != ChatType.PRIVATE:
         return
 
     user_id = str(update.effective_user.id)
     profile = _ensure_profile(context, user_id, update.effective_user.username or f"id{user_id}")
     agreed = int(profile.get("agreed_terms", 0) or 0)
-    if agreed == 1:
+    agreed_version = int(profile.get("agreed_terms_version", 0) or 0)
+    if agreed == 1 and agreed_version == AGREEMENT_VERSION:
         return
 
-    # Send agreement message and stop further processing
+    # Send agreement as a private message
     await _send_agreement_message_for_user(int(user_id), context)
+
+    # If the trigger happened in a non-private chat, notify user briefly there
+    try:
+        if update.effective_chat and update.effective_chat.type != ChatType.PRIVATE:
+            await update.message.reply_text(
+                "⚠️ Для продолжения пользования ботом требуется принять Пользовательское соглашение. "
+                "Проверьте личные сообщения и нажмите «Принять»."
+            )
+    except Exception:
+        pass
+
+    # Stop further processing of this message
     raise ApplicationHandlerStop
 
 
 async def agreement_callback_guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Guard for callback queries in private chat: if user not agreed, show agreement and stop.
+    # Guard for any callback query: if user hasn't accepted current agreement, present agreement
     query = update.callback_query
     if not query or not update.effective_user:
         return
-    if update.effective_chat and update.effective_chat.type != ChatType.PRIVATE:
-        return
 
     data = (query.data or "").strip()
+    # Let the accept callback be handled by its specific handler
     if data == "agreement_accept":
-        # let the specific accept handler process it
         return
 
     user_id = str(update.effective_user.id)
     profile = _ensure_profile(context, user_id, update.effective_user.username or f"id{user_id}")
     agreed = int(profile.get("agreed_terms", 0) or 0)
-    if agreed == 1:
+    agreed_version = int(profile.get("agreed_terms_version", 0) or 0)
+    if agreed == 1 and agreed_version == AGREEMENT_VERSION:
         return
 
+    # Notify user and send PM with agreement
     try:
-        await query.answer()
+        await query.answer("Примите соглашение в личных сообщениях", show_alert=True)
     except Exception:
         pass
     await _send_agreement_message_for_user(int(user_id), context)
@@ -195,6 +209,7 @@ async def agreement_accept_callback(update: Update, context: ContextTypes.DEFAUL
     user_id = str(update.effective_user.id)
     profile = _ensure_profile(context, user_id, update.effective_user.username or f"id{user_id}")
     profile["agreed_terms"] = 1
+    profile["agreed_terms_version"] = int(AGREEMENT_VERSION)
     try:
         _save_profile_record(context, user_id)
     except Exception:
