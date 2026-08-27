@@ -6,16 +6,30 @@ before processing a message; `enforce_autoban_if_needed` applies the
 warn-count-based autoban rule. Persists through `app.database.requests`.
 """
 from datetime import datetime
+import time
 
 from telegram import Update
 from telegram.ext import ContextTypes
 
 from app.config import LOG_CHAT_ID
 from app.database.requests import _save_ban_record, _save_profile_record
-from app.services.profiles import _has_admin_ban_immunity, is_user_banned
+from app.services.profiles import (
+    _has_admin_ban_immunity,
+    format_ban_remaining,
+    get_ban_remaining_seconds,
+    is_user_banned,
+    refresh_timed_warnings,
+)
 
 
-async def _apply_ban(context: ContextTypes.DEFAULT_TYPE, user_id: str, username_hint: str | None, reason: str, log_title: str) -> bool:
+async def _apply_ban(
+    context: ContextTypes.DEFAULT_TYPE,
+    user_id: str,
+    username_hint: str | None,
+    reason: str,
+    log_title: str,
+    duration_seconds: int | None = None,
+) -> bool:
     profiles = context.application.bot_data.setdefault("profiles", {})
     profile = profiles.get(str(user_id))
     if not profile:
@@ -25,7 +39,7 @@ async def _apply_ban(context: ContextTypes.DEFAULT_TYPE, user_id: str, username_
         return False
 
     banned_users = context.application.bot_data.setdefault("banned_users", {})
-    if banned_users.get(str(user_id)):
+    if is_user_banned(context, str(user_id)):
         return True
 
     username = username_hint or profile.get("username") or f"id{user_id}"
@@ -33,15 +47,24 @@ async def _apply_ban(context: ContextTypes.DEFAULT_TYPE, user_id: str, username_
         "banned_at": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"),
         "reason": reason,
         "source": log_title,
+        "expires_at": time.time() + duration_seconds if duration_seconds else None,
     }
     profile["reason"] = reason
     _save_profile_record(context, str(user_id))
     _save_ban_record(context, str(user_id))
 
     try:
+        duration_text = (
+            f" Срок: {format_ban_remaining(duration_seconds)}."
+            if duration_seconds
+            else " Срок: бессрочно."
+        )
         await context.bot.send_message(
             chat_id=int(user_id),
-            text=f'⛔Вы были заблокированы в нашем боте. Причина: "{reason}"',
+            text=(
+                f'⛔Вы были заблокированы в нашем боте. Причина: "{reason}".'
+                f"{duration_text}"
+            ),
         )
     except Exception:
         pass
@@ -94,10 +117,30 @@ async def block_if_banned(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     user = update.effective_user
     if not user:
         return False
-    if not is_user_banned(context, str(user.id)):
+    banned = is_user_banned(context, str(user.id))
+    expired_notifications = context.application.bot_data.setdefault(
+        "ban_expired_notifications", {}
+    )
+    if isinstance(expired_notifications, dict) and expired_notifications.pop(str(user.id), False):
+        target = getattr(update, "message", None)
+        if target is None and getattr(update, "callback_query", None) is not None:
+            target = update.callback_query.message
+        if target is not None:
+            await target.reply_text(
+                "✅Срок вашей временной блокировки истёк. "
+                "Доступ к функциям бота снова восстановлен."
+            )
+    if not banned:
         return False
 
-    text = "⛔ Доступ к функциям бота для вашего аккаунта приостановлен на неопределённый срок."
+    remaining = get_ban_remaining_seconds(context, str(user.id))
+    if remaining is None:
+        text = "⛔ Доступ к функциям бота для вашего аккаунта заблокирован бессрочно."
+    else:
+        text = (
+            "⛔ Доступ к функциям бота временно заблокирован.\n"
+            f"До разблокировки осталось: {format_ban_remaining(remaining)}."
+        )
     if getattr(update, "message", None) is not None:
         await update.message.reply_text(text)
     elif getattr(update, "callback_query", None) is not None:
@@ -114,7 +157,7 @@ async def enforce_autoban_if_needed(context: ContextTypes.DEFAULT_TYPE, user_id:
     if _has_admin_ban_immunity(profile):
         return False
 
-    warn_count = int(profile.get("warn", 0) or 0)
+    warn_count = refresh_timed_warnings(profile)
     if warn_count > 3:
         profile["warn"] = 3
         warn_count = 3
@@ -122,6 +165,7 @@ async def enforce_autoban_if_needed(context: ContextTypes.DEFAULT_TYPE, user_id:
         return False
 
     profile["warn"] = 0
+    profile["timed_warns"] = []
 
     banned_users = context.application.bot_data.setdefault("banned_users", {})
     if banned_users.get(str(user_id)):
@@ -134,7 +178,14 @@ async def enforce_autoban_if_needed(context: ContextTypes.DEFAULT_TYPE, user_id:
 async def check_active_chat_block(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     user_id = str(update.effective_user.id)
     if is_user_banned(context, user_id):
-        blocked_text = "⛔ Доступ к функции поиска администратора для вашего аккаунта приостановлен на неопределённый срок."
+        remaining = get_ban_remaining_seconds(context, user_id)
+        if remaining is None:
+            blocked_text = "⛔ Доступ к функции поиска администратора заблокирован бессрочно."
+        else:
+            blocked_text = (
+                "⛔ Доступ к функции поиска администратора временно заблокирован.\n"
+                f"До разблокировки осталось: {format_ban_remaining(remaining)}."
+            )
         if getattr(update, "message", None) is not None:
             await update.message.reply_text(blocked_text)
         elif getattr(update, "callback_query", None) is not None:

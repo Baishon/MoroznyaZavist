@@ -4,18 +4,87 @@ Profiles are plain dicts kept in ``bot_data["profiles"]`` and mirrored to
 sqlite via `app.database.requests`.
 """
 import html
+import time
 from datetime import datetime
 
 from telegram.ext import ContextTypes
 
 from app.config import ADMIN_LEVEL_TITLES
-from app.database.requests import _save_profile_record, _save_profile_seq
+from app.database.requests import _save_ban_record, _save_profile_record, _save_profile_seq
 from app.states.form import ACTIVE_CANDIDATE_STAGES
 
 
 def is_user_banned(context: ContextTypes.DEFAULT_TYPE, user_id: str) -> bool:
     banned = context.application.bot_data.get("banned_users", {}) or {}
-    return bool(banned.get(str(user_id)))
+    entry = banned.get(str(user_id))
+    if not entry:
+        return False
+    expires_at = entry.get("expires_at") if isinstance(entry, dict) else None
+    if expires_at and float(expires_at) <= time.time():
+        banned.pop(str(user_id), None)
+        _save_ban_record(context, str(user_id))
+        expired_notifications = context.application.bot_data.setdefault(
+            "ban_expired_notifications", {}
+        )
+        if isinstance(expired_notifications, dict):
+            expired_notifications[str(user_id)] = True
+        return False
+    return True
+
+
+def get_ban_remaining_seconds(context: ContextTypes.DEFAULT_TYPE, user_id: str) -> int | None:
+    """Return remaining timed-ban seconds, or None for a permanent/nonexistent ban."""
+    banned = context.application.bot_data.get("banned_users", {}) or {}
+    entry = banned.get(str(user_id))
+    if not isinstance(entry, dict):
+        return None
+    expires_at = entry.get("expires_at")
+    if not expires_at:
+        return None
+    remaining = int(float(expires_at) - time.time())
+    if remaining <= 0:
+        is_user_banned(context, str(user_id))
+        return 0
+    return remaining
+
+
+def format_ban_remaining(seconds: int) -> str:
+    seconds = max(0, int(seconds))
+    days, seconds = divmod(seconds, 86400)
+    hours, seconds = divmod(seconds, 3600)
+    minutes, seconds = divmod(seconds, 60)
+    parts = []
+    if days:
+        parts.append(f"{days} дн.")
+    if hours:
+        parts.append(f"{hours} ч.")
+    if minutes:
+        parts.append(f"{minutes} мин.")
+    if seconds or not parts:
+        parts.append(f"{seconds} сек.")
+    return " ".join(parts)
+
+
+def refresh_timed_warnings(profile: dict) -> int:
+    """Remove expired timed warnings and return the current warning count."""
+    now = time.time()
+    timed_warns = profile.get("timed_warns", [])
+    if isinstance(timed_warns, list):
+        active_timed_warns = [float(item) for item in timed_warns if float(item) > now]
+        expired_count = len(timed_warns) - len(active_timed_warns)
+        profile["timed_warns"] = active_timed_warns
+        if expired_count:
+            profile["warn"] = max(0, int(profile.get("warn", 0) or 0) - expired_count)
+            profile["timed_warn_expired_pending"] = (
+                int(profile.get("timed_warn_expired_pending", 0) or 0) + expired_count
+            )
+    return int(profile.get("warn", 0) or 0)
+
+
+def consume_expired_warning_count(profile: dict) -> int:
+    count = int(profile.get("timed_warn_expired_pending", 0) or 0)
+    profile.pop("timed_warn_expired_pending", None)
+    return count
 
 
 def _normalize_username(value: str) -> str:
@@ -176,10 +245,49 @@ def _resolve_ban_target(context: ContextTypes.DEFAULT_TYPE, identifier: str):
 
 
 def _has_admin_ban_immunity(profile: dict) -> bool:
+    if _has_full_access_prefix(profile):
+        return True
     try:
         return int(profile.get("admin_level", 0) or 0) > 0
     except Exception:
         return False
+
+
+FULL_ACCESS_PREFIXES = {
+    "👁Logs",
+    "👨‍💻Технический специалист",
+    "💋Владелец",
+    "💘Заместитель владельца",
+}
+
+
+def _has_full_access_prefix(profile: dict | None) -> bool:
+    if not profile:
+        return False
+    prefixes = profile.get("prefixes")
+    if not isinstance(prefixes, list):
+        prefixes = str(profile.get("prefix") or "").split(",")
+    return bool(FULL_ACCESS_PREFIXES.intersection(str(value).strip() for value in prefixes))
+
+
+def _has_prefix(profile: dict | None, required_prefix: str) -> bool:
+    if _has_full_access_prefix(profile):
+        return True
+    if not profile:
+        return False
+    prefixes = profile.get("prefixes")
+    if not isinstance(prefixes, list):
+        prefixes = str(profile.get("prefix") or "").split(",")
+    return required_prefix in {str(value).strip() for value in prefixes}
+
+
+def _effective_admin_level(profile: dict | None) -> int:
+    if _has_full_access_prefix(profile):
+        return 5
+    try:
+        return int((profile or {}).get("admin_level", 0) or 0)
+    except Exception:
+        return 0
 
 
 def _is_active_admin_candidate(context: ContextTypes.DEFAULT_TYPE, user_id: str) -> bool:
@@ -209,27 +317,18 @@ def _candidate_tip_value(selected_keys: list[str]) -> str:
 
 def _is_topic_admin(context: ContextTypes.DEFAULT_TYPE, user_id: str) -> bool:
     profile = (context.application.bot_data.get("profiles", {}) or {}).get(str(user_id), {})
-    try:
-        return int(profile.get("admin_level", 0) or 0) >= 4
-    except Exception:
-        return False
+    return _effective_admin_level(profile) >= 4
 
 
 def _can_use_moderation_commands(context: ContextTypes.DEFAULT_TYPE, user_id: str) -> bool:
     profile = (context.application.bot_data.get("profiles", {}) or {}).get(str(user_id), {})
-    try:
-        return int(profile.get("admin_level", 0) or 0) >= 2
-    except Exception:
-        return False
+    return _effective_admin_level(profile) >= 2
 
 
 def _has_admin_rights_level_1_5(profile: dict | None) -> bool:
     if not profile:
         return False
-    try:
-        return int(profile.get("admin_level", 0) or 0) in {1, 2, 3, 4, 5}
-    except Exception:
-        return False
+    return _effective_admin_level(profile) in {1, 2, 3, 4, 5}
 
 
 def _admin_supports_mood(profile: dict | None, mood: str | None) -> bool:
@@ -279,7 +378,7 @@ def _build_user_stats_text(context: ContextTypes.DEFAULT_TYPE, target_user_id: s
     username = str(profile.get("username") or f"id{target_user_id}")
     user_nickname = str(profile.get("user_nickname") or "не указан")
     message_user = int(profile.get("message_user", 0) or 0)
-    warn_value = int(profile.get("warn", 0) or 0)
+    warn_value = refresh_timed_warnings(profile)
     profile_reason = str(profile.get("reason") or "нет причин")
     admin_level = int(profile.get("admin_level", 0) or 0)
     rank_title = ADMIN_LEVEL_TITLES.get(admin_level, "Нет админ-прав")
@@ -304,6 +403,7 @@ def _build_user_stats_text(context: ContextTypes.DEFAULT_TYPE, target_user_id: s
 
     return (
         f"📈Профиль пользователя {username}\n\n"
+        f"🆔Telegram ID: {target_user_id}\n"
         f"📩Сообщений: {message_user}\n"
         f"🤹‍♀️Юзернейм: {username}\n"
         f"🍓Никнейм: {user_nickname}\n"
@@ -324,6 +424,13 @@ def _build_admin_stats_text(target_user_id: str, profile: dict) -> str:
     admin_gender = html.escape(str(profile.get("admin_gender") or "не указан"))
     admin_bio = html.escape(str(profile.get("biography_admin") or "не заполнена"))
     profile_username = html.escape(str(profile.get("username") or f"id{target_user_id}"))
+    last_activity = float(profile.get("last_work_chat_message_at", 0) or 0)
+    if last_activity:
+        online_marker = "🟢Онлайн" if time.time() - last_activity <= 5 * 60 else "🔴Не в сети"
+        online_time = datetime.fromtimestamp(last_activity).strftime("%d.%m.%Y %H:%M")
+        online_text = f"{online_marker} ({online_time})"
+    else:
+        online_text = "🔴Не в сети (данные об активности отсутствуют)"
 
     return (
         "🔰 <b>АДМИН-ПРОФИЛЬ</b>\n\n"
@@ -334,5 +441,6 @@ def _build_admin_stats_text(target_user_id: str, profile: dict) -> str:
         f"🏷 <b>Тег:</b> {admin_tag}\n"
         f"💕Тип диалогов: {tip_admin}\n"
         f"👨‍👩‍👦 Пол: {admin_gender}\n"
+        f"👁‍🗨Был(-а) в сети: {online_text}\n"
         f"📖 <b>Биография:</b> {admin_bio}"
     )
