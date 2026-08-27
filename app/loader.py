@@ -169,11 +169,11 @@ def build_application():
     # Agreement enforcement: block users who haven't accepted terms (default: 0)
     # Runs early to prevent other handlers from executing when user hasn't agreed.
     # Callback guard applies globally (anywhere a user clicks a callback) and will send PM with agreement.
-    app.add_handler(CallbackQueryHandler(agreement_callback_guard, pattern=r".*"), group=-6)
+    app.add_handler(CallbackQueryHandler(agreement_callback_guard, pattern=r".*"), group=-7)
     # Specific accept handler (should be after the guard so it can be handled)
     app.add_handler(CallbackQueryHandler(agreement_accept_callback, pattern=r"^agreement_accept$"), group=-5)
     # Message guard for all chat types: intercepts any message from a user who hasn't accepted the current agreement.
-    app.add_handler(MessageHandler(filters.ALL, agreement_message_handler), group=-6)
+    app.add_handler(MessageHandler(filters.ALL, agreement_message_handler), group=-7)
 
     app.add_handler(
         MessageHandler(

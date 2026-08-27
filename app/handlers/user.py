@@ -150,6 +150,36 @@ async def agreement_message_handler(update: Update, context: ContextTypes.DEFAUL
     if not update.message or not update.effective_user:
         return
 
+    # Ignore messages coming from bots (including our own) or from anonymous/service sources
+    from_user = update.message.from_user
+    if not from_user:
+        return
+    if getattr(from_user, "is_bot", False):
+        # do not prompt the bot or other bots
+        return
+
+    # Skip Telegram "service" messages (new_chat_members, left_chat_member, pinned_message, etc.)
+    _service_attrs = [
+        "new_chat_members",
+        "left_chat_member",
+        "new_chat_title",
+        "new_chat_photo",
+        "delete_chat_photo",
+        "group_chat_created",
+        "supergroup_chat_created",
+        "channel_chat_created",
+        "pinned_message",
+        "migrate_to_chat_id",
+        "migrate_from_chat_id",
+        "voice_chat_scheduled",
+        "voice_chat_started",
+        "voice_chat_ended",
+        "poll",
+    ]
+    for _attr in _service_attrs:
+        if hasattr(update.message, _attr) and getattr(update.message, _attr):
+            return
+
     user_id = str(update.effective_user.id)
     profile = _ensure_profile(context, user_id, update.effective_user.username or f"id{user_id}")
     agreed = int(profile.get("agreed_terms", 0) or 0)
@@ -178,6 +208,13 @@ async def agreement_callback_guard(update: Update, context: ContextTypes.DEFAULT
     # Guard for any callback query: if user hasn't accepted current agreement, present agreement
     query = update.callback_query
     if not query or not update.effective_user:
+        return
+
+    # Ignore interactions from bots
+    from_user = query.from_user
+    if not from_user:
+        return
+    if getattr(from_user, "is_bot", False):
         return
 
     data = (query.data or "").strip()
@@ -432,6 +469,21 @@ def _format_cooldown_left(seconds_left: int) -> str:
     if minutes:
         return f"{minutes} мин. {seconds} сек."
     return f"{seconds} сек."
+
+
+def _check_admin_search_cooldown(context: ContextTypes.DEFAULT_TYPE, user_id: str, profile: dict):
+    now = time.time()
+    cooldown_until = float(profile.get("admin_search_cooldown_until", 0) or 0)
+    if cooldown_until <= now:
+        return False, ""
+
+    remaining = max(0, int(cooldown_until - now))
+    return True, f"⏳ Вы отменили поиск администратора недавно. Повторный поиск будет доступен через {_format_cooldown_left(remaining)}."
+
+
+def _activate_admin_search_cooldown(context: ContextTypes.DEFAULT_TYPE, user_id: str, profile: dict) -> None:
+    profile["admin_search_cooldown_until"] = time.time() + (15 * 60)
+    _save_profile_record(context, user_id)
 
 
 def _check_complaint_cooldown(context: ContextTypes.DEFAULT_TYPE, user_id: str, profile: dict, cooldown_key: str, label: str):
@@ -1211,6 +1263,12 @@ async def choose_mood_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         return
 
     if choice in mood_map:
+        user_id = str(update.effective_user.id)
+        profile = _ensure_profile(context, user_id, update.effective_user.username or f"id{user_id}")
+        blocked, block_message = _check_admin_search_cooldown(context, user_id, profile)
+        if blocked:
+            await update.message.reply_text(block_message)
+            return
         if await check_active_chat_block(update, context):
             return
         context.user_data["mood"] = mood_map[choice]
@@ -1633,10 +1691,13 @@ async def confirm_cancel_callback(update: Update, context: ContextTypes.DEFAULT_
     if str(user_id) in app_requests:
         del app_requests[str(user_id)]
 
+    profile = _ensure_profile(context, str(user_id), update.effective_user.username if update.effective_user else f"id{user_id}")
+    _activate_admin_search_cooldown(context, str(user_id), profile)
+
     # Restore keyboard for the user
     try:
         kb = _build_main_menu_keyboard(context, user_id, update.effective_user.username if update.effective_user else None)
-        await context.bot.send_message(chat_id=user_id, text="Поиск администратора отменен.", reply_markup=kb)
+        await context.bot.send_message(chat_id=user_id, text="Поиск администратора отменен. На 15 минут будет установлен кулдаун перед повторным поиском.", reply_markup=kb)
     except Exception:
         pass
 
@@ -2056,16 +2117,21 @@ async def admin_cancel_deny_callback(update: Update, context: ContextTypes.DEFAU
 
 
 async def find_admin_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = str(update.effective_user.id)
     requester_profile = _ensure_profile(
         context,
-        str(update.effective_user.id),
-        update.effective_user.username or f"id{update.effective_user.id}",
+        user_id,
+        update.effective_user.username or f"id{user_id}",
     )
     if _has_admin_rights_level_1_5(requester_profile):
         await update.message.reply_text("⛔ Администратору нельзя искать администратора для начала сессии.")
         return
-    if _is_active_admin_candidate(context, str(update.effective_user.id)):
+    if _is_active_admin_candidate(context, user_id):
         await update.message.reply_text(_candidate_block_text())
+        return
+    blocked, block_message = _check_admin_search_cooldown(context, user_id, requester_profile)
+    if blocked:
+        await update.message.reply_text(block_message)
         return
     if await check_active_chat_block(update, context):
         return
