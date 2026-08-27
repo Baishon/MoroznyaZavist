@@ -38,6 +38,7 @@ from app.handlers.admin import (
     astats_tip_menu_callback,
     astats_tip_toggle_callback,
     ban_command_handler,
+    permanent_ban_command_handler,
     cancel_candidate_reject_callback,
     cancel_decline_request_callback,
     cancel_warn_callback,
@@ -88,7 +89,22 @@ from app.handlers.admin import (
     warn_user_callback,
     warn_user_cancel_callback,
 )
-from app.handlers.candidates import candidate_gender_callback, candidate_tip_next_callback, candidate_tip_toggle_callback
+from app.handlers.candidates import (
+    candidate_gender_callback,
+    candidate_application_callback,
+    candidate_character_callback,
+    candidate_character_confirm_callback,
+    candidate_character_edit_callback,
+    candidate_images_callback,
+    candidate_images_done_callback,
+    candidate_images_edit_callback,
+    candidate_images_photo_handler,
+    candidate_images_redo_callback,
+    candidate_profile_callback,
+    candidate_submit_callback,
+    candidate_tip_next_callback,
+    candidate_tip_toggle_callback,
+)
 from app.handlers.user import (
     admin_cancel_confirm_callback,
     admin_cancel_deny_callback,
@@ -107,6 +123,7 @@ from app.handlers.user import (
     change_nickname_callback,
     choose_admin_gender_callback,
     choose_mood_callback,
+    check_session_admin_online_handler,
     complaint_admin_back_handler,
     complaint_admin_last_admin_handler,
     complaint_admin_menu_handler,
@@ -205,6 +222,7 @@ def build_application():
     app.add_handler(CommandHandler("pm", pm_command_handler, filters=filters.ChatType.PRIVATE | filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), group=-1)
     app.add_handler(CommandHandler("prava", prava_command_handler, filters=filters.ChatType.PRIVATE | filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), group=-1)
     app.add_handler(CommandHandler("ban", ban_command_handler, filters=filters.ChatType.PRIVATE | filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), group=-1)
+    app.add_handler(CommandHandler("pban", permanent_ban_command_handler, filters=filters.ChatType.PRIVATE | filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), group=-1)
     app.add_handler(CommandHandler("unban", unban_command_handler, filters=filters.ChatType.PRIVATE | filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), group=-1)
     app.add_handler(CommandHandler("amute", amute_command_handler, filters=filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), group=-1)
     app.add_handler(CommandHandler("aunmute", unmute_command_handler, filters=filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), group=-1)
@@ -236,6 +254,16 @@ def build_application():
     app.add_handler(CallbackQueryHandler(candidate_tip_toggle_callback, pattern=r"^candidate_tip_toggle_\d+_(chat|support|flirt)$"))
     app.add_handler(CallbackQueryHandler(candidate_tip_next_callback, pattern=r"^candidate_tip_next_\d+$"))
     app.add_handler(CallbackQueryHandler(candidate_gender_callback, pattern=r"^candidate_gender_\d+_(male|female)$"))
+    app.add_handler(CallbackQueryHandler(candidate_application_callback, pattern=r"^candidate_application_\d+$"))
+    app.add_handler(CallbackQueryHandler(candidate_character_callback, pattern=r"^candidate_character_\d+$"))
+    app.add_handler(CallbackQueryHandler(candidate_character_edit_callback, pattern=r"^candidate_character_edit_\d+$"))
+    app.add_handler(CallbackQueryHandler(candidate_character_confirm_callback, pattern=r"^candidate_character_(yes|no)_\d+$"))
+    app.add_handler(CallbackQueryHandler(candidate_images_callback, pattern=r"^candidate_images_\d+$"))
+    app.add_handler(CallbackQueryHandler(candidate_images_redo_callback, pattern=r"^candidate_images_redo_\d+$"))
+    app.add_handler(CallbackQueryHandler(candidate_images_done_callback, pattern=r"^candidate_images_done_\d+$"))
+    app.add_handler(CallbackQueryHandler(candidate_images_edit_callback, pattern=r"^candidate_images_edit_\d+$"))
+    app.add_handler(CallbackQueryHandler(candidate_profile_callback, pattern=r"^candidate_profile_\d+$"))
+    app.add_handler(CallbackQueryHandler(candidate_submit_callback, pattern=r"^candidate_submit_\d+$"))
     app.add_handler(CallbackQueryHandler(cancel_candidate_reject_callback, pattern=r"^cancel_candidate_reject_\d+$"))
     app.add_handler(CallbackQueryHandler(suspicious_admin_allow_callback, pattern=r"^susp_admin_allow_\d+$"))
     app.add_handler(CallbackQueryHandler(suspicious_admin_deny_callback, pattern=r"^susp_admin_deny_\d+$"))
@@ -290,12 +318,14 @@ def build_application():
     app.add_handler(MessageHandler(filters.Regex("^🔰Админ-профиль$") & filters.ChatType.PRIVATE, send_admin_profile))
     app.add_handler(MessageHandler(filters.Regex("^🤧Отказаться от админа$") & filters.ChatType.PRIVATE, ask_cancel_admin))
     app.add_handler(MessageHandler(filters.Regex("^💤Приостановить общение$") & filters.ChatType.PRIVATE, pause_session_request))
+    app.add_handler(MessageHandler(filters.Regex("^🕘Проверить онлайн админа$") & filters.ChatType.PRIVATE, check_session_admin_online_handler))
     app.add_handler(MessageHandler(filters.Regex("^↩️Вернуться к кнопкам диалога$") & filters.ChatType.PRIVATE, return_to_dialog_menu_handler))
     app.add_handler(MessageHandler(filters.Regex("^↪️Вернуться в главное меню$") & filters.ChatType.PRIVATE, return_to_main_menu_handler))
     app.add_handler(MessageHandler(filters.Regex("^👨 Мальчик$|^👩 Девочка$|^◀️ Назад$") & filters.ChatType.PRIVATE, choose_admin_gender_callback))
     app.add_handler(MessageHandler(filters.Regex("^🗣️ Общение$|^❤️ Поддержка$|^🔥 Флирт$|^◀️ Назад$") & filters.ChatType.PRIVATE, choose_mood_callback))
     app.add_handler(MessageHandler(filters.PHOTO & filters.ChatType.PRIVATE, bug_report_photo_input_handler), group=-2)
     app.add_handler(MessageHandler(filters.PHOTO & filters.ChatType.PRIVATE, admin_complaint_photo_input_handler), group=-6)
+    app.add_handler(MessageHandler(filters.PHOTO & filters.ChatType.PRIVATE, candidate_images_photo_handler), group=-5)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE, bug_report_text_input_handler), group=-2)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE, admin_complaint_text_input_handler), group=-6)
     # Moderation input handlers must run before generic forwarding.

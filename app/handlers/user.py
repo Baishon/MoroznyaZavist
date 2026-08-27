@@ -46,7 +46,8 @@ from app.services.profiles import (
     _is_active_admin_candidate,
     _is_user_nickname_taken,
     _set_last_admin_tag_for_user,
-    is_user_banned,
+    consume_expired_warning_count,
+    refresh_timed_warnings,
 )
 from app.services.topics import (
     _build_paused_topic_name,
@@ -67,9 +68,18 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if _is_active_admin_candidate(context, str(user.id)):
             await update.message.reply_text(_candidate_block_text())
             return
-        if is_user_banned(context, str(user.id)):
-            await update.message.reply_text("⛔ Доступ к функциям бота для вашего аккаунта приостановлен на неопределённый срок.")
+        if await block_if_banned(update, context):
             return
+        profile = _ensure_profile(context, str(user.id), user.username or f"id{user.id}")
+        refresh_timed_warnings(profile)
+        expired_warns = consume_expired_warning_count(profile)
+        if expired_warns:
+            _save_profile_record(context, str(user.id))
+            await update.message.reply_text(
+                f"✅Срок действия предупреждени{'я' if expired_warns == 1 else 'й'} истёк. "
+                f"Истёкших предупреждений: {expired_warns}. "
+                "Теперь учитываются только действующие предупреждения."
+            )
 
         active = context.application.bot_data.get("active_chats", {}).get(str(user.id))
         if active and active.get("active", False):
@@ -369,6 +379,34 @@ async def send_active_session_menu(update: Update, context: ContextTypes.DEFAULT
     await update.message.reply_text("Кнопки диалога:", reply_markup=_build_active_session_keyboard())
 
 
+async def check_session_admin_online_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or update.effective_chat.type != ChatType.PRIVATE:
+        return
+    if await block_if_banned(update, context):
+        return
+
+    user_id = str(update.effective_user.id)
+    active = (context.application.bot_data.get("active_chats", {}) or {}).get(user_id)
+    if not active or not active.get("active"):
+        await update.message.reply_text("У вас нет активной сессии с администратором.")
+        return
+
+    admin_id = str(active.get("admin_id") or "")
+    last_activity = float(
+        (context.application.bot_data.get("admin_work_chat_activity", {}) or {}).get(admin_id, 0) or 0
+    )
+    if not last_activity:
+        await update.message.reply_text("🔴Администратор не в сети. Данных о его активности пока нет.")
+        return
+
+    elapsed = max(0, int(time.time() - last_activity))
+    last_activity_text = time.strftime("%d.%m.%Y %H:%M", time.localtime(last_activity))
+    status = "🟢Онлайн" if elapsed <= 5 * 60 else "🔴Не в сети"
+    await update.message.reply_text(
+        f"👁‍🗨Был(-а) в сети: {status}\nПоследнее сообщение: {last_activity_text}"
+    )
+
+
 async def return_to_main_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or update.effective_chat.type != ChatType.PRIVATE:
         return
@@ -456,7 +494,7 @@ async def settings_enable_ad_handler(update: Update, context: ContextTypes.DEFAU
 
 
 def _complaint_cooldown_duration(profile: dict) -> int:
-    warn_count = int(profile.get("warn", 0) or 0)
+    warn_count = refresh_timed_warnings(profile)
     return 30 * 60 + (3 * 60 * 60 if warn_count > 0 else 0)
 
 
@@ -492,7 +530,7 @@ def _check_complaint_cooldown(context: ContextTypes.DEFAULT_TYPE, user_id: str, 
     if cooldown_until <= now:
         return False, ""
 
-    warn_count = int(profile.get("warn", 0) or 0)
+    warn_count = refresh_timed_warnings(profile)
     if warn_count > 0:
         profile[cooldown_key] = cooldown_until + (3 * 60 * 60)
         _save_profile_record(context, user_id)
@@ -1196,6 +1234,15 @@ async def send_admin_profile(update: Update, context: ContextTypes.DEFAULT_TYPE)
     admin_gender = html.escape(str(profile.get("admin_gender") or "не указан"))
     admin_bio = html.escape(str(profile.get("biography_admin") or "не заполнена"))
     profile_username = html.escape(str(profile.get("username") or ""))
+    last_activity = float(
+        (context.application.bot_data.get("admin_work_chat_activity", {}) or {}).get(user_id, 0) or 0
+    )
+    if last_activity:
+        last_activity_text = time.strftime("%d.%m.%Y %H:%M", time.localtime(last_activity))
+        online_marker = "🟢Онлайн" if time.time() - last_activity <= 5 * 60 else "🔴Не в сети"
+        online_text = f"{online_marker} ({last_activity_text})"
+    else:
+        online_text = "🔴Не в сети (данные об активности отсутствуют)"
 
     text = (
         "🔰 <b>АДМИН-ПРОФИЛЬ</b>\n\n"
@@ -1206,6 +1253,7 @@ async def send_admin_profile(update: Update, context: ContextTypes.DEFAULT_TYPE)
         f"🏷 <b>Тег:</b> {admin_tag}\n"
         f"💕Тип диалогов: {tip_admin}\n"
         f"👨‍👩‍👦 Пол: {admin_gender}\n"
+        f"👁‍🗨Был(-а) в сети: {online_text}\n"
         f"📖 <b>Биография:</b> {admin_bio}"
     )
     await update.message.reply_text(text, parse_mode=ParseMode.HTML)
@@ -1785,8 +1833,19 @@ async def user_private_message_handler(update: Update, context: ContextTypes.DEF
         return
     user_id = str(user.id)
 
-    if is_user_banned(context, user_id):
+    if await block_if_banned(update, context):
         return
+
+    profile = _ensure_profile(context, user_id, user.username or f"id{user_id}")
+    refresh_timed_warnings(profile)
+    expired_warns = consume_expired_warning_count(profile)
+    if expired_warns:
+        _save_profile_record(context, user_id)
+        await update.message.reply_text(
+            f"✅Срок действия предупреждени{'я' if expired_warns == 1 else 'й'} истёк. "
+            f"Истёкших предупреждений: {expired_warns}. "
+            "Теперь учитываются только действующие предупреждения."
+        )
 
     if await admin_candidate_private_flow(update, context):
         return

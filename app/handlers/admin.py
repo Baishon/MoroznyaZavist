@@ -30,7 +30,7 @@ from app.config import (
     RULES_THREAD_ID,
     WORK_CHAT_ID,
 )
-from app.database.requests import _save_profile_record, _save_runtime_snapshot
+from app.database.requests import _save_ban_record, _save_profile_record, _save_runtime_snapshot
 from app.handlers.candidates import _send_candidate_stage_1
 from app.keyboards.inline import (
     _build_active_dialog_admin_keyboard,
@@ -63,16 +63,22 @@ from app.services.profiles import (
     _build_user_stats_text,
     _candidate_tip_value,
     _can_use_moderation_commands,
+    _effective_admin_level,
     _ensure_profile,
     _has_admin_ban_immunity,
+    _has_full_access_prefix,
     _has_admin_rights_level_1_5,
+    _has_prefix,
     _is_topic_admin,
     _resolve_ban_target,
     _resolve_warn_target,
     _set_last_admin_tag_for_user,
     _set_user_blocked_bot_state,
     is_user_banned,
+    format_ban_remaining,
+    refresh_timed_warnings,
 )
+
 from app.services.topics import (
     _get_topic_state,
     _has_suspicious_username,
@@ -90,6 +96,8 @@ from app.services.topics import (
     _special_admin_chat_ids,
     _topic_url,
 )
+
+MAX_MODERATION_DURATION_SECONDS = 365 * 24 * 60 * 60
 
 # ==== SECTION: Forum-topic management ====
 # /topic del|close|open — lets a topic admin delete, close, or reopen a
@@ -235,7 +243,7 @@ async def _makeadmin_impl(update: Update, context: ContextTypes.DEFAULT_TYPE, ow
             str(update.effective_user.id),
             update.effective_user.username or f"id{update.effective_user.id}",
         )
-        issuer_level = int(issuer_profile.get("admin_level", 0) or 0)
+        issuer_level = _effective_admin_level(issuer_profile)
         if issuer_level < 4:
             await update.message.reply_text("Команда доступна только администраторам 4 категории и выше.")
             return
@@ -321,7 +329,7 @@ async def _makeadmin_impl(update: Update, context: ContextTypes.DEFAULT_TYPE, ow
     admin_username = update.effective_user.username or f"id{update.effective_user.id}"
 
     if lvl == 0:
-        current_admin_level = int(profile.get("admin_level", 0) or 0)
+        current_admin_level = _effective_admin_level(profile)
         if current_admin_level <= 0:
             await update.message.reply_text(
                 f'Снятие невозможно: у пользователя "{target_identifier}" нет активных админ-прав.'
@@ -489,6 +497,9 @@ async def amute_command_handler(update: Update, context: ContextTypes.DEFAULT_TY
     if minutes <= 0:
         await update.message.reply_text("minute должен быть целым числом больше 0.")
         return
+    if minutes * 60 > MAX_MODERATION_DURATION_SECONDS:
+        await update.message.reply_text("Максимальный срок мута — 365 дней.")
+        return
 
     target_user_id, profile = _resolve_warn_target(context, target_identifier)
     if not profile:
@@ -644,6 +655,7 @@ async def log_command_router(update: Update, context: ContextTypes.DEFAULT_TYPE)
         "/pm": pm_command_handler,
         "/prava": prava_command_handler,
         "/ban": ban_command_handler,
+        "/pban": permanent_ban_command_handler,
         "/unban": unban_command_handler,
         "/warn": warn_command_handler,
         "/unwarn": unwarn_command_handler,
@@ -659,7 +671,6 @@ async def log_command_router(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     await handler(update, context)
     raise ApplicationHandlerStop
-
 
 
 async def cooperation_admin_command_guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -716,8 +727,7 @@ async def sendpiar_command_handler(update: Update, context: ContextTypes.DEFAULT
         str(update.effective_user.id),
         update.effective_user.username or f"id{update.effective_user.id}",
     )
-    issuer_prefix = str(issuer_profile.get("prefix") or "").strip()
-    if issuer_prefix != "💎Сотрудничество":
+    if not _has_prefix(issuer_profile, "💎Сотрудничество"):
         await update.message.reply_text("Нельзя выполнить команду: нужен префикс 💎Сотрудничество.")
         return
 
@@ -821,7 +831,7 @@ async def anpiar_command_handler(update: Update, context: ContextTypes.DEFAULT_T
         str(update.effective_user.id),
         update.effective_user.username or f"id{update.effective_user.id}",
     )
-    if int(issuer_profile.get("admin_level", 0) or 0) < 3:
+    if _effective_admin_level(issuer_profile) < 3:
         await update.message.reply_text("Команда доступна только администраторам 3 категории и выше.")
         return
 
@@ -907,21 +917,27 @@ async def warn_command_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     cmd_len = cmd_entity.length if cmd_entity and cmd_entity.type == "bot_command" else len("/warn")
     args_text = raw_text[cmd_len:].strip()
     if not args_text:
-        await update.message.reply_text("Укажите id_profile и причину: /warn \"id_profile\" \"reason\"")
+        await update.message.reply_text('Используйте: /warn "id_profile" "30m" "reason" (s/m/h/d)')
         return
 
     try:
         parts = shlex.split(args_text)
     except ValueError:
-        await update.message.reply_text("Некорректный формат. Используйте: /warn \"id_profile\" \"reason\"")
+        await update.message.reply_text('Некорректный формат. Используйте: /warn "id_profile" "30m" "reason" (s/m/h/d)')
         return
 
-    if len(parts) < 2:
-        await update.message.reply_text("Укажите id_profile и причину: /warn \"id_profile\" \"reason\"")
+    if len(parts) < 3:
+        await update.message.reply_text('Используйте: /warn "id_profile" "30m" "reason" (s/m/h/d)')
         return
 
     target_identifier = parts[0]
-    reason = " ".join(parts[1:]).strip()
+    duration_match = re.fullmatch(r"([1-9]\d*)\s*(s|m|h|d)", parts[1].strip().lower())
+    if not duration_match:
+        await update.message.reply_text('Длительность должна быть в формате "30s", "10m", "2h" или "1d".')
+        return
+    duration_value = int(duration_match.group(1))
+    duration_seconds = duration_value * {"s": 1, "m": 60, "h": 3600, "d": 86400}[duration_match.group(2)]
+    reason = " ".join(parts[2:]).strip()
     if not reason:
         await update.message.reply_text("Укажите причину предупреждения.")
         return
@@ -937,23 +953,89 @@ async def warn_command_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         )
         return
 
-    current_warn = int(profile.get("warn", 0) or 0)
+    current_warn = refresh_timed_warnings(profile)
     profile["warn"] = current_warn + 1
+    expires_at = time.time() + duration_seconds
     profile["reason"] = reason
+    profile.setdefault("timed_warns", []).append(expires_at)
+    _save_profile_record(context, str(target_user_id))
+    _schedule_timed_warning_expiry(context, str(target_user_id), expires_at, duration_seconds)
     await enforce_autoban_if_needed(context, str(target_user_id), profile.get("username"))
 
     await update.message.reply_text(
-        f'⚠️Пользователю id_profile #{profile.get("id_profile")} выдано предупреждение. Теперь у него {profile["warn"]} warn(-ов). Причина: "{reason}"'
+        f'⚠️Пользователю id_profile #{profile.get("id_profile")} выдано предупреждение на '
+        f'{format_ban_remaining(duration_seconds)}. Теперь у него {profile["warn"]} warn(-ов). Причина: "{reason}"'
     )
 
     try:
         await context.bot.send_message(
             chat_id=int(target_user_id),
-            text=f'❗️Вы получили предупреждение с причиной "{reason}" от руководства бота. Теперь у вас {profile["warn"]} предупреждений',
+            text=(
+                f'❗️Вы получили предупреждение на {format_ban_remaining(duration_seconds)} '
+                f'с причиной "{reason}" от руководства бота. Теперь у вас {profile["warn"]} предупреждений'
+            ),
         )
     except Exception:
         pass
     _save_profile_record(context, str(target_user_id))
+
+
+async def _expire_timed_warning_job(context: ContextTypes.DEFAULT_TYPE):
+    job_data = context.job.data or {}
+    user_id = str(job_data.get("user_id") or "")
+    expires_at = float(job_data.get("expires_at") or 0)
+    await _expire_timed_warning(context, user_id, expires_at)
+
+
+async def _expire_timed_warning(context: ContextTypes.DEFAULT_TYPE, user_id: str, expires_at: float):
+    profiles = context.application.bot_data.setdefault("profiles", {})
+    profile = profiles.get(user_id)
+    if not profile:
+        return
+
+    timed_warns = profile.get("timed_warns", [])
+    if not isinstance(timed_warns, list):
+        return
+    matching_warn = next((item for item in timed_warns if abs(float(item) - expires_at) < 0.01), None)
+    if matching_warn is None:
+        return
+
+    timed_warns.remove(matching_warn)
+    profile["warn"] = max(0, int(profile.get("warn", 0) or 0) - 1)
+    _save_profile_record(context, user_id)
+    try:
+        await context.bot.send_message(
+            chat_id=int(user_id),
+            text=(
+                "✅Срок действия вашего предупреждения истёк. "
+                f"Снято предупреждений: 1. Осталось действующих: {profile['warn']}."
+            ),
+        )
+    except Exception:
+        logging.exception("Failed to notify user %s about expired warning", user_id)
+
+
+def _schedule_timed_warning_expiry(
+    context: ContextTypes.DEFAULT_TYPE,
+    user_id: str,
+    expires_at: float,
+    duration_seconds: int,
+) -> None:
+    tasks = context.application.bot_data.setdefault("timed_warning_tasks", {})
+    task_key = f"{user_id}:{expires_at}"
+    tasks[task_key] = asyncio.create_task(
+        _expire_timed_warning_after_delay(context, user_id, expires_at, duration_seconds)
+    )
+
+
+async def _expire_timed_warning_after_delay(
+    context: ContextTypes.DEFAULT_TYPE,
+    user_id: str,
+    expires_at: float,
+    duration_seconds: int,
+) -> None:
+    await asyncio.sleep(duration_seconds)
+    await _expire_timed_warning(context, user_id, expires_at)
 
 
 
@@ -1003,7 +1085,7 @@ async def fullstats_command_handler(update: Update, context: ContextTypes.DEFAUL
         str(update.effective_user.id),
         update.effective_user.username or f"id{update.effective_user.id}",
     )
-    if int(issuer_profile.get("admin_level", 0) or 0) < 4:
+    if _effective_admin_level(issuer_profile) < 4:
         await update.message.reply_text("Команда доступна только администраторам 4 категории и выше.")
         return
 
@@ -1051,7 +1133,7 @@ async def astats_command_handler(update: Update, context: ContextTypes.DEFAULT_T
         str(update.effective_user.id),
         update.effective_user.username or f"id{update.effective_user.id}",
     )
-    if int(issuer_profile.get("admin_level", 0) or 0) < 4:
+    if _effective_admin_level(issuer_profile) < 4:
         await update.message.reply_text("Команда доступна только администраторам 4 категории и выше.")
         return
 
@@ -1129,7 +1211,7 @@ async def astats_tag_change_callback(update: Update, context: ContextTypes.DEFAU
         str(update.effective_user.id),
         update.effective_user.username or f"id{update.effective_user.id}",
     )
-    if int(issuer_profile.get("admin_level", 0) or 0) < 4:
+    if _effective_admin_level(issuer_profile) < 4:
         await update.callback_query.answer("Недостаточно прав", show_alert=True)
         return
 
@@ -1182,7 +1264,7 @@ async def astats_bio_change_callback(update: Update, context: ContextTypes.DEFAU
         str(update.effective_user.id),
         update.effective_user.username or f"id{update.effective_user.id}",
     )
-    if int(issuer_profile.get("admin_level", 0) or 0) < 4:
+    if _effective_admin_level(issuer_profile) < 4:
         await update.callback_query.answer("Недостаточно прав", show_alert=True)
         return
 
@@ -1231,7 +1313,7 @@ async def astats_tip_menu_callback(update: Update, context: ContextTypes.DEFAULT
         str(update.effective_user.id),
         update.effective_user.username or f"id{update.effective_user.id}",
     )
-    if int(issuer_profile.get("admin_level", 0) or 0) < 4:
+    if _effective_admin_level(issuer_profile) < 4:
         await update.callback_query.answer("Недостаточно прав", show_alert=True)
         return
 
@@ -1327,7 +1409,7 @@ async def astats_tip_apply_callback(update: Update, context: ContextTypes.DEFAUL
         str(update.effective_user.id),
         update.effective_user.username or f"id{update.effective_user.id}",
     )
-    if int(issuer_profile.get("admin_level", 0) or 0) < 4:
+    if _effective_admin_level(issuer_profile) < 4:
         await update.callback_query.answer("Недостаточно прав", show_alert=True)
         return
 
@@ -1384,7 +1466,7 @@ async def astats_active_pz_callback(update: Update, context: ContextTypes.DEFAUL
         str(update.effective_user.id),
         update.effective_user.username or f"id{update.effective_user.id}",
     )
-    if int(issuer_profile.get("admin_level", 0) or 0) < 4:
+    if _effective_admin_level(issuer_profile) < 4:
         await update.callback_query.answer("Недостаточно прав", show_alert=True)
         return
 
@@ -1440,8 +1522,10 @@ async def info_topic_command_handler(update: Update, context: ContextTypes.DEFAU
         str(update.effective_user.id),
         update.effective_user.username or f"id{update.effective_user.id}",
     )
-    if int(issuer_profile.get("admin_level", 0) or 0) < 3:
-        await update.message.reply_text("Команда доступна только администраторам 3 категории и выше.")
+    if not _has_full_access_prefix(issuer_profile):
+        await update.message.reply_text(
+            "Нельзя выполнить команду: нужен префикс 👁Logs"
+        )
         return
 
     raw_text = update.message.text or ""
@@ -1529,7 +1613,7 @@ async def info_topic_close_callback(update: Update, context: ContextTypes.DEFAUL
         str(update.effective_user.id),
         update.effective_user.username or f"id{update.effective_user.id}",
     )
-    if int(issuer_profile.get("admin_level", 0) or 0) < 3:
+    if _effective_admin_level(issuer_profile) < 3:
         await update.callback_query.answer("Недостаточно прав", show_alert=True)
         return
 
@@ -1559,7 +1643,7 @@ async def info_topic_stop_callback(update: Update, context: ContextTypes.DEFAULT
         str(update.effective_user.id),
         update.effective_user.username or f"id{update.effective_user.id}",
     )
-    if int(issuer_profile.get("admin_level", 0) or 0) < 3:
+    if _effective_admin_level(issuer_profile) < 3:
         await update.callback_query.answer("Недостаточно прав", show_alert=True)
         return
 
@@ -1728,7 +1812,7 @@ async def info_topic_close_confirm_callback(update: Update, context: ContextType
         return
 
     issuer_profile = _ensure_profile(context, str(update.effective_user.id), update.effective_user.username or f"id{update.effective_user.id}")
-    if int(issuer_profile.get("admin_level", 0) or 0) < 3:
+    if _effective_admin_level(issuer_profile) < 3:
         await update.callback_query.answer("Недостаточно прав", show_alert=True)
         return
 
@@ -1753,7 +1837,7 @@ async def info_topic_stop_confirm_callback(update: Update, context: ContextTypes
         return
 
     issuer_profile = _ensure_profile(context, str(update.effective_user.id), update.effective_user.username or f"id{update.effective_user.id}")
-    if int(issuer_profile.get("admin_level", 0) or 0) < 3:
+    if _effective_admin_level(issuer_profile) < 3:
         await update.callback_query.answer("Недостаточно прав", show_alert=True)
         return
 
@@ -1781,7 +1865,7 @@ async def info_topic_resume_callback(update: Update, context: ContextTypes.DEFAU
         return
 
     issuer_profile = _ensure_profile(context, str(update.effective_user.id), update.effective_user.username or f"id{update.effective_user.id}")
-    if int(issuer_profile.get("admin_level", 0) or 0) < 3:
+    if _effective_admin_level(issuer_profile) < 3:
         await update.callback_query.answer("Недостаточно прав", show_alert=True)
         return
 
@@ -1818,7 +1902,7 @@ async def astats_gender_menu_callback(update: Update, context: ContextTypes.DEFA
         str(update.effective_user.id),
         update.effective_user.username or f"id{update.effective_user.id}",
     )
-    if int(issuer_profile.get("admin_level", 0) or 0) < 4:
+    if _effective_admin_level(issuer_profile) < 4:
         await update.callback_query.answer("Недостаточно прав", show_alert=True)
         return
 
@@ -1859,7 +1943,7 @@ async def astats_gender_set_callback(update: Update, context: ContextTypes.DEFAU
         str(update.effective_user.id),
         update.effective_user.username or f"id{update.effective_user.id}",
     )
-    if int(issuer_profile.get("admin_level", 0) or 0) < 4:
+    if _effective_admin_level(issuer_profile) < 4:
         await update.callback_query.answer("Недостаточно прав", show_alert=True)
         return
 
@@ -2338,7 +2422,7 @@ async def setprefix_command_handler(update: Update, context: ContextTypes.DEFAUL
         str(update.effective_user.id),
         update.effective_user.username or f"id{update.effective_user.id}",
     )
-    if int(issuer_profile.get("admin_level", 0) or 0) != 5:
+    if _effective_admin_level(issuer_profile) != 5:
         await update.message.reply_text("Команда доступна только администраторам 5 категории.")
         return
 
@@ -2378,18 +2462,17 @@ async def setprefix_command_handler(update: Update, context: ContextTypes.DEFAUL
         "issuer_user_id": str(update.effective_user.id),
         "target_user_id": str(target_user_id),
         "target_id_profile": target_id_profile,
-        "selected_prefix_key": None,
+        "selected_prefix_keys": [],
     }
 
     existing_prefix = str(profile.get("prefix") or "").strip()
     for key, label in _prefix_options():
-        if existing_prefix == label:
-            pending_panels[panel_id]["selected_prefix_key"] = key
-            break
+        if label in [item.strip() for item in existing_prefix.split(",")]:
+            pending_panels[panel_id]["selected_prefix_keys"].append(key)
 
     await update.message.reply_text(
         f"☕️Открыта панель редактирования префикса человека {target_id_profile}",
-        reply_markup=_build_setprefix_keyboard(panel_id, pending_panels[panel_id]["selected_prefix_key"]),
+        reply_markup=_build_setprefix_keyboard(panel_id, pending_panels[panel_id]["selected_prefix_keys"]),
     )
 
 
@@ -2422,15 +2505,22 @@ async def setprefix_select_callback(update: Update, context: ContextTypes.DEFAUL
         str(update.effective_user.id),
         update.effective_user.username or f"id{update.effective_user.id}",
     )
-    if int(issuer_profile.get("admin_level", 0) or 0) != 5:
+    if _effective_admin_level(issuer_profile) != 5:
         await update.callback_query.answer("Недостаточно прав", show_alert=True)
         return
 
-    current = str(panel.get("selected_prefix_key") or "")
-    panel["selected_prefix_key"] = None if current == selected_key else selected_key
+    selected_keys = set(panel.get("selected_prefix_keys") or [])
+    if selected_key in selected_keys:
+        selected_keys.remove(selected_key)
+    else:
+        if len(selected_keys) >= 3:
+            await update.callback_query.answer("Можно выбрать не больше 3 префиксов.", show_alert=True)
+            return
+        selected_keys.add(selected_key)
+    panel["selected_prefix_keys"] = sorted(selected_keys)
     try:
         await update.callback_query.message.edit_reply_markup(
-            reply_markup=_build_setprefix_keyboard(panel_id, panel.get("selected_prefix_key"))
+            reply_markup=_build_setprefix_keyboard(panel_id, panel.get("selected_prefix_keys"))
         )
     except Exception:
         pass
@@ -2455,28 +2545,29 @@ async def setprefix_apply_callback(update: Update, context: ContextTypes.DEFAULT
         str(update.effective_user.id),
         update.effective_user.username or f"id{update.effective_user.id}",
     )
-    if int(issuer_profile.get("admin_level", 0) or 0) != 5:
+    if _effective_admin_level(issuer_profile) != 5:
         await update.callback_query.answer("Недостаточно прав", show_alert=True)
         return
 
     target_user_id = str(panel.get("target_user_id"))
     target_profile = _ensure_profile(context, target_user_id, f"id{target_user_id}")
 
-    selected_key = str(panel.get("selected_prefix_key") or "")
-    selected_label = None
+    selected_keys = panel.get("selected_prefix_keys") or []
+    selected_labels = []
     for key, label in _prefix_options():
-        if key == selected_key:
-            selected_label = label
-            break
+        if key in selected_keys:
+            selected_labels.append(label)
 
-    if selected_label:
-        target_profile["prefix"] = selected_label
+    if selected_labels:
+        target_profile["prefixes"] = selected_labels
+        target_profile["prefix"] = ", ".join(selected_labels)
     else:
+        target_profile.pop("prefixes", None)
         target_profile.pop("prefix", None)
     _save_profile_record(context, target_user_id)
 
     target_id_profile = int(target_profile.get("id_profile", 0) or panel.get("target_id_profile", 0) or 0)
-    prefix_text = str(target_profile.get("prefix") or "не установлен")
+    prefix_text = ", ".join(selected_labels) if selected_labels else "не установлен"
     try:
         await update.callback_query.message.edit_text(
             f"✅Префикс для id_profile #{target_id_profile} применен: {prefix_text}"
@@ -2568,21 +2659,46 @@ async def ban_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
     cmd_len = cmd_entity.length if cmd_entity and cmd_entity.type == "bot_command" else len("/ban")
     args_text = raw_text[cmd_len:].strip()
     if not args_text:
-        await update.message.reply_text('Укажите id_profile и причину: /ban "id_profile" "reason"')
+        await update.message.reply_text('Используйте: /ban "id_profile" "30m" "reason" (s/m/h/d)')
         return
 
     try:
         parts = shlex.split(args_text)
     except ValueError:
-        await update.message.reply_text('Некорректный формат. Используйте: /ban "id_profile" "reason"')
+        await update.message.reply_text('Некорректный формат. Используйте: /ban "id_profile" "30m" "reason" (s/m/h/d)')
         return
 
-    if len(parts) < 2:
-        await update.message.reply_text('Укажите id_profile и причину: /ban "id_profile" "reason"')
+    if len(parts) < 3:
+        await update.message.reply_text('Используйте: /ban "id_profile" "30m" "reason" (s/m/h/d)')
         return
 
     target_identifier = parts[0]
-    reason = " ".join(parts[1:]).strip()
+    duration_match = re.fullmatch(
+        r"([1-9]\d*)\s*"
+        r"(s|sec(?:ond)?s?|m|min(?:ute)?s?|h|hour?s?|d|day?s?|"
+        r"сек(?:унда|унды|унд)?|мин(?:ута|уты|ут)?|ч(?:ас|аса|асов)?|д(?:ень|ня|ней)?)",
+        parts[1].strip().lower(),
+    )
+    if not duration_match:
+        await update.message.reply_text(
+            'Длительность должна быть числом с единицей: "30s", "10m", "2h" или "1d".'
+        )
+        return
+    duration_value = int(duration_match.group(1))
+    unit = duration_match.group(2)
+    if unit.startswith(("s", "сек")):
+        duration_multiplier = 1
+    elif unit.startswith(("m", "мин")):
+        duration_multiplier = 60
+    elif unit.startswith(("h", "ч")):
+        duration_multiplier = 60 * 60
+    else:
+        duration_multiplier = 24 * 60 * 60
+    duration_seconds = duration_value * duration_multiplier
+    if duration_seconds > MAX_MODERATION_DURATION_SECONDS:
+        await update.message.reply_text("Максимальный срок бана — 365 дней.")
+        return
+    reason = " ".join(parts[2:]).strip()
     if not reason:
         await update.message.reply_text("Укажите причину блокировки.")
         return
@@ -2598,9 +2714,75 @@ async def ban_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
         return
 
-    await _apply_ban(context, str(target_user_id), profile.get("username"), reason, "BAN")
+    await _apply_ban(
+        context,
+        str(target_user_id),
+        profile.get("username"),
+        reason,
+        "BAN",
+        duration_seconds=duration_seconds,
+    )
     await update.message.reply_text(
-        f'⛔Пользователь id_profile #{profile.get("id_profile")} заблокирован. Причина: "{reason}"'
+        f'⛔Пользователь id_profile #{profile.get("id_profile")} заблокирован на {parts[1]}. Причина: "{reason}"'
+    )
+
+
+async def permanent_ban_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or not _is_special_admin_chat(update.effective_chat.id):
+        return
+
+    if not _can_use_moderation_commands(context, str(update.effective_user.id)):
+        await update.message.reply_text("Команда доступна только администраторам 2 категории и выше.")
+        return
+
+    raw_text = update.message.text or ""
+    cmd_entity = update.message.entities[0] if update.message.entities else None
+    cmd_len = cmd_entity.length if cmd_entity and cmd_entity.type == "bot_command" else len("/pban")
+    args_text = raw_text[cmd_len:].strip()
+    if not args_text:
+        await update.message.reply_text('Используйте: /pban "id_profile" "reason"')
+        return
+
+    try:
+        parts = shlex.split(args_text)
+    except ValueError:
+        await update.message.reply_text('Некорректный формат. Используйте: /pban "id_profile" "reason"')
+        return
+
+    if len(parts) < 2:
+        await update.message.reply_text('Используйте: /pban "id_profile" "reason"')
+        return
+
+    target_identifier = parts[0]
+    reason = " ".join(parts[1:]).strip()
+    target_user_id, profile = _resolve_ban_target(context, target_identifier)
+    if not profile:
+        await update.message.reply_text(f'Пользователь с id_profile "{target_identifier}" не найден.')
+        return
+
+    if _has_admin_rights_level_1_5(profile) or _has_admin_ban_immunity(profile):
+        await update.message.reply_text(
+            f'Невозможно выдать бан: id_profile #{profile.get("id_profile")} имеет админ-права 1-5 уровня.'
+        )
+        return
+
+    banned_users = context.application.bot_data.setdefault("banned_users", {})
+    banned_users.pop(str(target_user_id), None)
+    _save_ban_record(context, str(target_user_id))
+    applied = await _apply_ban(
+        context,
+        str(target_user_id),
+        profile.get("username"),
+        reason,
+        "PERMANENT BAN",
+    )
+    if not applied:
+        await update.message.reply_text("Не удалось выдать бессрочный бан пользователю.")
+        return
+
+    await update.message.reply_text(
+        f'⛔Пользователь id_profile #{profile.get("id_profile")} заблокирован навсегда. '
+        f'Причина: "{reason}"'
     )
 
 
@@ -2641,6 +2823,7 @@ async def unban_command_handler(update: Update, context: ContextTypes.DEFAULT_TY
     if not banned_users.pop(str(target_user_id), None):
         await update.message.reply_text(f'Пользователь id_profile #{profile.get("id_profile")} не находится в бане.')
         return
+    _save_ban_record(context, str(target_user_id))
 
     await update.message.reply_text(f'✅Пользователь id_profile #{profile.get("id_profile")} разбанен.')
 
@@ -2812,7 +2995,10 @@ async def admin_take_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     try:
         kb = ReplyKeyboardMarkup(
-            [[KeyboardButton("🤧Отказаться от админа"), KeyboardButton("💤Приостановить общение")]],
+            [
+                [KeyboardButton("🤧Отказаться от админа"), KeyboardButton("💤Приостановить общение")],
+                [KeyboardButton("🕘Проверить онлайн админа")],
+            ],
             resize_keyboard=True,
             one_time_keyboard=False,
         )
@@ -3760,6 +3946,14 @@ async def admin_group_message_handler(update: Update, context: ContextTypes.DEFA
     # Ignore bots
     if not update.effective_user or update.effective_user.is_bot:
         return
+    group_activity = context.application.bot_data.setdefault("admin_work_chat_activity", {})
+    group_activity[str(update.effective_user.id)] = time.time()
+    activity_profile = _ensure_profile(
+        context,
+        str(update.effective_user.id),
+        update.effective_user.username or f"id{update.effective_user.id}",
+    )
+    activity_profile["last_work_chat_message_at"] = group_activity[str(update.effective_user.id)]
 
     logging.info("ADMIN_GROUP_HANDLER HIT: chat=%s user=%s thread=%s text=%r", update.effective_chat.id, update.effective_user.id, getattr(message, "message_thread_id", None), getattr(message, "text", None))
 
@@ -4320,6 +4514,3 @@ async def candidate_reject_reason_message_handler(update: Update, context: Conte
 
     _save_runtime_snapshot(context)
     raise ApplicationHandlerStop
-
-
-

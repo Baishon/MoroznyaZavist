@@ -42,6 +42,58 @@ def _build_candidate_gender_keyboard(user_id: str) -> InlineKeyboardMarkup:
     )
 
 
+def _build_candidate_profile_keyboard(
+    user_id: str,
+    images_saved: bool = False,
+    character_saved: bool = False,
+) -> InlineKeyboardMarkup:
+    image_label = "✅🔖Изображения" if images_saved else "🔖Изображения"
+    character_label = "✅💬Характер" if character_saved else "💬Характер"
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton(image_label, callback_data=f"candidate_images_{user_id}")],
+            [InlineKeyboardButton(character_label, callback_data=f"candidate_character_{user_id}")],
+            [InlineKeyboardButton("↗️отправить заявку", callback_data=f"candidate_submit_{user_id}")],
+        ]
+    )
+
+
+def _build_candidate_character_confirm_keyboard(user_id: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [[
+            InlineKeyboardButton("да", callback_data=f"candidate_character_yes_{user_id}"),
+            InlineKeyboardButton("нет", callback_data=f"candidate_character_no_{user_id}"),
+        ]]
+    )
+
+
+def _build_candidate_character_edit_keyboard(user_id: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [[InlineKeyboardButton("отредактировать", callback_data=f"candidate_character_edit_{user_id}")],
+         [InlineKeyboardButton("отмена", callback_data=f"candidate_profile_{user_id}")]]
+    )
+
+
+def _build_candidate_images_confirm_keyboard(user_id: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("переделать", callback_data=f"candidate_images_redo_{user_id}"),
+                InlineKeyboardButton("готово", callback_data=f"candidate_images_done_{user_id}"),
+            ]
+        ]
+    )
+
+
+def _build_candidate_images_preview_keyboard(user_id: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton("↩️вернуться к заполнению анкеты", callback_data=f"candidate_profile_{user_id}")],
+            [InlineKeyboardButton("отредактировать", callback_data=f"candidate_images_edit_{user_id}")],
+        ]
+    )
+
+
 def _build_main_menu_keyboard(context: ContextTypes.DEFAULT_TYPE, user_id: int | str, username_hint: str | None = None) -> ReplyKeyboardMarkup:
     profile = _ensure_profile(context, str(user_id), username_hint or f"id{user_id}")
     profile_button = "🔰Админ-профиль" if _has_admin_rights_level_1_5(profile) else "👤 Профиль"
@@ -64,6 +116,7 @@ def _build_active_session_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         [
             [KeyboardButton("🤧Отказаться от админа"), KeyboardButton("💤Приостановить общение")],
+            [KeyboardButton("🕘Проверить онлайн админа")],
             [KeyboardButton("↪️Вернуться в главное меню")],
         ],
         resize_keyboard=True,
@@ -228,10 +281,14 @@ def _prefix_options() -> list[tuple[str, str]]:
     ]
 
 
-def _build_setprefix_keyboard(panel_id: str, selected_key: str | None) -> InlineKeyboardMarkup:
+def _build_setprefix_keyboard(panel_id: str, selected_keys: list[str] | str | None) -> InlineKeyboardMarkup:
+    if isinstance(selected_keys, str):
+        selected_set = {selected_keys} if selected_keys else set()
+    else:
+        selected_set = set(selected_keys or [])
     buttons = []
     for key, label in _prefix_options():
-        title = f"✅{label}" if str(selected_key or "") == key else label
+        title = f"✅{label}" if key in selected_set else label
         buttons.append(InlineKeyboardButton(title, callback_data=f"prefix_select_{panel_id}_{key}"))
 
     rows = []
