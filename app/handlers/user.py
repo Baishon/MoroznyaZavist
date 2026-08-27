@@ -2006,6 +2006,7 @@ async def user_private_message_handler(update: Update, context: ContextTypes.DEF
         active["detect_topic"] = int(active.get("detect_topic", 0) or 0) + 1
         chat_id = active.get("chat_id")
         topic_id = active.get("topic_id")
+        profile = _ensure_profile(context, user_id, update.effective_user.username or f"id{update.effective_user.id}")
         topic_link = _topic_url(chat_id, topic_id)
         username = update.effective_user.username or f"id{update.effective_user.id}"
         review_id = _next_suspicious_review_id(context)
@@ -2051,8 +2052,6 @@ async def user_private_message_handler(update: Update, context: ContextTypes.DEF
 
     chat_id = active.get("chat_id")
     topic_id = active.get("topic_id")
-    profile = _ensure_profile(context, user_id, update.effective_user.username or f"id{update.effective_user.id}")
-
     rp_trigger = _parse_rp_trigger_text(update.message.text or update.message.caption)
     if rp_trigger:
         trigger_name, template = rp_trigger

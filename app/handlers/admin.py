@@ -69,6 +69,7 @@ from app.services.profiles import (
     _has_full_access_prefix,
     _has_admin_rights_level_1_5,
     _has_prefix,
+    _is_active_admin_candidate,
     _is_topic_admin,
     _resolve_ban_target,
     _resolve_warn_target,
@@ -340,6 +341,7 @@ async def _makeadmin_impl(update: Update, context: ContextTypes.DEFAULT_TYPE, ow
         profile["admin_rank"] = ""
         profile["admin_candidate"] = False
         profile["admin_candidate_status"] = "none"
+        profile.pop("prefixes", None)
         profile.pop("prefix", None)
         state_map = context.application.bot_data.setdefault("admin_candidate_state", {})
         state_map.pop(str(target_user_id), None)
@@ -662,6 +664,8 @@ async def log_command_router(update: Update, context: ContextTypes.DEFAULT_TYPE)
         "/stats": stats_command_handler,
         "/astats": astats_command_handler,
         "/info_topic": info_topic_command_handler,
+        "/givetopic": givetopic_command_handler,
+        "/taketopic": taketopic_command_handler,
         "/dump_maps": dump_maps_handler,
     }
 
@@ -670,6 +674,194 @@ async def log_command_router(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
 
     await handler(update, context)
+    raise ApplicationHandlerStop
+
+
+async def givetopic_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if (
+        not update.message
+        or not update.effective_user
+        or update.effective_chat.id not in {LOG_CHAT_ID, WORK_CHAT_ID}
+    ):
+        return
+
+    issuer_profile = _ensure_profile(
+        context,
+        str(update.effective_user.id),
+        update.effective_user.username or f"id{update.effective_user.id}",
+    )
+    if _effective_admin_level(issuer_profile) < 1:
+        await update.message.reply_text("Команда доступна только администраторам 1 категории и выше.")
+        return
+
+    try:
+        parts = shlex.split(update.message.text or "")
+    except ValueError:
+        await update.message.reply_text('Используйте: /givetopic "id_profile" "url_topic"')
+        return
+    if len(parts) < 3:
+        await update.message.reply_text('Используйте: /givetopic "id_profile" "url_topic"')
+        return
+
+    target_identifier = parts[1].strip()
+    topic_link = parts[2].strip()
+    chat_id, topic_id = _parse_topic_url(topic_link)
+    if chat_id is None or topic_id is None:
+        await update.message.reply_text("Некорректная ссылка на тему.")
+        return
+
+    topic_map = context.application.bot_data.get("topic_user_map", {}) or {}
+    target_user_id = topic_map.get(topic_id) or topic_map.get(str(topic_id))
+    active = (
+        context.application.bot_data.get("active_chats", {}) or {}
+    ).get(str(target_user_id)) if target_user_id else None
+    if (
+        not active
+        or not active.get("active")
+        or int(active.get("chat_id", 0) or 0) != int(chat_id)
+        or int(active.get("topic_id", 0) or 0) != int(topic_id)
+    ):
+        await update.message.reply_text("Сессия закрыта или неактуальна: выдавать доступ уже нечему.")
+        return
+
+    if (
+        str(active.get("admin_id") or "") != str(update.effective_user.id)
+        and not _has_full_access_prefix(issuer_profile)
+    ):
+        await update.message.reply_text(
+            "Выдать доступ можно только в своей сессии, которую вы приняли, "
+            "или администратору с высшим префиксом."
+        )
+        return
+
+    recipient_id, recipient_profile = _resolve_warn_target(context, target_identifier)
+    if not recipient_profile:
+        await update.message.reply_text(f'Администратор с id_profile "{target_identifier}" не найден.')
+        return
+    if not _has_admin_rights_level_1_5(recipient_profile):
+        await update.message.reply_text("У указанного пользователя нет действующих админских прав.")
+        return
+    if _is_active_admin_candidate(context, recipient_id):
+        await update.message.reply_text("Кандидату с неодобренной заявкой нельзя выдавать доступ к сессии.")
+        return
+
+    allowed_admin_ids = active.setdefault("allowed_admin_ids", [])
+    if recipient_id not in {str(value) for value in allowed_admin_ids}:
+        allowed_admin_ids.append(recipient_id)
+    _save_runtime_snapshot(context)
+    try:
+        await context.bot.send_message(
+            chat_id=int(recipient_id),
+            text=(
+                f"✅Вам выдано право писать в теме сессии по ссылке:\n{topic_link}\n"
+                "Право действует, пока сессия активна или пока его не отберут."
+            ),
+        )
+    except Exception:
+        logging.exception("failed to notify admin %s about topic access grant", recipient_id)
+    await update.message.reply_text(
+        f"✅Администратору с id_profile #{target_identifier} выдано право писать в указанной активной теме."
+    )
+
+
+async def taketopic_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if (
+        not update.message
+        or not update.effective_user
+        or update.effective_chat.id not in {LOG_CHAT_ID, WORK_CHAT_ID}
+    ):
+        return
+
+    issuer_profile = _ensure_profile(
+        context,
+        str(update.effective_user.id),
+        update.effective_user.username or f"id{update.effective_user.id}",
+    )
+    if _effective_admin_level(issuer_profile) < 1:
+        await update.message.reply_text("Команда доступна только администраторам 1 категории и выше.")
+        return
+
+    try:
+        parts = shlex.split(update.message.text or "")
+    except ValueError:
+        await update.message.reply_text('Используйте: /taketopic "id_profile" "url_topic"')
+        return
+    if len(parts) < 3:
+        await update.message.reply_text('Используйте: /taketopic "id_profile" "url_topic"')
+        return
+
+    target_identifier = parts[1].strip()
+    topic_link = parts[2].strip()
+    chat_id, topic_id = _parse_topic_url(topic_link)
+    if chat_id is None or topic_id is None:
+        await update.message.reply_text("Некорректная ссылка на тему.")
+        return
+
+    topic_map = context.application.bot_data.get("topic_user_map", {}) or {}
+    target_user_id = topic_map.get(topic_id) or topic_map.get(str(topic_id))
+    active = (
+        context.application.bot_data.get("active_chats", {}) or {}
+    ).get(str(target_user_id)) if target_user_id else None
+    if (
+        not active
+        or not active.get("active")
+        or int(active.get("chat_id", 0) or 0) != int(chat_id)
+        or int(active.get("topic_id", 0) or 0) != int(topic_id)
+    ):
+        await update.message.reply_text("Сессия закрыта или неактуальна: отзывать доступ уже нечего.")
+        return
+
+    if (
+        str(active.get("admin_id") or "") != str(update.effective_user.id)
+        and not _has_full_access_prefix(issuer_profile)
+    ):
+        await update.message.reply_text(
+            "Отобрать доступ можно только в своей сессии, которую вы приняли, "
+            "или администратору с высшим префиксом."
+        )
+        return
+
+    recipient_id, recipient_profile = _resolve_warn_target(context, target_identifier)
+    if not recipient_profile:
+        await update.message.reply_text(f'Администратор с id_profile "{target_identifier}" не найден.')
+        return
+
+    allowed_admin_ids = active.setdefault("allowed_admin_ids", [])
+    normalized_allowed = {str(value) for value in allowed_admin_ids}
+    if str(recipient_id) not in normalized_allowed:
+        await update.message.reply_text(
+            f'У администратора с id_profile #{target_identifier} нет выданного доступа к этой теме.'
+        )
+        return
+
+    active["allowed_admin_ids"] = [
+        str(value) for value in allowed_admin_ids if str(value) != str(recipient_id)
+    ]
+    _save_runtime_snapshot(context)
+    try:
+        await context.bot.send_message(
+            chat_id=int(recipient_id),
+            text=(
+                f"⚠️У вас отозвано право писать в теме сессии по ссылке:\n{topic_link}\n"
+                "Теперь сообщения в этой теме отправлять нельзя."
+            ),
+        )
+    except Exception:
+        logging.exception("failed to notify admin %s about topic access removal", recipient_id)
+    await update.message.reply_text(
+        f"✅У администратора с id_profile #{target_identifier} отобрано право писать в указанной теме."
+    )
+
+
+async def admin_candidate_command_guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    message = getattr(update, "message", None)
+    user = getattr(update, "effective_user", None)
+    chat = getattr(update, "effective_chat", None)
+    if message is None or user is None or chat is None:
+        return
+    if chat.id not in _special_admin_chat_ids() or not _is_active_admin_candidate(context, str(user.id)):
+        return
+    await message.reply_text("⛔️Во время кандидатуры админские команды недоступны. Дождитесь одобрения заявки.")
     raise ApplicationHandlerStop
 
 
@@ -905,7 +1097,7 @@ async def anpiar_command_handler(update: Update, context: ContextTypes.DEFAULT_T
 # and every astats_*_callback below render and edit an admin's profile card
 # (tag, bio, gender, cooperation tip text) via app.services.profiles.
 async def warn_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_chat.id != LOG_CHAT_ID or not update.message:
+    if update.effective_chat.id not in {LOG_CHAT_ID, WORK_CHAT_ID} or not update.message:
         return
 
     if not _can_use_moderation_commands(context, str(update.effective_user.id)):
@@ -2591,7 +2783,7 @@ async def setprefix_apply_callback(update: Update, context: ContextTypes.DEFAULT
 # flow (issued from a user's profile card) apply moderation actions via
 # app.services.bans and persist through app.database.requests.
 async def unwarn_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_chat.id != LOG_CHAT_ID or not update.message:
+    if update.effective_chat.id not in {LOG_CHAT_ID, WORK_CHAT_ID} or not update.message:
         return
 
     if not _can_use_moderation_commands(context, str(update.effective_user.id)):
@@ -3968,6 +4160,20 @@ async def admin_group_message_handler(update: Update, context: ContextTypes.DEFA
         return
 
     profile = (context.application.bot_data.get("profiles", {}) or {}).get(str(update.effective_user.id), {})
+    if _is_active_admin_candidate(context, str(update.effective_user.id)):
+        try:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                message_thread_id=topic_id,
+                text="⛔️Во время кандидатуры админские права недоступны. Сообщение не отправлено.",
+            )
+        except Exception:
+            logging.exception(
+                "failed to notify candidate %s in topic %s",
+                update.effective_user.id,
+                topic_id,
+            )
+        return
     if _is_admin_muted(profile):
         remaining_minutes = _mute_remaining_minutes(profile)
         try:
@@ -4024,6 +4230,58 @@ async def admin_group_message_handler(update: Update, context: ContextTypes.DEFA
         return
     if active_target and active_target.get("management_paused"):
         logging.info("Target user %s session is management-paused; skip forwarding", target_user)
+        return
+
+    sender_id = str(update.effective_user.id)
+    session_admin_id = str(active_target.get("admin_id") or "") if active_target else ""
+    allowed_admin_ids = {
+        str(value) for value in (active_target or {}).get("allowed_admin_ids", [])
+    }
+    if (
+        sender_id != session_admin_id
+        and sender_id not in allowed_admin_ids
+        and not _has_full_access_prefix(profile)
+    ):
+        try:
+            await message.delete()
+        except Exception:
+            logging.exception(
+                "failed to delete message from unauthorized admin %s in topic %s",
+                sender_id,
+                topic_id,
+            )
+        username = update.effective_user.username
+        sender_label = f"@{username}" if username else f"id{sender_id}"
+        try:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                message_thread_id=topic_id,
+                text=(
+                    f"⛔️{sender_label}, это чужая тема. "
+                    "У вас нет доступа отправлять сюда сообщения."
+                ),
+            )
+        except Exception:
+            logging.exception(
+                "failed to notify unauthorized admin %s in topic %s",
+                sender_id,
+                topic_id,
+            )
+        return
+
+    if not _has_admin_rights_level_1_5(profile):
+        try:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                message_thread_id=topic_id,
+                text="⛔️У вас нет действующих админских прав. Сообщение не отправлено пользователю.",
+            )
+        except Exception:
+            logging.exception(
+                "failed to notify non-admin sender %s in active topic %s",
+                update.effective_user.id,
+                topic_id,
+            )
         return
 
     profile = (context.application.bot_data.get("profiles", {}) or {}).get(str(target_user), {})
