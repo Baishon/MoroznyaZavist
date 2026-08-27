@@ -18,6 +18,7 @@ from app.database.requests import _init_persistent_storage
 from app.handlers.admin import (
     add_rules_handler,
     admin_group_message_handler,
+    admin_candidate_command_guard,
     admin_mute_guard_handler,
     admin_take_callback,
     amute_command_handler,
@@ -50,6 +51,7 @@ from app.handlers.admin import (
     admin_decline_request_callback,
     dump_maps_handler,
     fullstats_command_handler,
+    givetopic_command_handler,
     handle_astats_bio_input_message,
     handle_astats_tag_input_message,
     handle_decline_input_message,
@@ -75,6 +77,7 @@ from app.handlers.admin import (
     setprefix_select_callback,
     show_user_profile_callback,
     stats_command_handler,
+    taketopic_command_handler,
     suspicious_admin_allow_callback,
     suspicious_admin_deny_callback,
     suspicious_user_allow_callback,
@@ -211,6 +214,13 @@ def build_application():
         group=-1,
     )
     app.add_handler(MessageHandler(filters.TEXT & filters.Chat(LOG_CHAT_ID), log_command_router), group=-1)
+    app.add_handler(
+        MessageHandler(
+            filters.COMMAND & (filters.ChatType.GROUP | filters.ChatType.SUPERGROUP | filters.ChatType.CHANNEL),
+            admin_candidate_command_guard,
+        ),
+        group=-2,
+    )
     app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND & (filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), admin_mute_guard_handler), group=-1)
     app.add_handler(CommandHandler("addrules", add_rules_handler), group=-1)
     app.add_handler(CommandHandler("delrules", del_rule_handler), group=-1)
@@ -231,6 +241,8 @@ def build_application():
     app.add_handler(CommandHandler("stats", stats_command_handler, filters=filters.ChatType.PRIVATE | filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), group=-1)
     app.add_handler(CommandHandler("astats", astats_command_handler, filters=filters.ChatType.PRIVATE | filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), group=-1)
     app.add_handler(CommandHandler("info_topic", info_topic_command_handler, filters=filters.ChatType.GROUP | filters.ChatType.SUPERGROUP | filters.ChatType.CHANNEL), group=-1)
+    app.add_handler(CommandHandler("givetopic", givetopic_command_handler, filters=filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), group=-1)
+    app.add_handler(CommandHandler("taketopic", taketopic_command_handler, filters=filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), group=-1)
     app.add_handler(CommandHandler("topic", topic_command_handler, filters=filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), group=-1)
     app.add_handler(CommandHandler("start", start, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("restart", restart_command_handler, filters=filters.ChatType.PRIVATE))

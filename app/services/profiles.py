@@ -264,6 +264,11 @@ FULL_ACCESS_PREFIXES = {
 def _has_full_access_prefix(profile: dict | None) -> bool:
     if not profile:
         return False
+    try:
+        if int(profile.get("admin_level", 0) or 0) <= 0:
+            return False
+    except (TypeError, ValueError):
+        return False
     prefixes = profile.get("prefixes")
     if not isinstance(prefixes, list):
         prefixes = str(profile.get("prefix") or "").split(",")
