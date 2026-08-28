@@ -24,7 +24,7 @@ from telegram.constants import ChatType, ParseMode
 from telegram.error import BadRequest
 from telegram.ext import ApplicationHandlerStop, ContextTypes
 
-from app.config import ADMIN_LEVEL_TITLES, LOG_CHAT_ID, WORK_CHAT_ID
+from app.config import ADMIN_LEVEL_TITLES, LOG_CHAT_ID, TRUSTED_ADMIN_CHAT_ID, WORK_CHAT_ID
 from app.database.requests import _save_profile_record, _save_runtime_snapshot
 from app.handlers.candidates import _send_candidate_stage_1, admin_candidate_private_flow
 from app.keyboards.inline import (
@@ -197,6 +197,10 @@ async def agreement_message_handler(update: Update, context: ContextTypes.DEFAUL
     if agreed == 1 and agreed_version == AGREEMENT_VERSION:
         return
 
+    # Keep the trusted admin chat quiet for users who have not accepted the terms.
+    if update.effective_chat and update.effective_chat.id == TRUSTED_ADMIN_CHAT_ID:
+        raise ApplicationHandlerStop
+
     # Send agreement as a private message
     await _send_agreement_message_for_user(int(user_id), context)
 
@@ -238,6 +242,9 @@ async def agreement_callback_guard(update: Update, context: ContextTypes.DEFAULT
     agreed_version = int(profile.get("agreed_terms_version", 0) or 0)
     if agreed == 1 and agreed_version == AGREEMENT_VERSION:
         return
+
+    if query.message and query.message.chat.id == TRUSTED_ADMIN_CHAT_ID:
+        raise ApplicationHandlerStop
 
     # Notify user and send PM with agreement
     try:
@@ -307,6 +314,27 @@ async def agreement_accept_callback(update: Update, context: ContextTypes.DEFAUL
         pass
 
     raise ApplicationHandlerStop
+
+
+async def admin_search_command_guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Prevent private commands while the user is waiting for an administrator."""
+    if not update.message or not update.effective_user:
+        return
+    if not update.effective_chat or update.effective_chat.type != ChatType.PRIVATE:
+        return
+
+    user_id = str(update.effective_user.id)
+    request = (context.application.bot_data.get("admin_requests", {}) or {}).get(user_id)
+    if not request:
+        return
+
+    await update.message.reply_text(
+        "⏳ Вы сейчас ожидаете администратора.\n\n"
+        "Команды временно недоступны. Сначала отмените поиск администратора "
+        "кнопкой «Отменить» в сообщении запроса."
+    )
+    raise ApplicationHandlerStop
+
 
 async def help_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await block_if_banned(update, context):

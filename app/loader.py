@@ -158,6 +158,7 @@ from app.handlers.user import (
     agreement_message_handler,
     agreement_callback_guard,
     agreement_accept_callback,
+    admin_search_command_guard,
 )
 
 
@@ -205,6 +206,10 @@ def build_application():
     app.add_handler(CallbackQueryHandler(agreement_accept_callback, pattern=r"^agreement_accept$"), group=-5)
     # Message guard for all chat types: intercepts any message from a user who hasn't accepted the current agreement.
     app.add_handler(MessageHandler(filters.ALL, agreement_message_handler), group=-7)
+    app.add_handler(
+        MessageHandler(filters.COMMAND & filters.ChatType.PRIVATE, admin_search_command_guard),
+        group=-6,
+    )
 
     app.add_handler(
         MessageHandler(
