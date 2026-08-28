@@ -2004,6 +2004,7 @@ async def user_private_message_handler(update: Update, context: ContextTypes.DEF
     bypass_until = float(active.get("suspicious_bypass_user_to_admin_until", 0) or 0)
     if _has_suspicious_username(suspicious_text) and time.time() >= bypass_until:
         active["detect_topic"] = int(active.get("detect_topic", 0) or 0) + 1
+        active["last_suspicious_message"] = suspicious_text
         chat_id = active.get("chat_id")
         topic_id = active.get("topic_id")
         profile = _ensure_profile(context, user_id, update.effective_user.username or f"id{update.effective_user.id}")
@@ -2082,6 +2083,7 @@ async def user_private_message_handler(update: Update, context: ContextTypes.DEF
         profile["message_user"] = int(profile.get("message_user", 0) or 0) + 1
         active["msg_topic_user"] = int(active.get("msg_topic_user", 0) or 0) + 1
         active["rp_topic"] = int(active.get("rp_topic", 0) or 0) + 1
+        active["last_rp_action"] = update.message.text or update.message.caption or "RP"
         return
 
     try:
@@ -2095,6 +2097,7 @@ async def user_private_message_handler(update: Update, context: ContextTypes.DEF
         active["msg_topic_user"] = int(active.get("msg_topic_user", 0) or 0) + 1
         if _is_rp_action_text(update.message.text or update.message.caption):
             active["rp_topic"] = int(active.get("rp_topic", 0) or 0) + 1
+            active["last_rp_action"] = update.message.text or update.message.caption or "RP"
         group_map = context.application.bot_data.setdefault("group_message_map", {})
         group_map[copied.message_id] = user_id
         group_map[str(copied.message_id)] = user_id

@@ -28,6 +28,7 @@ from app.config import (
     OWNER_ID,
     RULES_CHAT_ID,
     RULES_THREAD_ID,
+    TRUSTED_ADMIN_CHAT_ID,
     WORK_CHAT_ID,
 )
 from app.database.requests import _save_ban_record, _save_profile_record, _save_runtime_snapshot
@@ -107,7 +108,7 @@ async def topic_command_handler(update: Update, context: ContextTypes.DEFAULT_TY
     if not update.message or not update.effective_user:
         return
 
-    allowed_topic_chats = {WORK_CHAT_ID, LOG_CHAT_ID, COOPERATION_CHAT_ID}
+    allowed_topic_chats = {WORK_CHAT_ID, LOG_CHAT_ID, COOPERATION_CHAT_ID, TRUSTED_ADMIN_CHAT_ID}
     if update.effective_chat.id not in allowed_topic_chats:
         await update.message.reply_text("Команда /topic доступна только в спец-группах.")
         return
@@ -1359,6 +1360,13 @@ async def astats_command_handler(update: Update, context: ContextTypes.DEFAULT_T
         )
         return
 
+    if update.effective_chat.id == TRUSTED_ADMIN_CHAT_ID:
+        await update.message.reply_text(
+            _build_admin_stats_text(str(target_user_id), profile),
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
     astats_sessions = context.application.bot_data.setdefault("astats_tag_sessions", {})
     astats_seq = int(context.application.bot_data.get("astats_tag_seq", 0) or 0) + 1
     context.application.bot_data["astats_tag_seq"] = astats_seq
@@ -1770,11 +1778,23 @@ async def info_topic_command_handler(update: Update, context: ContextTypes.DEFAU
     admin_username = str(active.get("admin_username") or "админ")
     username_pz = str(target_profile.get("username") or active.get("topic_base_name") or f"id{target_user_id}")
     detect = int(active.get("detect_topic", 0) or 0)
+    detect_last = str(active.get("last_suspicious_message") or "нет")
     msg_topic = int(active.get("msg_topic_user", 0) or 0) + int(active.get("msg_topic_admin", 0) or 0)
     rp_topic = int(active.get("rp_topic", 0) or 0)
+    rp_topic_last = str(active.get("last_rp_action") or "нет")
     date_value = str(active.get("session_started_at") or "не указана")
 
-    text = _build_info_topic_text(username_pz, admin_username, detect, msg_topic, rp_topic, date_value, topic_link)
+    text = _build_info_topic_text(
+        username_pz,
+        admin_username,
+        detect,
+        detect_last,
+        msg_topic,
+        rp_topic,
+        rp_topic_last,
+        date_value,
+        topic_link,
+    )
     panels[panel_id]["panel_text"] = text
     try:
         await context.bot.send_message(
@@ -3173,6 +3193,8 @@ async def admin_take_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         "msg_topic_admin": 0,
         "detect_topic": 0,
         "rp_topic": 0,
+        "last_suspicious_message": "",
+        "last_rp_action": "",
         "session_started_at": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"),
         "active": True,
     }
@@ -4131,21 +4153,32 @@ async def admin_group_message_handler(update: Update, context: ContextTypes.DEFA
         message.message_id,
     )
 
-    # Only consider messages in the designated special group and in a forum topic
-    if update.effective_chat.id != WORK_CHAT_ID:
+    # Track registered admins in the work and trusted admin chats. Messages in
+    # the trusted chat are observed only for online status and never forwarded.
+    if update.effective_chat.id not in {WORK_CHAT_ID, TRUSTED_ADMIN_CHAT_ID}:
         return
 
     # Ignore bots
     if not update.effective_user or update.effective_user.is_bot:
         return
+    profiles = context.application.bot_data.get("profiles", {}) or {}
+    existing_profile = profiles.get(str(update.effective_user.id))
+    if update.effective_chat.id == TRUSTED_ADMIN_CHAT_ID:
+        if not existing_profile or _effective_admin_level(existing_profile) < 1:
+            return
+        activity_profile = existing_profile
+    else:
+        activity_profile = _ensure_profile(
+            context,
+            str(update.effective_user.id),
+            update.effective_user.username or f"id{update.effective_user.id}",
+        )
     group_activity = context.application.bot_data.setdefault("admin_work_chat_activity", {})
     group_activity[str(update.effective_user.id)] = time.time()
-    activity_profile = _ensure_profile(
-        context,
-        str(update.effective_user.id),
-        update.effective_user.username or f"id{update.effective_user.id}",
-    )
     activity_profile["last_work_chat_message_at"] = group_activity[str(update.effective_user.id)]
+    if update.effective_chat.id == TRUSTED_ADMIN_CHAT_ID:
+        _save_profile_record(context, str(update.effective_user.id))
+        return
 
     logging.info("ADMIN_GROUP_HANDLER HIT: chat=%s user=%s thread=%s text=%r", update.effective_chat.id, update.effective_user.id, getattr(message, "message_thread_id", None), getattr(message, "text", None))
 
@@ -4291,6 +4324,7 @@ async def admin_group_message_handler(update: Update, context: ContextTypes.DEFA
     if _has_suspicious_username(suspicious_text, allowed_username=allowed_username) and time.time() >= bypass_until:
         if active_target:
             active_target["detect_topic"] = int(active_target.get("detect_topic", 0) or 0) + 1
+            active_target["last_suspicious_message"] = suspicious_text
         admin_username = update.effective_user.username or f"id{update.effective_user.id}"
         topic_link = _topic_url(update.effective_chat.id, topic_id)
         review_id = _next_suspicious_review_id(context)
@@ -4359,6 +4393,7 @@ async def admin_group_message_handler(update: Update, context: ContextTypes.DEFA
         if active_target:
             active_target["msg_topic_admin"] = int(active_target.get("msg_topic_admin", 0) or 0) + 1
             active_target["rp_topic"] = int(active_target.get("rp_topic", 0) or 0) + 1
+            active_target["last_rp_action"] = getattr(message, "text", None) or getattr(message, "caption", None) or "RP"
             context.application.bot_data["total_admin_replies"] = int(context.application.bot_data.get("total_admin_replies", 0) or 0) + 1
         return
 
@@ -4372,6 +4407,7 @@ async def admin_group_message_handler(update: Update, context: ContextTypes.DEFA
                 context.application.bot_data["total_admin_replies"] = int(context.application.bot_data.get("total_admin_replies", 0) or 0) + 1
                 if _is_rp_action_text(update.message.text or update.message.caption):
                     active_target["rp_topic"] = int(active_target.get("rp_topic", 0) or 0) + 1
+                    active_target["last_rp_action"] = getattr(message, "text", None) or getattr(message, "caption", None) or "RP"
             logging.info("Forwarded text from group topic %s msg=%s to user %s via send_message", topic_id, update.message.message_id, target_user)
             return
 
@@ -4382,6 +4418,7 @@ async def admin_group_message_handler(update: Update, context: ContextTypes.DEFA
             context.application.bot_data["total_admin_replies"] = int(context.application.bot_data.get("total_admin_replies", 0) or 0) + 1
             if _is_rp_action_text(update.message.text or update.message.caption):
                 active_target["rp_topic"] = int(active_target.get("rp_topic", 0) or 0) + 1
+                active_target["last_rp_action"] = getattr(message, "text", None) or getattr(message, "caption", None) or "RP"
         logging.info("Forwarded non-text message from group topic %s msg=%s to user %s (copied id=%s)", topic_id, update.message.message_id, target_user, getattr(res, 'message_id', None))
         return
     except Forbidden as e:
@@ -4403,6 +4440,7 @@ async def admin_group_message_handler(update: Update, context: ContextTypes.DEFA
             context.application.bot_data["total_admin_replies"] = int(context.application.bot_data.get("total_admin_replies", 0) or 0) + 1
             if _is_rp_action_text(update.message.text or update.message.caption):
                 active_target["rp_topic"] = int(active_target.get("rp_topic", 0) or 0) + 1
+                active_target["last_rp_action"] = getattr(message, "text", None) or getattr(message, "caption", None) or "RP"
         logging.info("Fallback delivered message %s to user %s", update.message.message_id, target_user)
     except Forbidden as e:
         err = str(e).lower()
