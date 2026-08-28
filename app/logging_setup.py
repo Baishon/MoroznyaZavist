@@ -24,7 +24,7 @@ except Exception:
 
 from app.config import LOG_CHAT_ID, TOKEN
 
-logging.basicConfig(level=logging.INFO, format='Монтажер: %(levelname)s: %(message)s')
+logging.basicConfig(level=logging.INFO, format='Logs: %(levelname)s: %(message)s')
 
 
 class TelegramLogHandler(logging.Handler):
@@ -59,7 +59,7 @@ class TelegramLogHandler(logging.Handler):
 try:
     t_handler = TelegramLogHandler(TOKEN, LOG_CHAT_ID)
     t_handler.setLevel(logging.WARNING)
-    t_handler.setFormatter(logging.Formatter("Монтажер: %(levelname)s: %(message)s"))
+    t_handler.setFormatter(logging.Formatter("Logs: %(levelname)s: %(message)s"))
     logging.getLogger().addHandler(t_handler)
     # Emit a startup log so it appears in the special log chat (verifies handler works)
     logging.info(f"TelegramLogHandler initialized, logs will be sent to chat {LOG_CHAT_ID}")

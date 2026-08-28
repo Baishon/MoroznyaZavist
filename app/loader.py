@@ -7,6 +7,7 @@ import asyncio
 import logging
 import os
 import threading
+from types import SimpleNamespace
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 from telegram import BotCommand
@@ -14,7 +15,7 @@ from telegram.ext import ApplicationBuilder, CallbackQueryHandler, CommandHandle
 
 from app import logging_setup  # noqa: F401  (side effect: attaches Telegram log handler)
 from app.config import COOPERATION_CHAT_ID, HEARTBEAT_USER_ID, LOG_CHAT_ID, TOKEN, WORK_CHAT_ID
-from app.database.requests import _init_persistent_storage
+from app.database.requests import _init_persistent_storage, _save_runtime_snapshot
 from app.handlers.admin import (
     add_rules_handler,
     admin_group_message_handler,
@@ -169,6 +170,15 @@ async def _heartbeat_loop(app) -> None:
         await asyncio.sleep(30)
 
 
+async def _runtime_snapshot_loop(app) -> None:
+    while True:
+        try:
+            _save_runtime_snapshot(SimpleNamespace(application=app))
+        except Exception:
+            logging.exception("Failed to autosave runtime snapshot")
+        await asyncio.sleep(10)
+
+
 async def _post_init(app) -> None:
     try:
         await app.bot.set_my_commands(
@@ -180,6 +190,7 @@ async def _post_init(app) -> None:
     except Exception:
         logging.exception("Failed to set bot commands")
     app.create_task(_heartbeat_loop(app))
+    app.create_task(_runtime_snapshot_loop(app))
 
 
 def build_application():

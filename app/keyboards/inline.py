@@ -248,13 +248,23 @@ def _build_info_topic_keyboard(panel_id: str, paused: bool = False, pending_acti
     )
 
 
-def _build_info_topic_text(username_pz: str, admin_username: str, detect: int, msg_topic: int, rp_topic: int, date_value: str, topic_link: str) -> str:
+def _build_info_topic_text(
+    username_pz: str,
+    admin_username: str,
+    detect: int,
+    detect_last: str,
+    msg_topic: int,
+    rp_topic: int,
+    rp_topic_last: str,
+    date_value: str,
+    topic_link: str,
+) -> str:
     return (
-        f"📋Информация о переписке {username_pz} с админом {admin_username}\n\n"
-        f"⚠️Подозрительных сообщений: {detect}\n"
-        f"📥Сообщений в теме: {msg_topic}\n"
-        f"💞РП действий: {rp_topic}\n\n"
-        f"🕘Регистрация запроса от пользователя: {date_value}"
+        f"📕Full information about the session {username_pz} with the admin {admin_username}\n\n"
+        f"🔍Suspicious messages: {detect} Last suspicious: {detect_last}\n"
+        f"✉️Total posts in this topic: {msg_topic}\n"
+        f"💓Action role-play: {rp_topic} Last RP: {rp_topic_last}\n\n"
+        f"📂Time of session registration in the bot's database {date_value}"
     )
 
 
