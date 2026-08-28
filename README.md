@@ -36,11 +36,24 @@ app/
 `handlers/user.py` and `handlers/admin.py` depend on, without depending on each other — this avoids
 a circular import between the two handler modules.
 
-## Files to upload to hosting
+## Deployment
 
-- `main.py`, `app/`, `requirements.txt`
-- `bot_storage/bot_state.sqlite3`
-- `config/.env` (or environment variables set on the host)
+For Render, create a **Web Service** from this repository and select **Docker**.
+The included `Dockerfile` starts the bot with `python main.py`. Use one instance
+only: Telegram polling must not run in multiple replicas at the same time.
+
+Add these environment variables in Render:
+
+- `TELEGRAM_TOKEN` — the bot token, stored as a secret.
+- `DATABASE_URL` — the **Internal Database URL** from a Render PostgreSQL
+  database in the same region.
+
+Set the health check path to `/`. The bot exposes a small HTTP health endpoint
+on Render's `$PORT` while receiving Telegram updates through polling.
+
+Do not upload `config/.env`, `.venv/`, or `bot_storage/` to Render. The
+filesystem of a Web Service is not a database; PostgreSQL is used automatically
+when `DATABASE_URL` is set.
 
 ## Setup
 
@@ -68,19 +81,12 @@ python main.py
 By default the bot stores its state in `bot_storage/bot_state.sqlite3`.
 It keeps profiles, bans, warnings, admin levels, last admin tags, and the profile sequence there.
 
-If you move the bot to another host, copy the whole `bot_storage/` folder too.
+If you move the bot to another host and want to preserve local development
+data, copy the whole `bot_storage/` folder. On Render, use PostgreSQL instead.
 
 ### Deploying on Render (or other hosts with an ephemeral filesystem)
 
-Render's free web-service tier recreates the container's filesystem on every
-restart/redeploy, so the SQLite file above gets wiped and the bot "forgets"
-everything. To avoid that, set the `DATABASE_URL` environment variable to a
-Postgres connection string (a free project on [Neon](https://neon.tech) or
-[Supabase](https://supabase.com) works well). When `DATABASE_URL` is set, the
-bot stores all the same state (profiles, bans, runtime snapshot) in that
-Postgres database instead of the local SQLite file, so restarts/redeploys no
-longer lose data. Nothing else changes — same schema, same behavior.
-
-If you're on a paid Render plan with a persistent Disk, you can instead skip
-`DATABASE_URL` and mount a Disk at `bot_storage/` so the SQLite file itself
-persists.
+Render's Web Service filesystem can be recreated on restart or redeploy, so
+SQLite is only intended for local development. When `DATABASE_URL` is set, the
+bot creates its tables and stores profiles, bans, warnings, and the runtime
+snapshot in PostgreSQL. This preserves state across restarts and redeploys.
