@@ -11,6 +11,7 @@ from types import SimpleNamespace
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 from telegram import BotCommand
+from telegram.error import Forbidden
 from telegram.ext import ApplicationBuilder, CallbackQueryHandler, CommandHandler, MessageHandler, filters
 
 from app import logging_setup  # noqa: F401  (side effect: attaches Telegram log handler)
@@ -171,6 +172,16 @@ async def _heartbeat_loop(app) -> None:
     while True:
         try:
             await app.bot.send_message(HEARTBEAT_USER_ID, "Logs save.")
+        except Forbidden:
+            logging.warning(
+                "Heartbeat user %s is not available for PMs; falling back to the log chat.",
+                HEARTBEAT_USER_ID,
+            )
+            try:
+                await app.bot.send_message(LOG_CHAT_ID, "Logs save. (heartbeat fallback)")
+            except Exception:
+                pass
+            return
         except Exception:
             logging.exception("Failed to send heartbeat message")
         await asyncio.sleep(30)
