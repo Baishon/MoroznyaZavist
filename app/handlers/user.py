@@ -34,6 +34,7 @@ from app.keyboards.inline import (
     _build_complaint_admin_menu_keyboard,
     _build_complaint_menu_keyboard,
     _build_main_menu_keyboard,
+    _build_session_settings_keyboard,
     _build_settings_menu_keyboard,
 )
 from app.services.bans import block_if_banned, check_active_chat_block, enforce_autoban_if_needed
@@ -317,13 +318,28 @@ async def agreement_accept_callback(update: Update, context: ContextTypes.DEFAUL
 
 
 async def admin_search_command_guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Prevent private commands while the user is waiting for an administrator."""
+    """Prevent private commands while the user is waiting for an administrator.
+
+    Some system commands must remain available even while the search request is active
+    (for example /admins, /restart, /start), otherwise bot navigation becomes blocked by
+    stale search state.
+    """
     if not update.message or not update.effective_user:
         return
     if not update.effective_chat or update.effective_chat.type != ChatType.PRIVATE:
         return
 
+    raw_text = update.message.text or ""
+    if raw_text:
+        candidate = raw_text.split()[0].lower().split("@", 1)[0]
+        if candidate in {"/admins", "/restart", "/start"}:
+            return
+
     user_id = str(update.effective_user.id)
+    active = (context.application.bot_data.get("active_chats", {}) or {}).get(user_id)
+    if active and active.get("active"):
+        return
+
     request = (context.application.bot_data.get("admin_requests", {}) or {}).get(user_id)
     if not request:
         return
@@ -405,6 +421,156 @@ async def send_active_session_menu(update: Update, context: ContextTypes.DEFAULT
         await send_main_submenu(update, context)
         return
     await update.message.reply_text("Кнопки диалога:", reply_markup=_build_active_session_keyboard())
+
+
+async def session_settings_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or update.effective_chat.type != ChatType.PRIVATE:
+        return
+    if await block_if_banned(update, context):
+        return
+    user_id = str(update.effective_user.id)
+    active = (context.application.bot_data.get("active_chats", {}) or {}).get(user_id)
+    if not active or not active.get("active"):
+        await update.message.reply_text("У вас нет активной сессии с администратором.")
+        return
+
+    status_text = "💔RP-команды отключены в этой сессии." if active.get("rp_disabled") else "💞RP-команды включены в этой сессии."
+    await update.message.reply_text(
+        f"⚙️Настройки сессии\n\n{status_text}",
+        reply_markup=_build_session_settings_keyboard(active),
+    )
+
+
+async def session_rp_disable_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or update.effective_chat.type != ChatType.PRIVATE:
+        return
+    if await block_if_banned(update, context):
+        return
+    user_id = str(update.effective_user.id)
+    active = (context.application.bot_data.get("active_chats", {}) or {}).get(user_id)
+    if not active or not active.get("active"):
+        await update.message.reply_text("У вас нет активной сессии с администратором.")
+        return
+    if active.get("rp_disabled"):
+        await update.message.reply_text(
+            "💞RP-команды уже отключены в этой сессии.",
+            reply_markup=_build_session_settings_keyboard(active),
+        )
+        return
+
+    cooldown_until = float(active.get("rp_disable_cooldown_until", 0) or 0)
+    if time.time() < cooldown_until:
+        remaining = max(0, int(cooldown_until - time.time()))
+        minutes, seconds = divmod(remaining, 60)
+        remaining_text = f"{minutes} мин. {seconds} сек." if minutes else f"{seconds} сек."
+        await update.message.reply_text(f"⏳Повторно отключить RP можно через {remaining_text}.")
+        return
+
+    user_id_int = int(user_id)
+    confirm_kb = InlineKeyboardMarkup(
+        [[
+            InlineKeyboardButton("✅ Подтвердить", callback_data=f"session_rp_disable_confirm_{user_id_int}"),
+            InlineKeyboardButton("❌ Отмена", callback_data=f"session_rp_disable_cancel_{user_id_int}"),
+        ]]
+    )
+    await update.message.reply_text(
+        "⚠️Вы уверены, что хотите отключить RP-команды в этой сессии?\n\nПосле отключения любые RP-команды будут недоступны и не будут отправляться администратору.",
+        reply_markup=confirm_kb,
+    )
+
+
+async def session_rp_enable_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or update.effective_chat.type != ChatType.PRIVATE:
+        return
+    if await block_if_banned(update, context):
+        return
+    user_id = str(update.effective_user.id)
+    active = (context.application.bot_data.get("active_chats", {}) or {}).get(user_id)
+    if not active or not active.get("active"):
+        await update.message.reply_text("У вас нет активной сессии с администратором.")
+        return
+
+    active["rp_disabled"] = False
+    active["rp_disable_cooldown_until"] = time.time() + 30 * 60
+    await update.message.reply_text(
+        "✅RP-команды снова включены в этой сессии.",
+        reply_markup=_build_session_settings_keyboard(active),
+    )
+
+
+async def session_rp_disable_confirm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.callback_query.answer()
+    data = update.callback_query.data or ""
+    parts = data.split("_")
+    if len(parts) < 5:
+        return
+    user_id = int(parts[4])
+    if update.effective_user.id != user_id:
+        await update.callback_query.answer("Только владелец сессии может это сделать", show_alert=True)
+        return
+
+    active = (context.application.bot_data.get("active_chats", {}) or {}).get(str(user_id))
+    if not active or not active.get("active"):
+        await update.callback_query.answer("Активная сессия не найдена", show_alert=True)
+        return
+    if active.get("rp_disabled"):
+        await update.callback_query.answer("RP-команды уже отключены", show_alert=True)
+        return
+
+    active["rp_disabled"] = True
+    active["rp_disable_cooldown_until"] = time.time() + 30 * 60
+
+    chat_id = active.get("chat_id")
+    topic_id = active.get("topic_id")
+    notify_text = "💔RP-команды отключены в данной сессии. Чтобы включить их снова, откройте раздел настроек сессии."
+    user_notice = "💔RP-команды отключены в этой сессии. Чтобы включить их снова, откройте раздел настроек сессии."
+
+    try:
+        await update.callback_query.message.delete()
+    except Exception:
+        pass
+
+    try:
+        await context.bot.send_message(chat_id=int(user_id), text=user_notice)
+    except Exception:
+        pass
+
+    try:
+        if chat_id is not None:
+            if topic_id is not None:
+                await context.bot.send_message(
+                    chat_id=int(chat_id),
+                    message_thread_id=topic_id,
+                    text=f"💔RP-команды были отключены пользователем в этой сессии.",
+                )
+            else:
+                await context.bot.send_message(chat_id=int(chat_id), text=notify_text)
+    except Exception:
+        pass
+
+    admin_id = active.get("admin_id")
+    if admin_id:
+        try:
+            await context.bot.send_message(chat_id=int(admin_id), text="💔Пользователь отключил RP-команды в этой сессии.")
+        except Exception:
+            pass
+
+
+async def session_rp_disable_cancel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.callback_query.answer()
+    data = update.callback_query.data or ""
+    parts = data.split("_")
+    if len(parts) < 5:
+        return
+    user_id = int(parts[4])
+    if update.effective_user.id != user_id:
+        await update.callback_query.answer("Только владелец сессии может это сделать", show_alert=True)
+        return
+
+    try:
+        await update.callback_query.message.delete()
+    except Exception:
+        pass
 
 
 async def check_session_admin_online_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1456,6 +1622,13 @@ async def pause_session_request(update: Update, context: ContextTypes.DEFAULT_TY
         await update.message.reply_text("У вас нет активной сессии с администратором.")
         return
 
+    if active.get("management_paused"):
+        await update.message.reply_text(
+            "🔇В вашем диалоге отключен режим общения руководством бота. "
+            "Если вы считаете что это ошибка обратитесь в технический раздел"
+        )
+        return
+
     if active.get("paused"):
         resume_kb = InlineKeyboardMarkup(
             [[InlineKeyboardButton("Возомновить общение", callback_data=f"resume_session_{user.id}")]]
@@ -1960,11 +2133,20 @@ async def user_private_message_handler(update: Update, context: ContextTypes.DEF
             except Exception as e:
                 logging.exception("failed to notify topic about user cancel: %s", e)
 
+            admin_tag = str(active_session.get("admin_tag") or active_session.get("admin_username") or "админ")
+            id_profile = profile.get("id_profile")
+            msg_topic_closed = int(active_session.get("msg_topic_user", 0) or 0) + int(active_session.get("msg_topic_admin", 0) or 0)
+            url_topic_closed = _topic_url(chat_id, topic_id) if chat_id and topic_id is not None else "тема недоступна"
+            date_closed = active_session.get("closed_at") or datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+            active_session["closed_at"] = date_closed
+            user_handle = f"@{username}" if username and not str(username).startswith("@") else str(username or "@unknown")
             cancel_review_text = (
-                "🟥Отказ пользователя от администратора\n\n"
-                f"Пришло уведомление, что пользователь нашего бота \"{username}\" отказался от администратора \"{admin_username}\" "
-                f"по причине \"{reason_otkazik}\"\n\n"
-                "Выберите кнопки ниже⬇️"
+                f"💔Пользователь отказался от администратора {admin_tag}\n\n"
+                f"Сессия {url_topic_closed} была закрыта пользователем {user_handle} по причине {reason_otkazik}\n"
+                f"🆔Айди пользователя: {id_profile}\n\n"
+                "📌\n"
+                f"Сообщений в теме: {msg_topic_closed}\n\n"
+                f"🕑Дата закрытия сессии: {date_closed}"
             )
 
             seq = context.application.bot_data.get("user_cancel_review_seq", 0) + 1
@@ -2021,12 +2203,30 @@ async def user_private_message_handler(update: Update, context: ContextTypes.DEF
     if not active or not active.get("active"):
         return
 
+    if active.get("management_paused"):
+        await update.message.reply_text(
+            "🔇В вашем диалоге отключен режим общения руководством бота. Если вы считаете что это ошибка обратитесь в технический раздел"
+        )
+        return
+
     if active.get("paused") or active.get("management_paused"):
         resume_kb = InlineKeyboardMarkup(
             [[InlineKeyboardButton("Возомновить общение", callback_data=f"resume_session_{user_id}")]]
         )
         await update.message.reply_text("💤Включен режим остановки. Администратору не отправится сообщение пока общение не будет возобновлено.", reply_markup=resume_kb)
         return
+
+    if active.get("rp_disabled"):
+        rp_trigger = _parse_rp_trigger_text(getattr(update.message, "text", None) or getattr(update.message, "caption", None))
+        if rp_trigger:
+            try:
+                await update.message.delete()
+            except Exception:
+                pass
+            await update.message.reply_text(
+                "💔RP-команды отключены в данной сессии. Чтобы включить их снова, откройте раздел настроек сессии."
+            )
+            return
 
     suspicious_text = (getattr(update.message, "text", None) or getattr(update.message, "caption", None) or "").strip()
     bypass_until = float(active.get("suspicious_bypass_user_to_admin_until", 0) or 0)

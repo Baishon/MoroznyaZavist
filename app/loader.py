@@ -146,6 +146,11 @@ from app.handlers.user import (
     return_to_main_menu_handler,
     send_admin_profile,
     send_profile,
+    session_rp_disable_cancel_callback,
+    session_rp_disable_confirm_callback,
+    session_rp_disable_prompt,
+    session_rp_enable_handler,
+    session_settings_menu_handler,
     settings_back_handler,
     settings_complaint_menu_handler,
     settings_disable_ad_handler,
@@ -186,6 +191,7 @@ async def _post_init(app) -> None:
             [
                 BotCommand("start", "Запустить бота"),
                 BotCommand("restart", "Обновить текущее подменю"),
+                BotCommand("admins", "Список администраторов"),
             ]
         )
     except Exception:
@@ -301,6 +307,8 @@ def build_application():
     app.add_handler(CallbackQueryHandler(pause_session_confirm_callback, pattern=r"^pause_confirm_\d+$"))
     app.add_handler(CallbackQueryHandler(pause_session_cancel_callback, pattern=r"^pause_cancel_\d+$"))
     app.add_handler(CallbackQueryHandler(resume_session_callback, pattern=r"^resume_session_\d+$"))
+    app.add_handler(CallbackQueryHandler(session_rp_disable_confirm_callback, pattern=r"^session_rp_disable_confirm_\d+$"))
+    app.add_handler(CallbackQueryHandler(session_rp_disable_cancel_callback, pattern=r"^session_rp_disable_cancel_\d+$"))
     app.add_handler(CallbackQueryHandler(setprefix_select_callback, pattern=r"^prefix_select_\d+_[a-z]+$"))
     app.add_handler(CallbackQueryHandler(setprefix_apply_callback, pattern=r"^prefix_apply_\d+$"))
     app.add_handler(CallbackQueryHandler(astats_tag_change_callback, pattern=r"^astats_tag_change_\d+$"))
@@ -346,6 +354,9 @@ def build_application():
     app.add_handler(MessageHandler(filters.Regex("^🔰Админ-профиль$") & filters.ChatType.PRIVATE, send_admin_profile))
     app.add_handler(MessageHandler(filters.Regex("^🤧Отказаться от админа$") & filters.ChatType.PRIVATE, ask_cancel_admin))
     app.add_handler(MessageHandler(filters.Regex("^💤Приостановить общение$") & filters.ChatType.PRIVATE, pause_session_request))
+    app.add_handler(MessageHandler(filters.Regex("^➕Настройки сессии$") & filters.ChatType.PRIVATE, session_settings_menu_handler))
+    app.add_handler(MessageHandler(filters.Regex("^💔Отключить RP$") & filters.ChatType.PRIVATE, session_rp_disable_prompt))
+    app.add_handler(MessageHandler(filters.Regex("^💞Включить RP$") & filters.ChatType.PRIVATE, session_rp_enable_handler))
     app.add_handler(MessageHandler(filters.Regex("^🕘Проверить онлайн админа$") & filters.ChatType.PRIVATE, check_session_admin_online_handler))
     app.add_handler(MessageHandler(filters.Regex("^↩️Вернуться к кнопкам диалога$") & filters.ChatType.PRIVATE, return_to_dialog_menu_handler))
     app.add_handler(MessageHandler(filters.Regex("^↪️Вернуться в главное меню$") & filters.ChatType.PRIVATE, return_to_main_menu_handler))

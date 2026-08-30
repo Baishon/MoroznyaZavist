@@ -35,6 +35,7 @@ from app.database.requests import _save_ban_record, _save_profile_record, _save_
 from app.handlers.candidates import _send_candidate_stage_1
 from app.keyboards.inline import (
     _build_active_dialog_admin_keyboard,
+    _build_active_session_keyboard,
     _build_astats_gender_editor_keyboard,
     _build_astats_profile_keyboard,
     _build_astats_tip_editor_keyboard,
@@ -305,15 +306,16 @@ async def _makeadmin_impl(update: Update, context: ContextTypes.DEFAULT_TYPE, ow
     preview_prefix_text = preview_prefix or "не установлен"
 
     target_user_id_int = int(target_user_id)
-    in_work_chat = await _is_member_of_chat(context, WORK_CHAT_ID, target_user_id_int)
-    if not in_work_chat:
-        await update.message.reply_text("Выдача невозможна: добавьте пользователя в рабочий чат.")
-        return
+    if lvl != 0:
+        in_work_chat = await _is_member_of_chat(context, WORK_CHAT_ID, target_user_id_int)
+        if not in_work_chat:
+            await update.message.reply_text("Выдача невозможна: добавьте пользователя в рабочий чат.")
+            return
 
-    in_channel = await _is_member_of_chat(context, OFFICIAL_CHANNEL_ID, target_user_id_int)
-    if not in_channel:
-        await update.message.reply_text("Выдача невозможна: пользователь не подписан на официальный тгк бота.")
-        return
+        in_channel = await _is_member_of_chat(context, OFFICIAL_CHANNEL_ID, target_user_id_int)
+        if not in_channel:
+            await update.message.reply_text("Выдача невозможна: пользователь не подписан на официальный тгк бота.")
+            return
 
     if lvl > 1:
         candidate_status = str(profile.get("admin_candidate_status") or "")
@@ -441,7 +443,6 @@ async def _makeadmin_impl(update: Update, context: ContextTypes.DEFAULT_TYPE, ow
 
 async def makeadmin_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _makeadmin_impl(update, context, owner_bypass=False)
-
 
 
 async def prava_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -3096,11 +3097,33 @@ async def admin_take_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     except Exception:
         pass
 
+    user_requests = context.user_data.get("admin_request", {})
+    if str(request_user_id) in user_requests:
+        del user_requests[str(request_user_id)]
+    app_requests.pop(str(request_user_id), None)
+
+    async def _refresh_user_session_menu():
+        await asyncio.sleep(5)
+        active = (context.application.bot_data.get("active_chats", {}) or {}).get(str(request_user_id))
+        if not active or not active.get("active"):
+            return
+        try:
+            await context.bot.send_message(
+                chat_id=int(request_user_id),
+                text="📱Меню диалога обновлено.",
+                reply_markup=_build_active_session_keyboard(),
+            )
+        except Exception:
+            pass
+
+    asyncio.create_task(_refresh_user_session_menu())
+
     chat_id = req_info.get("chat_id")
     topic_id = req_info.get("topic_id")
     username = req_info.get("username")
     admin_username = f"@{update.effective_user.username}" if update.effective_user.username else f"id{update.effective_user.id}"
     admin_tag = str(admin_profile.get("tag_admin") or admin_username)
+    session_topic_name = str(admin_tag or admin_username)
     requester_profile = _ensure_profile(context, str(request_user_id), username)
     requester_id_profile = requester_profile.get("id_profile")
 
@@ -3174,6 +3197,16 @@ async def admin_take_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     except Exception:
         pass
 
+    if topic_id is not None:
+        try:
+            await context.bot.edit_forum_topic(
+                chat_id=chat_id,
+                message_thread_id=topic_id,
+                name=session_topic_name,
+            )
+        except Exception:
+            pass
+
     # enable user-side cancel button and active chat forwarding state
     user_session = context.application.bot_data.setdefault("active_chats", {})
     user_session[str(request_user_id)] = {
@@ -3184,7 +3217,7 @@ async def admin_take_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         "admin_username": admin_username,
         "admin_tag": admin_tag,
         "admin_biography": str(admin_profile.get("biography_admin") or ""),
-        "topic_base_name": username,
+        "topic_base_name": session_topic_name,
         "paused": False,
         "pause_topic_message_id": None,
         "suspicious_bypass_user_to_admin_until": 0,
@@ -4421,6 +4454,12 @@ async def admin_group_message_handler(update: Update, context: ContextTypes.DEFA
                 active_target["last_rp_action"] = getattr(message, "text", None) or getattr(message, "caption", None) or "RP"
         logging.info("Forwarded non-text message from group topic %s msg=%s to user %s (copied id=%s)", topic_id, update.message.message_id, target_user, getattr(res, 'message_id', None))
         return
+    except BadRequest as e:
+        err = str(e).lower()
+        if "can't be copied" in err or "message can't be copied" in err:
+            logging.warning("Copy failed for user %s topic %s: %s; using fallback delivery", target_user, topic_id, e)
+        else:
+            logging.exception("Forwarding to user %s failed in copy_message: %s", target_user, e)
     except Forbidden as e:
         err = str(e).lower()
         if "bot was blocked by the user" in err:

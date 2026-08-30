@@ -115,10 +115,24 @@ def _build_main_menu_keyboard(context: ContextTypes.DEFAULT_TYPE, user_id: int |
 def _build_active_session_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         [
-            [KeyboardButton("🤧Отказаться от админа"), KeyboardButton("💤Приостановить общение")],
+            [KeyboardButton("🤧Отказаться от админа")],
+            [KeyboardButton("➕Настройки сессии")],
             [KeyboardButton("🕘Проверить онлайн админа")],
             [KeyboardButton("↪️Вернуться в главное меню")],
         ],
+        resize_keyboard=True,
+        one_time_keyboard=False,
+    )
+
+
+def _build_session_settings_keyboard(active: dict | None = None) -> ReplyKeyboardMarkup:
+    session_data = active or {}
+    rp_disabled = bool(session_data.get("rp_disabled", False))
+    label = "💞Включить RP" if rp_disabled else "💔Отключить RP"
+    rows = [[KeyboardButton(label), KeyboardButton("💤Приостановить общение")]]
+    rows.append([KeyboardButton("↩️Вернуться к кнопкам диалога")])
+    return ReplyKeyboardMarkup(
+        rows,
         resize_keyboard=True,
         one_time_keyboard=False,
     )
