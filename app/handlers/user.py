@@ -111,8 +111,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = InlineKeyboardMarkup(
         [
             [
-                InlineKeyboardButton("⭐ Канал бота", url="https://t.me/Icyenvy_channel"),
-                InlineKeyboardButton("❓ Помощь", callback_data="help")
+                InlineKeyboardButton("⭐ Канал бота", url="https://t.me/berlogaAskly"),
+                InlineKeyboardButton("❓ Помощь", url="https://t.me/berlogaAskly/58")
             ]
         ]
     )
@@ -297,8 +297,8 @@ async def agreement_accept_callback(update: Update, context: ContextTypes.DEFAUL
         keyboard = InlineKeyboardMarkup(
             [
                 [
-                    InlineKeyboardButton("⭐ Канал бота", url="https://t.me/Icyenvy_channel"),
-                    InlineKeyboardButton("❓ Помощь", callback_data="help")
+                    InlineKeyboardButton("⭐ Канал бота", url="https://t.me/berlogaAskly"),
+                    InlineKeyboardButton("❓ Помощь", url="https://t.me/berlogaAskly/58")
                 ]
             ]
         )
