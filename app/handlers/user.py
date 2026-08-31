@@ -329,7 +329,7 @@ async def admin_search_command_guard(update: Update, context: ContextTypes.DEFAU
     """Prevent private commands while the user is waiting for an administrator.
 
     Some system commands must remain available even while the search request is active
-    (for example /admins, /restart, /start), otherwise bot navigation becomes blocked by
+    (for example /restart and /start), otherwise bot navigation becomes blocked by
     stale search state.
     """
     if not update.message or not update.effective_user:
@@ -340,7 +340,7 @@ async def admin_search_command_guard(update: Update, context: ContextTypes.DEFAU
     raw_text = update.message.text or ""
     if raw_text:
         candidate = raw_text.split()[0].lower().split("@", 1)[0]
-        if candidate in {"/admins", "/restart", "/start"}:
+        if candidate in {"/restart", "/start"}:
             return
 
     user_id = str(update.effective_user.id)
@@ -2304,16 +2304,19 @@ async def user_private_message_handler(update: Update, context: ContextTypes.DEF
         )
         wrapped_text = f"💞RP : {rendered}"
         try:
-            await context.bot.send_message(chat_id=int(chat_id), message_thread_id=topic_id if topic_id else None, text=wrapped_text)
+            sent_to_topic = await context.bot.send_message(chat_id=int(chat_id), message_thread_id=topic_id if topic_id else None, text=wrapped_text)
+            _track_session_message_pair(context, int(update.effective_user.id), int(update.message.message_id), int(chat_id), int(sent_to_topic.message_id))
         except Exception:
             try:
-                await context.bot.send_message(chat_id=int(chat_id), text=wrapped_text)
+                sent_to_topic = await context.bot.send_message(chat_id=int(chat_id), text=wrapped_text)
+                _track_session_message_pair(context, int(update.effective_user.id), int(update.message.message_id), int(chat_id), int(sent_to_topic.message_id))
             except Exception:
                 pass
         admin_id = active.get("admin_id")
         if admin_id:
             try:
-                await context.bot.send_message(chat_id=int(admin_id), text=wrapped_text)
+                sent_to_admin = await context.bot.send_message(chat_id=int(admin_id), text=wrapped_text)
+                _track_session_message_pair(context, int(update.effective_user.id), int(update.message.message_id), int(admin_id), int(sent_to_admin.message_id))
             except Exception:
                 pass
         profile["message_user"] = int(profile.get("message_user", 0) or 0) + 1
@@ -2337,6 +2340,8 @@ async def user_private_message_handler(update: Update, context: ContextTypes.DEF
         group_map = context.application.bot_data.setdefault("group_message_map", {})
         group_map[copied.message_id] = user_id
         group_map[str(copied.message_id)] = user_id
+        from app.services.messaging import _track_session_message_pair
+        _track_session_message_pair(context, int(chat_id), int(update.message.message_id), int(update.effective_chat.id), int(copied.message_id))
     except Exception:
         try:
             await deliver_message_to_user(context.bot, update.message, int(chat_id))

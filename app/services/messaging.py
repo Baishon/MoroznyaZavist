@@ -1,9 +1,68 @@
 """Generic message-forwarding helpers shared by user- and admin-side handlers."""
 import logging
 
+from telegram import ReactionTypeCustomEmoji, ReactionTypeEmoji
 from telegram.ext import ContextTypes
 
 from app.services.profiles import _set_user_blocked_bot_state
+
+
+def _track_session_message_pair(context: ContextTypes.DEFAULT_TYPE, source_chat_id: int, source_message_id: int, target_chat_id: int, target_message_id: int) -> None:
+    """Store a bidirectional mapping between mirrored messages in both session chats."""
+    mapping = context.application.bot_data.setdefault("session_message_map", {})
+    source_key = (int(source_chat_id), int(source_message_id))
+    target_key = (int(target_chat_id), int(target_message_id))
+    mapping[source_key] = target_key
+    mapping[target_key] = source_key
+    mapping[(int(source_chat_id), str(source_message_id))] = target_key
+    mapping[(int(target_chat_id), str(target_message_id))] = source_key
+
+
+def _extract_reaction_payload(reactions):
+    """Return the first user reaction as a Telegram reaction payload suitable for set_message_reaction."""
+    if not reactions:
+        return None
+    first = reactions[0]
+    if hasattr(first, "emoji") and getattr(first, "emoji", None):
+        return [ReactionTypeEmoji(emoji=first.emoji)]
+    if hasattr(first, "custom_emoji_id") and getattr(first, "custom_emoji_id", None):
+        return [ReactionTypeCustomEmoji(custom_emoji_id=first.custom_emoji_id)]
+    if isinstance(first, str):
+        return [first]
+    return None
+
+
+async def mirror_session_message_reaction(update, context: ContextTypes.DEFAULT_TYPE):
+    """Mirror a reaction from one side of a session to the other side in the same session."""
+    reaction = getattr(update, "message_reaction", None)
+    if reaction is None:
+        return
+
+    chat_id = int(getattr(update.effective_chat, "id", 0) or 0)
+    if not chat_id:
+        return
+
+    message_id = int(getattr(reaction, "message_id", 0) or 0)
+    if not message_id:
+        return
+
+    target_reaction = _extract_reaction_payload(getattr(reaction, "reactions", None))
+    if not target_reaction:
+        return
+
+    mapping = context.application.bot_data.get("session_message_map", {}) or {}
+    counterpart = mapping.get((chat_id, message_id)) or mapping.get((chat_id, str(message_id)))
+    if not counterpart or not isinstance(counterpart, tuple) or len(counterpart) != 2:
+        return
+
+    other_chat_id, other_message_id = int(counterpart[0]), int(counterpart[1])
+    if other_chat_id == chat_id and other_message_id == message_id:
+        return
+
+    try:
+        await context.bot.set_message_reaction(chat_id=other_chat_id, message_id=other_message_id, reaction=target_reaction)
+    except Exception:
+        logging.exception("Failed to mirror reaction from chat %s msg %s to chat %s msg %s", chat_id, message_id, other_chat_id, other_message_id)
 
 
 async def deliver_message_to_user(bot, message, user_chat_id: int):
