@@ -2317,6 +2317,8 @@ async def user_private_message_handler(update: Update, context: ContextTypes.DEF
             try:
                 sent_to_admin = await context.bot.send_message(chat_id=int(admin_id), text=wrapped_text)
                 _track_session_message_pair(context, int(update.effective_user.id), int(update.message.message_id), int(admin_id), int(sent_to_admin.message_id))
+                if 'sent_to_topic' in locals() and sent_to_topic is not None:
+                    _track_session_message_pair(context, int(chat_id), int(sent_to_topic.message_id), int(admin_id), int(sent_to_admin.message_id))
             except Exception:
                 pass
         profile["message_user"] = int(profile.get("message_user", 0) or 0) + 1
