@@ -4415,14 +4415,19 @@ async def admin_group_message_handler(update: Update, context: ContextTypes.DEFA
         )
         wrapped_text = f"💞RP : {rendered}"
         try:
-            await context.bot.send_message(chat_id=update.effective_chat.id, message_thread_id=topic_id, text=wrapped_text)
+            topic_message = await context.bot.send_message(chat_id=update.effective_chat.id, message_thread_id=topic_id, text=wrapped_text)
+            try:
+                sent = await context.bot.send_message(chat_id=int(target_user), text=wrapped_text)
+                _track_session_message_pair(context, int(update.effective_chat.id), int(topic_message.message_id), int(target_user), int(sent.message_id))
+                _track_session_message_pair(context, int(update.message.chat_id), int(update.message.message_id), int(target_user), int(sent.message_id))
+            except Exception:
+                pass
         except Exception:
-            pass
-        try:
-            sent = await context.bot.send_message(chat_id=int(target_user), text=wrapped_text)
-            _track_session_message_pair(context, int(update.message.chat_id), int(update.message.message_id), int(target_user), int(sent.message_id))
-        except Exception:
-            pass
+            try:
+                sent = await context.bot.send_message(chat_id=int(target_user), text=wrapped_text)
+                _track_session_message_pair(context, int(update.message.chat_id), int(update.message.message_id), int(target_user), int(sent.message_id))
+            except Exception:
+                pass
         _set_user_blocked_bot_state(context, str(target_user), False)
         if active_target:
             active_target["msg_topic_admin"] = int(active_target.get("msg_topic_admin", 0) or 0) + 1
