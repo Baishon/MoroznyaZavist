@@ -262,6 +262,19 @@ def _record_info_topic_action(
         session["status"] = session.get("status") or "active"
 
 
+def _is_info_topic_session_admin(context: ContextTypes.DEFAULT_TYPE, panel: dict | None, user_id: int | str | None) -> bool:
+    if panel is None or user_id is None:
+        return False
+    user_key = str(user_id)
+    if str(panel.get("issuer_user_id") or "") == user_key:
+        return True
+    target_user_id = str(panel.get("target_user_id") or "")
+    if not target_user_id:
+        return False
+    active = (context.application.bot_data.get("active_chats", {}) or {}).get(target_user_id) or {}
+    return str(active.get("admin_id") or "") == user_key
+
+
 def _build_info_topic_logs_text(context: ContextTypes.DEFAULT_TYPE, target_user_id: str | int, panel_id: str | None = None) -> str:
     logs_bucket = (context.application.bot_data.get("info_topic_logs", {}) or {})
     session = logs_bucket.get(str(panel_id)) if panel_id else logs_bucket.get(str(target_user_id))
@@ -2240,8 +2253,8 @@ async def info_topic_close_callback(update: Update, context: ContextTypes.DEFAUL
         await update.callback_query.answer("Панель устарела", show_alert=True)
         return
 
-    if str(update.effective_user.id) != str(panel.get("issuer_user_id")):
-        await update.callback_query.answer("Кнопка доступна только автору /info_topic", show_alert=True)
+    if not _is_info_topic_session_admin(context, panel, update.effective_user.id):
+        await update.callback_query.answer("Доступно только админу этой сессии", show_alert=True)
         return
 
     issuer_profile = _ensure_profile(
@@ -2270,8 +2283,8 @@ async def info_topic_stop_callback(update: Update, context: ContextTypes.DEFAULT
         await update.callback_query.answer("Панель устарела", show_alert=True)
         return
 
-    if str(update.effective_user.id) != str(panel.get("issuer_user_id")):
-        await update.callback_query.answer("Кнопка доступна только автору /info_topic", show_alert=True)
+    if not _is_info_topic_session_admin(context, panel, update.effective_user.id):
+        await update.callback_query.answer("Доступно только админу этой сессии", show_alert=True)
         return
 
     issuer_profile = _ensure_profile(
@@ -2299,8 +2312,8 @@ async def info_topic_cancel_callback(update: Update, context: ContextTypes.DEFAU
     if not panel:
         return
 
-    if str(update.effective_user.id) != str(panel.get("issuer_user_id")):
-        await update.callback_query.answer("Кнопка доступна только автору /info_topic", show_alert=True)
+    if not _is_info_topic_session_admin(context, panel, update.effective_user.id):
+        await update.callback_query.answer("Доступно только админу этой сессии", show_alert=True)
         return
 
     active = context.application.bot_data.get("active_chats", {}).get(str(panel.get("target_user_id"))) or {}
@@ -2325,8 +2338,8 @@ async def info_topic_logs_callback(update: Update, context: ContextTypes.DEFAULT
         await update.callback_query.answer("Панель устарела", show_alert=True)
         return
 
-    if str(update.effective_user.id) != str(panel.get("issuer_user_id")):
-        await update.callback_query.answer("Кнопка доступна только автору /info_topic", show_alert=True)
+    if not _is_info_topic_session_admin(context, panel, update.effective_user.id):
+        await update.callback_query.answer("Доступно только админу этой сессии", show_alert=True)
         return
 
     target_user_id = str(panel.get("target_user_id") or "")
@@ -2393,8 +2406,8 @@ async def info_topic_stats_callback(update: Update, context: ContextTypes.DEFAUL
         await update.callback_query.answer("Панель устарела", show_alert=True)
         return
 
-    if str(update.effective_user.id) != str(panel.get("issuer_user_id")):
-        await update.callback_query.answer("Кнопка доступна только автору /info_topic", show_alert=True)
+    if not _is_info_topic_session_admin(context, panel, update.effective_user.id):
+        await update.callback_query.answer("Доступно только админу этой сессии", show_alert=True)
         return
 
     target_user_id = str(panel.get("target_user_id") or "")
@@ -2536,8 +2549,8 @@ async def info_topic_close_confirm_callback(update: Update, context: ContextType
         await update.callback_query.answer("Панель устарела", show_alert=True)
         return
 
-    if str(update.effective_user.id) != str(panel.get("issuer_user_id")):
-        await update.callback_query.answer("Кнопка доступна только автору /info_topic", show_alert=True)
+    if not _is_info_topic_session_admin(context, panel, update.effective_user.id):
+        await update.callback_query.answer("Доступно только админу этой сессии", show_alert=True)
         return
 
     issuer_profile = _ensure_profile(context, str(update.effective_user.id), update.effective_user.username or f"id{update.effective_user.id}")
@@ -2561,8 +2574,8 @@ async def info_topic_stop_confirm_callback(update: Update, context: ContextTypes
         await update.callback_query.answer("Панель устарела", show_alert=True)
         return
 
-    if str(update.effective_user.id) != str(panel.get("issuer_user_id")):
-        await update.callback_query.answer("Кнопка доступна только автору /info_topic", show_alert=True)
+    if not _is_info_topic_session_admin(context, panel, update.effective_user.id):
+        await update.callback_query.answer("Доступно только админу этой сессии", show_alert=True)
         return
 
     issuer_profile = _ensure_profile(context, str(update.effective_user.id), update.effective_user.username or f"id{update.effective_user.id}")
@@ -2589,8 +2602,8 @@ async def info_topic_resume_callback(update: Update, context: ContextTypes.DEFAU
         await update.callback_query.answer("Панель устарела", show_alert=True)
         return
 
-    if str(update.effective_user.id) != str(panel.get("issuer_user_id")):
-        await update.callback_query.answer("Кнопка доступна только автору /info_topic", show_alert=True)
+    if not _is_info_topic_session_admin(context, panel, update.effective_user.id):
+        await update.callback_query.answer("Доступно только админу этой сессии", show_alert=True)
         return
 
     issuer_profile = _ensure_profile(context, str(update.effective_user.id), update.effective_user.username or f"id{update.effective_user.id}")
