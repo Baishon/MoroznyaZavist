@@ -117,11 +117,13 @@ def _record_info_topic_action(context: ContextTypes.DEFAULT_TYPE, target_user_id
     session_logs = logs.setdefault(target_key, [])
 
     active = (context.application.bot_data.get("active_chats", {}) or {}).get(target_key) or {}
+    profiles = (context.application.bot_data.get("profiles", {}) or {})
+    current_profile = profiles.get(admin_key, {})
     admin_tag = str(
-        active.get("admin_tag")
+        current_profile.get("tag_admin")
+        or current_profile.get("username")
+        or active.get("admin_tag")
         or active.get("admin_username")
-        or (context.application.bot_data.get("profiles", {}) or {}).get(admin_key, {}).get("tag_admin")
-        or (context.application.bot_data.get("profiles", {}) or {}).get(admin_key, {}).get("username")
         or f"id{admin_user_id}"
     )
     entry = {
