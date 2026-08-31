@@ -16,6 +16,13 @@ def _track_session_message_pair(context: ContextTypes.DEFAULT_TYPE, source_chat_
     mapping[target_key] = source_key
     mapping[(int(source_chat_id), str(source_message_id))] = target_key
     mapping[(int(target_chat_id), str(target_message_id))] = source_key
+    logging.info(
+        "session_message_map: %s:%s <-> %s:%s",
+        int(source_chat_id),
+        int(source_message_id),
+        int(target_chat_id),
+        int(target_message_id),
+    )
 
 
 def _extract_reaction_payload(reaction_value):
@@ -59,8 +66,17 @@ async def mirror_session_message_reaction(update, context: ContextTypes.DEFAULT_
     if target_reaction is None:
         return
 
+    logging.info(
+        "reaction_update: chat=%s msg=%s by=%s new_reaction=%s",
+        chat_id,
+        message_id,
+        getattr(actor, "id", None),
+        target_reaction,
+    )
+
     mapping = context.application.bot_data.get("session_message_map", {}) or {}
     counterpart = mapping.get((chat_id, message_id)) or mapping.get((chat_id, str(message_id)))
+    logging.info("reaction_lookup: chat=%s msg=%s counterpart=%s", chat_id, message_id, counterpart)
     if not counterpart or not isinstance(counterpart, tuple) or len(counterpart) != 2:
         return
 
@@ -79,9 +95,24 @@ async def mirror_session_message_reaction(update, context: ContextTypes.DEFAULT_
     lock.add(lock_key)
 
     try:
+        logging.info(
+            "set_message_reaction: chat=%s msg=%s reaction=%s -> chat=%s msg=%s",
+            chat_id,
+            message_id,
+            target_reaction,
+            other_chat_id,
+            other_message_id,
+        )
         await context.bot.set_message_reaction(chat_id=other_chat_id, message_id=other_message_id, reaction=target_reaction)
-    except Exception:
-        logging.exception("Failed to mirror reaction from chat %s msg %s to chat %s msg %s", chat_id, message_id, other_chat_id, other_message_id)
+    except Exception as exc:
+        logging.exception(
+            "Failed to mirror reaction from chat %s msg %s to chat %s msg %s. Telegram API error: %s",
+            chat_id,
+            message_id,
+            other_chat_id,
+            other_message_id,
+            exc,
+        )
     finally:
         lock.discard(lock_key)
 

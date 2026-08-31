@@ -423,4 +423,13 @@ def _start_health_check_server() -> None:
 def main() -> None:
     _start_health_check_server()
     app = build_application()
-    app.run_polling(close_loop=False)
+    app.run_polling(
+        allowed_updates=[
+            "message",
+            "edited_message",
+            "callback_query",
+            "message_reaction",
+            "message_reaction_count",
+        ],
+        close_loop=False,
+    )
