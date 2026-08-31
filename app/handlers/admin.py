@@ -48,7 +48,7 @@ from app.keyboards.inline import (
     _prefix_options,
 )
 from app.services.bans import _apply_ban, enforce_autoban_if_needed
-from app.services.messaging import deliver_message_to_user, notify_blocked_user_in_topic
+from app.services.messaging import _track_session_message_pair, deliver_message_to_user, notify_blocked_user_in_topic
 from app.services.mutes import (
     _admin_mute_permissions,
     _admin_unmute_permissions,
@@ -4419,7 +4419,8 @@ async def admin_group_message_handler(update: Update, context: ContextTypes.DEFA
         except Exception:
             pass
         try:
-            await context.bot.send_message(chat_id=int(target_user), text=wrapped_text)
+            sent = await context.bot.send_message(chat_id=int(target_user), text=wrapped_text)
+            _track_session_message_pair(context, int(update.message.chat_id), int(update.message.message_id), int(target_user), int(sent.message_id))
         except Exception:
             pass
         _set_user_blocked_bot_state(context, str(target_user), False)
@@ -4433,7 +4434,8 @@ async def admin_group_message_handler(update: Update, context: ContextTypes.DEFA
     # Forward the message to the user's private chat.
     try:
         if update.message.text:
-            await context.bot.send_message(chat_id=int(target_user), text=update.message.text)
+            sent = await context.bot.send_message(chat_id=int(target_user), text=update.message.text)
+            _track_session_message_pair(context, int(update.message.chat_id), int(update.message.message_id), int(target_user), int(sent.message_id))
             _set_user_blocked_bot_state(context, str(target_user), False)
             if active_target:
                 active_target["msg_topic_admin"] = int(active_target.get("msg_topic_admin", 0) or 0) + 1
@@ -4445,6 +4447,7 @@ async def admin_group_message_handler(update: Update, context: ContextTypes.DEFA
             return
 
         res = await context.bot.copy_message(chat_id=int(target_user), from_chat_id=update.message.chat_id, message_id=update.message.message_id)
+        _track_session_message_pair(context, int(update.message.chat_id), int(update.message.message_id), int(target_user), int(res.message_id))
         _set_user_blocked_bot_state(context, str(target_user), False)
         if active_target:
             active_target["msg_topic_admin"] = int(active_target.get("msg_topic_admin", 0) or 0) + 1
