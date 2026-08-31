@@ -12,12 +12,13 @@ from telegram import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     KeyboardButton,
+    MessageEntity,
     ReplyKeyboardMarkup,
     ReplyKeyboardRemove,
     Update,
 )
 from telegram.constants import ChatType, ParseMode
-from telegram.error import BadRequest, Forbidden
+from telegram.error import BadRequest, Forbidden, RetryAfter
 from telegram.ext import ApplicationHandlerStop, ContextTypes
 
 from app.config import (
@@ -886,6 +887,90 @@ async def cooperation_admin_command_guard(update: Update, context: ContextTypes.
 
 
 
+def _strip_command_entities(entities, command_length: int, full_text: str):
+    if not entities:
+        return []
+
+    results: list[MessageEntity] = []
+    for entity in entities:
+        if entity.offset + entity.length <= command_length:
+            continue
+        start = max(entity.offset, command_length)
+        end = min(entity.offset + entity.length, len(full_text))
+        if end <= start:
+            continue
+
+        clipped = MessageEntity(
+            type=entity.type,
+            offset=start - command_length,
+            length=end - start,
+            url=getattr(entity, "url", None),
+            user=getattr(entity, "user", None),
+            language=getattr(entity, "language", None),
+            custom_emoji_id=getattr(entity, "custom_emoji_id", None),
+        )
+        results.append(clipped)
+    return results
+
+
+def _split_text_for_telegram(text: str, entities=None, max_chars: int = 4096):
+    if not text:
+        return [("", [])]
+
+    if len(text) <= max_chars:
+        return [(text, list(entities or []))]
+
+    chunks: list[tuple[str, list[MessageEntity]]] = []
+    for start in range(0, len(text), max_chars):
+        end = min(len(text), start + max_chars)
+        chunk_text = text[start:end]
+        chunk_entities = []
+        for entity in entities or []:
+            entity_start = entity.offset
+            entity_end = entity.offset + entity.length
+            if entity_end <= start or entity_start >= end:
+                continue
+            overlap_start = max(entity_start, start)
+            overlap_end = min(entity_end, end)
+            if overlap_end <= overlap_start:
+                continue
+            chunk_entities.append(
+                MessageEntity(
+                    type=entity.type,
+                    offset=max(0, overlap_start - start),
+                    length=max(0, overlap_end - overlap_start),
+                    url=getattr(entity, "url", None),
+                    user=getattr(entity, "user", None),
+                    language=getattr(entity, "language", None),
+                    custom_emoji_id=getattr(entity, "custom_emoji_id", None),
+                )
+            )
+        chunks.append((chunk_text, chunk_entities))
+    return chunks
+
+
+async def _send_telegram_message_with_retry(context, recipient_id: int, *, text: str = None, entities=None, photo_file_id: str = None, video_file_id: str = None, caption: str = None, caption_entities=None):
+    send_kwargs = {"chat_id": recipient_id}
+    if photo_file_id:
+        send_kwargs["photo"] = photo_file_id
+        if caption is not None:
+            send_kwargs["caption"] = caption
+            if caption_entities:
+                send_kwargs["caption_entities"] = caption_entities
+        return await context.bot.send_photo(**send_kwargs)
+    if video_file_id:
+        send_kwargs["video"] = video_file_id
+        if caption is not None:
+            send_kwargs["caption"] = caption
+            if caption_entities:
+                send_kwargs["caption_entities"] = caption_entities
+        return await context.bot.send_video(**send_kwargs)
+    send_kwargs["text"] = text
+    if entities:
+        send_kwargs["entities"] = entities
+    return await context.bot.send_message(**send_kwargs)
+
+
 async def sendpiar_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.effective_chat:
         return
@@ -944,6 +1029,10 @@ async def sendpiar_command_handler(update: Update, context: ContextTypes.DEFAULT
     if not payload_text.lower().startswith("#реклама"):
         payload_text = f"#реклама\n\n{payload_text}"
 
+    payload_entities = _strip_command_entities(cmd_entities, cmd_len, source_text)
+    if quoted:
+        payload_entities = []
+
     profiles = context.application.bot_data.setdefault("profiles", {})
     recipients: list[int] = []
     immune_profiles: list[int] = []
@@ -978,18 +1067,133 @@ async def sendpiar_command_handler(update: Update, context: ContextTypes.DEFAULT
         except Exception:
             video_file_id = None
 
+    message_specs: list[dict] = []
+    if photo_file_id or video_file_id:
+        if len(payload_text) <= 1024:
+            message_specs.append(
+                {
+                    "kind": "media",
+                    "caption": payload_text,
+                    "caption_entities": payload_entities,
+                    "photo_file_id": photo_file_id,
+                    "video_file_id": video_file_id,
+                }
+            )
+        else:
+            media_caption = payload_text[:1024]
+            media_caption_entities = []
+            for entity in payload_entities or []:
+                entity_start = entity.offset
+                entity_end = entity.offset + entity.length
+                if entity_start >= 1024 or entity_end <= 0:
+                    continue
+                overlap_start = max(entity_start, 0)
+                overlap_end = min(entity_end, 1024)
+                if overlap_end <= overlap_start:
+                    continue
+                media_caption_entities.append(
+                    MessageEntity(
+                        type=entity.type,
+                        offset=max(0, overlap_start),
+                        length=max(0, overlap_end - overlap_start),
+                        url=getattr(entity, "url", None),
+                        user=getattr(entity, "user", None),
+                        language=getattr(entity, "language", None),
+                        custom_emoji_id=getattr(entity, "custom_emoji_id", None),
+                    )
+                )
+            message_specs.append(
+                {
+                    "kind": "media",
+                    "caption": media_caption,
+                    "caption_entities": media_caption_entities,
+                    "photo_file_id": photo_file_id,
+                    "video_file_id": video_file_id,
+                }
+            )
+            remaining_text = payload_text[1024:]
+            remaining_entities = []
+            for entity in payload_entities or []:
+                entity_start = entity.offset
+                entity_end = entity.offset + entity.length
+                if entity_end <= 1024 or entity_start >= len(payload_text):
+                    continue
+                overlap_start = max(entity_start, 1024)
+                overlap_end = min(entity_end, len(payload_text))
+                if overlap_end <= overlap_start:
+                    continue
+                remaining_entities.append(
+                    MessageEntity(
+                        type=entity.type,
+                        offset=max(0, overlap_start - 1024),
+                        length=max(0, overlap_end - overlap_start),
+                        url=getattr(entity, "url", None),
+                        user=getattr(entity, "user", None),
+                        language=getattr(entity, "language", None),
+                        custom_emoji_id=getattr(entity, "custom_emoji_id", None),
+                    )
+                )
+            for chunk_text, chunk_entities in _split_text_for_telegram(remaining_text, remaining_entities, 4096):
+                if chunk_text:
+                    message_specs.append({"kind": "text", "text": chunk_text, "entities": chunk_entities})
+    else:
+        for chunk_text, chunk_entities in _split_text_for_telegram(payload_text, payload_entities, 4096):
+            if chunk_text:
+                message_specs.append({"kind": "text", "text": chunk_text, "entities": chunk_entities})
+
     success_count = 0
     failed_count = 0
     for recipient_id in recipients:
-        try:
-            if photo_file_id:
-                await context.bot.send_photo(chat_id=recipient_id, photo=photo_file_id, caption=payload_text)
-            elif video_file_id:
-                await context.bot.send_video(chat_id=recipient_id, video=video_file_id, caption=payload_text)
-            else:
-                await context.bot.send_message(chat_id=recipient_id, text=payload_text)
+        recipient_ok = True
+        for spec in message_specs:
+            try:
+                if spec["kind"] == "media":
+                    await _send_telegram_message_with_retry(
+                        context,
+                        recipient_id,
+                        photo_file_id=spec.get("photo_file_id"),
+                        video_file_id=spec.get("video_file_id"),
+                        caption=spec.get("caption"),
+                        caption_entities=spec.get("caption_entities") or None,
+                    )
+                else:
+                    await _send_telegram_message_with_retry(
+                        context,
+                        recipient_id,
+                        text=spec.get("text"),
+                        entities=spec.get("entities") or None,
+                    )
+            except RetryAfter as exc:
+                logging.warning("sendpiar rate limit hit for recipient %s; retrying after %s seconds", recipient_id, exc.retry_after)
+                await asyncio.sleep(float(exc.retry_after) + 1.0)
+                try:
+                    if spec["kind"] == "media":
+                        await _send_telegram_message_with_retry(
+                            context,
+                            recipient_id,
+                            photo_file_id=spec.get("photo_file_id"),
+                            video_file_id=spec.get("video_file_id"),
+                            caption=spec.get("caption"),
+                            caption_entities=spec.get("caption_entities") or None,
+                        )
+                    else:
+                        await _send_telegram_message_with_retry(
+                            context,
+                            recipient_id,
+                            text=spec.get("text"),
+                            entities=spec.get("entities") or None,
+                        )
+                except Exception:
+                    logging.exception("sendpiar retry failed for recipient %s after rate limit", recipient_id)
+                    recipient_ok = False
+                    break
+            except Exception:
+                logging.exception("sendpiar failed for recipient %s", recipient_id)
+                recipient_ok = False
+                break
+        if recipient_ok:
             success_count += 1
-        except Exception:
+        else:
             failed_count += 1
 
     report_text = f"✅Рассылка отправлена всем пользователям бота.\nУспешно: {success_count}\nОшибок: {failed_count}"
