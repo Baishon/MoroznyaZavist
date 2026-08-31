@@ -110,11 +110,19 @@ def _format_kyiv_datetime(timestamp: float | None = None) -> str:
     return when.strftime("%d.%m.%Y %H:%M:%S")
 
 
-def _record_info_topic_action(context: ContextTypes.DEFAULT_TYPE, target_user_id: str | int, admin_user_id: str | int, button_text: str, reason: str | None = None) -> None:
+def _record_info_topic_action(
+    context: ContextTypes.DEFAULT_TYPE,
+    target_user_id: str | int,
+    admin_user_id: str | int,
+    button_text: str,
+    reason: str | None = None,
+    panel_id: str | None = None,
+) -> None:
     target_key = str(target_user_id)
     admin_key = str(admin_user_id)
     logs = context.application.bot_data.setdefault("info_topic_logs", {})
-    session_logs = logs.setdefault(target_key, [])
+    scope_key = str(panel_id) if panel_id else target_key
+    session_logs = logs.setdefault(scope_key, [])
 
     active = (context.application.bot_data.get("active_chats", {}) or {}).get(target_key) or {}
     profiles = (context.application.bot_data.get("profiles", {}) or {})
@@ -136,8 +144,9 @@ def _record_info_topic_action(context: ContextTypes.DEFAULT_TYPE, target_user_id
     session_logs.append(entry)
 
 
-def _build_info_topic_logs_text(context: ContextTypes.DEFAULT_TYPE, target_user_id: str | int) -> str:
-    logs = (context.application.bot_data.get("info_topic_logs", {}) or {}).get(str(target_user_id), [])
+def _build_info_topic_logs_text(context: ContextTypes.DEFAULT_TYPE, target_user_id: str | int, panel_id: str | None = None) -> str:
+    logs_bucket = (context.application.bot_data.get("info_topic_logs", {}) or {})
+    logs = logs_bucket.get(str(panel_id), []) if panel_id else logs_bucket.get(str(target_user_id), [])
     if not logs:
         return "👁‍🗨Действия совершенные inline-кнопками\n\nПока ничего не записано."
     lines = ["👁‍🗨Действия совершенные inline-кнопками"]
@@ -2156,7 +2165,7 @@ async def info_topic_logs_callback(update: Update, context: ContextTypes.DEFAULT
         return
 
     target_user_id = str(panel.get("target_user_id") or "")
-    text = _build_info_topic_logs_text(context, target_user_id)
+    text = _build_info_topic_logs_text(context, target_user_id, panel_id=panel_id)
     try:
         await update.callback_query.message.edit_text(text)
     except Exception:
@@ -2180,7 +2189,7 @@ async def _finish_info_topic_action(context: ContextTypes.DEFAULT_TYPE, panel_id
     admin_username = str(active.get("admin_username") or "админ")
 
     if action == "close":
-        _record_info_topic_action(context, target_user_id, panel.get("issuer_user_id") or "system", "❌Закрыть общение")
+        _record_info_topic_action(context, target_user_id, panel.get("issuer_user_id") or "system", "❌Закрыть общение", panel_id=panel_id)
         active.pop("management_paused", None)
         active.pop("management_close_pending", None)
         try:
@@ -2214,11 +2223,12 @@ async def _finish_info_topic_action(context: ContextTypes.DEFAULT_TYPE, panel_id
             await context.bot.send_message(chat_id=LOG_CHAT_ID, text=f"✅Сессия {username_pz} с админом {admin_username} закрыта руководством.")
         except Exception:
             pass
+        context.application.bot_data.get("info_topic_logs", {}).pop(panel_id, None)
         panels.pop(panel_id, None)
         return
 
     if action == "stop":
-        _record_info_topic_action(context, target_user_id, panel.get("issuer_user_id") or "system", "💤Остановить общение")
+        _record_info_topic_action(context, target_user_id, panel.get("issuer_user_id") or "system", "💤Остановить общение", panel_id=panel_id)
         active["management_paused"] = True
         try:
             await context.bot.edit_forum_topic(
@@ -2251,7 +2261,7 @@ async def _finish_info_topic_action(context: ContextTypes.DEFAULT_TYPE, panel_id
         return
 
     if action == "resume":
-        _record_info_topic_action(context, target_user_id, panel.get("issuer_user_id") or "system", "✅Возомновить сессию")
+        _record_info_topic_action(context, target_user_id, panel.get("issuer_user_id") or "system", "✅Возомновить сессию", panel_id=panel_id)
         active.pop("management_paused", None)
         try:
             await context.bot.edit_forum_topic(
