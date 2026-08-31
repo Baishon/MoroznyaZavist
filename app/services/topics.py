@@ -217,6 +217,11 @@ def _render_rp_action_message(template: str, sender_is_admin: bool, name_admin: 
     display_name_admin = str(name_admin or "админ").strip().lstrip("@")
     display_name_user = str(name_user or "пользователь").strip().lstrip("@")
 
+    # Prevent the same identifier from filling both slots when a profile falls back to the same value.
+    # Keep the admin tag and the user nickname as distinct names.
+    if display_name_admin == display_name_user:
+        display_name_user = "пользователь"
+
     text = template.replace("{name_admin}", "__ADMIN__").replace("{name_user}", "__USER__")
     if sender_is_admin:
         return text.replace("__ADMIN__", display_name_admin).replace("__USER__", display_name_user)
