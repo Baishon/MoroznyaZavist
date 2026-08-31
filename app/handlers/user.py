@@ -2343,7 +2343,13 @@ async def user_private_message_handler(update: Update, context: ContextTypes.DEF
         group_map[copied.message_id] = user_id
         group_map[str(copied.message_id)] = user_id
         from app.services.messaging import _track_session_message_pair
-        _track_session_message_pair(context, int(chat_id), int(update.message.message_id), int(update.effective_chat.id), int(copied.message_id))
+        _track_session_message_pair(
+            context,
+            int(update.effective_chat.id),
+            int(update.message.message_id),
+            int(chat_id),
+            int(copied.message_id),
+        )
     except Exception:
         try:
             await deliver_message_to_user(context.bot, update.message, int(chat_id))
