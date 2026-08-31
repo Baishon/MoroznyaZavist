@@ -68,7 +68,11 @@ async def mirror_session_message_reaction(update, context: ContextTypes.DEFAULT_
     if other_chat_id == chat_id and other_message_id == message_id:
         return
 
-    lock = context.application.bot_data.setdefault("session_reaction_lock", set())
+    lock = context.application.bot_data.get("session_reaction_lock")
+    if not isinstance(lock, set):
+        lock = set()
+        context.application.bot_data["session_reaction_lock"] = lock
+
     lock_key = tuple(sorted(((chat_id, message_id), (other_chat_id, other_message_id))))
     if lock_key in lock:
         return
