@@ -110,20 +110,90 @@ def _format_kyiv_datetime(timestamp: float | None = None) -> str:
     return when.strftime("%d.%m.%Y %H:%M:%S")
 
 
+INFO_TOPIC_ACTION_LABELS = {
+    "OPEN_PANEL": "Открытие панели",
+    "CLOSE_SESSION": "Закрытие сессии",
+    "PAUSE_SESSION": "Приостановка сессии",
+    "RESUME_SESSION": "Возобновление сессии",
+    "WARN_USER": "Выдача предупреждения",
+    "VIEW_PROFILE": "Просмотр профиля",
+    "DECLINE_USER": "Отказ от пользователя",
+    "TAKE_USER": "Принятие пользователя",
+    "LOG_VIEW": "Просмотр логов",
+    "CANCEL_ACTION": "Отмена действия",
+}
+
+
+def _normalize_info_topic_action(action: str | None, fallback: str | None = None) -> str:
+    if action:
+        return str(action)
+    return str(fallback or "UNKNOWN")
+
+
+def _ensure_info_topic_session_record(
+    context: ContextTypes.DEFAULT_TYPE,
+    panel_id: str | None,
+    target_user_id: str | int | None,
+    issuer_user_id: str | int | None,
+    topic_link: str | None = None,
+) -> dict:
+    logs_bucket = context.application.bot_data.setdefault("info_topic_logs", {})
+    record_key = str(panel_id) if panel_id else str(target_user_id or "unknown")
+    session = logs_bucket.setdefault(record_key, {
+        "panel_id": record_key,
+        "target_user_id": str(target_user_id) if target_user_id is not None else None,
+        "issuer_user_id": str(issuer_user_id) if issuer_user_id is not None else None,
+        "topic_link": topic_link,
+        "opened_at": _format_kyiv_datetime(),
+        "last_action_at": _format_kyiv_datetime(),
+        "status": "active",
+        "stats": {
+            "total_actions": 0,
+            "admin_ids": [],
+            "warnings": 0,
+            "close_count": 0,
+            "pause_count": 0,
+            "resume_count": 0,
+            "view_profile_count": 0,
+            "decline_count": 0,
+            "take_count": 0,
+            "log_view_count": 0,
+        },
+        "actions": [],
+    })
+    if target_user_id is not None and session.get("target_user_id") is None:
+        session["target_user_id"] = str(target_user_id)
+    if issuer_user_id is not None and session.get("issuer_user_id") is None:
+        session["issuer_user_id"] = str(issuer_user_id)
+    if topic_link:
+        session["topic_link"] = topic_link
+    session["panel_id"] = record_key
+    return session
+
+
 def _record_info_topic_action(
     context: ContextTypes.DEFAULT_TYPE,
     target_user_id: str | int,
     admin_user_id: str | int,
-    button_text: str,
+    action_type: str,
     reason: str | None = None,
     panel_id: str | None = None,
+    duration: float | int | None = None,
+    topic_link: str | None = None,
 ) -> None:
     target_key = str(target_user_id)
     admin_key = str(admin_user_id)
-    logs = context.application.bot_data.setdefault("info_topic_logs", {})
-    scope_key = str(panel_id) if panel_id else target_key
-    session_logs = logs.setdefault(scope_key, [])
 
+    if panel_id is None:
+        panels = context.application.bot_data.get("info_topic_panels", {}) or {}
+        for candidate_id, panel in panels.items():
+            if str(panel.get("target_user_id") or "") == target_key:
+                panel_id = str(candidate_id)
+                break
+    if panel_id is None:
+        return
+
+    session = _ensure_info_topic_session_record(context, panel_id, target_key, admin_key, topic_link)
     active = (context.application.bot_data.get("active_chats", {}) or {}).get(target_key) or {}
     profiles = (context.application.bot_data.get("profiles", {}) or {})
     current_profile = profiles.get(admin_key, {})
@@ -134,28 +204,112 @@ def _record_info_topic_action(
         or active.get("admin_username")
         or f"id{admin_user_id}"
     )
+
+    action_name = INFO_TOPIC_ACTION_LABELS.get(str(action_type), str(action_type or "Неизвестное действие"))
     entry = {
+        "action_type": str(action_type),
         "tag_admin": admin_tag,
-        "button": button_text,
+        "button": action_name,
         "date": _format_kyiv_datetime(),
+        "reason": reason,
+        "duration": duration,
     }
     if reason:
         entry["reason"] = reason
-    session_logs.append(entry)
+    if duration is not None:
+        entry["duration"] = duration
+
+    session["actions"].append(entry)
+    session["last_action_at"] = entry["date"]
+    stats = session.setdefault("stats", {
+        "total_actions": 0,
+        "admin_ids": [],
+        "warnings": 0,
+        "close_count": 0,
+        "pause_count": 0,
+        "resume_count": 0,
+        "view_profile_count": 0,
+        "decline_count": 0,
+        "take_count": 0,
+        "log_view_count": 0,
+    })
+    stats["total_actions"] = int(stats.get("total_actions", 0)) + 1
+    admin_ids = stats.setdefault("admin_ids", [])
+    if admin_key not in admin_ids:
+        admin_ids.append(admin_key)
+
+    if str(action_type) == "WARN_USER":
+        stats["warnings"] = int(stats.get("warnings", 0)) + 1
+    elif str(action_type) == "CLOSE_SESSION":
+        stats["close_count"] = int(stats.get("close_count", 0)) + 1
+        session["status"] = "closed"
+    elif str(action_type) == "PAUSE_SESSION":
+        stats["pause_count"] = int(stats.get("pause_count", 0)) + 1
+        session["status"] = "paused"
+    elif str(action_type) == "RESUME_SESSION":
+        stats["resume_count"] = int(stats.get("resume_count", 0)) + 1
+        session["status"] = "active"
+    elif str(action_type) == "VIEW_PROFILE":
+        stats["view_profile_count"] = int(stats.get("view_profile_count", 0)) + 1
+    elif str(action_type) == "DECLINE_USER":
+        stats["decline_count"] = int(stats.get("decline_count", 0)) + 1
+    elif str(action_type) == "TAKE_USER":
+        stats["take_count"] = int(stats.get("take_count", 0)) + 1
+    elif str(action_type) == "LOG_VIEW":
+        stats["log_view_count"] = int(stats.get("log_view_count", 0)) + 1
+
+    if str(action_type) not in {"CLOSE_SESSION", "PAUSE_SESSION", "RESUME_SESSION"}:
+        session["status"] = session.get("status") or "active"
 
 
 def _build_info_topic_logs_text(context: ContextTypes.DEFAULT_TYPE, target_user_id: str | int, panel_id: str | None = None) -> str:
     logs_bucket = (context.application.bot_data.get("info_topic_logs", {}) or {})
-    logs = logs_bucket.get(str(panel_id), []) if panel_id else logs_bucket.get(str(target_user_id), [])
-    if not logs:
+    session = logs_bucket.get(str(panel_id)) if panel_id else logs_bucket.get(str(target_user_id))
+    if session is None:
+        session = logs_bucket.get(str(target_user_id)) or {}
+    if not session:
         return "👁‍🗨Действия совершенные inline-кнопками\n\nПока ничего не записано."
-    lines = ["👁‍🗨Действия совершенные inline-кнопками"]
-    for entry in logs:
-        line = f'- {entry.get("tag_admin", "админ")} нажал inline-button "{entry.get("button", "кнопка")}" в {entry.get("date", "неизвестно")}'
-        reason = entry.get("reason")
-        if reason:
-            line = f"{line}\n  Причина: {reason}"
-        lines.append(line)
+
+    actions = session.get("actions", []) or []
+    stats = session.get("stats", {}) or {}
+    panel_label = session.get("panel_id") or str(panel_id or target_user_id)
+    target_label = session.get("target_user_id") or str(target_user_id)
+    issuer_label = session.get("issuer_user_id") or "неизвестно"
+    topic_link = session.get("topic_link") or "не указана"
+    status = session.get("status") or "active"
+    last_action = session.get("last_action_at") or "неизвестно"
+
+    lines = [
+        "👁‍🗨Действия совершенные inline-кнопками",
+        f"- Панель: #{panel_label}",
+        f"- Пользователь: {target_label}",
+        f"- Админ открытия: {issuer_label}",
+        f"- Тема: {topic_link}",
+        f"- Статус: {status}",
+        f"- Последнее действие: {last_action}",
+        "",
+        "📊 Статистика:",
+        f"- Всего действий: {stats.get('total_actions', len(actions))}",
+        f"- Уникальных админов: {len(stats.get('admin_ids', []))}",
+        f"- Предупреждения: {stats.get('warnings', 0)}",
+        f"- Закрытия: {stats.get('close_count', 0)}",
+        f"- Приостановки: {stats.get('pause_count', 0)}",
+        f"- Возобновления: {stats.get('resume_count', 0)}",
+        "",
+        "🧾 Последние действия:",
+    ]
+
+    recent_actions = actions[-20:]
+    if not recent_actions:
+        lines.append("- Нет действий.")
+    else:
+        for entry in recent_actions:
+            label = entry.get("button") or INFO_TOPIC_ACTION_LABELS.get(entry.get("action_type"), entry.get("action_type") or "Действие")
+            text = f'- {entry.get("date", "неизвестно")} | {entry.get("tag_admin", "админ")} | {label}'
+            reason = entry.get("reason")
+            if reason:
+                text = f"{text}\n  Причина: {reason}"
+            lines.append(text)
     return "\n".join(lines)
 
 # ==== SECTION: Forum-topic management ====
@@ -2027,12 +2181,22 @@ async def info_topic_command_handler(update: Update, context: ContextTypes.DEFAU
     panel_id = _next_info_topic_panel_id(context)
     panels = context.application.bot_data.setdefault("info_topic_panels", {})
     panels[panel_id] = {
+        "panel_id": panel_id,
         "issuer_user_id": str(update.effective_user.id),
         "target_user_id": str(target_user_id),
         "chat_id": chat_id,
         "topic_id": topic_id,
         "topic_link": topic_link,
     }
+    _record_info_topic_action(
+        context,
+        target_user_id,
+        update.effective_user.id,
+        "OPEN_PANEL",
+        reason="Открыта панель управления сессией",
+        panel_id=panel_id,
+        topic_link=topic_link,
+    )
 
     target_profile = _ensure_profile(context, str(target_user_id), active.get("topic_base_name") or f"id{target_user_id}")
     admin_username = str(active.get("admin_username") or "админ")
@@ -2141,6 +2305,7 @@ async def info_topic_cancel_callback(update: Update, context: ContextTypes.DEFAU
 
     active = context.application.bot_data.get("active_chats", {}).get(str(panel.get("target_user_id"))) or {}
     paused = bool(active.get("management_paused"))
+    _record_info_topic_action(context, panel.get("target_user_id"), update.effective_user.id, "CANCEL_ACTION", reason="Отмена действия в панели управления", panel_id=panel_id)
     panel.pop("pending_action", None)
     panel_text = str(panel.get("panel_text") or "")
     try:
@@ -2165,7 +2330,76 @@ async def info_topic_logs_callback(update: Update, context: ContextTypes.DEFAULT
         return
 
     target_user_id = str(panel.get("target_user_id") or "")
+    _record_info_topic_action(context, target_user_id, update.effective_user.id, "LOG_VIEW", panel_id=panel_id)
     text = _build_info_topic_logs_text(context, target_user_id, panel_id=panel_id)
+    try:
+        await update.callback_query.message.edit_text(text)
+    except Exception:
+        pass
+
+
+def _build_info_topic_full_stats_text(context: ContextTypes.DEFAULT_TYPE, target_user_id: str | int, panel_id: str | None = None) -> str:
+    logs_bucket = (context.application.bot_data.get("info_topic_logs", {}) or {})
+    session = logs_bucket.get(str(panel_id)) if panel_id else logs_bucket.get(str(target_user_id))
+    if session is None:
+        return "📊Полная статистика\n\nДанные по этой сессии отсутствуют."
+    stats = session.get("stats", {}) or {}
+    admin_ids = stats.get("admin_ids", []) or []
+    actions = session.get("actions", []) or []
+    unique_admins = [
+        (context.application.bot_data.get("profiles", {}) or {}).get(str(admin_id), {}).get("tag_admin")
+        or f"id{admin_id}"
+        for admin_id in admin_ids
+    ]
+
+    lines = [
+        "📊Полная статистика по сессии",
+        f"- Панель: #{session.get('panel_id') or panel_id or target_user_id}",
+        f"- Пользователь: {session.get('target_user_id') or target_user_id}",
+        f"- Админ открытия: {session.get('issuer_user_id') or 'неизвестно'}",
+        f"- Тема: {session.get('topic_link') or 'не указана'}",
+        f"- Статус: {session.get('status') or 'active'}",
+        f"- Дата открытия: {session.get('opened_at') or 'неизвестно'}",
+        f"- Последнее действие: {session.get('last_action_at') or 'неизвестно'}",
+        "",
+        "📈 Общая статистика:",
+        f"- Всего действий: {stats.get('total_actions', len(actions))}",
+        f"- Уникальных админов: {len(unique_admins)}",
+        f"- Предупреждения: {stats.get('warnings', 0)}",
+        f"- Закрытия: {stats.get('close_count', 0)}",
+        f"- Приостановки: {stats.get('pause_count', 0)}",
+        f"- Возобновления: {stats.get('resume_count', 0)}",
+        "",
+        "🧑‍💼 Администраторы:",
+    ]
+    if unique_admins:
+        for admin in unique_admins:
+            lines.append(f"- {admin}")
+    else:
+        lines.append("- Нет данных")
+
+    lines.extend(["", "⏱ Ключевые события:"])
+    for entry in actions[-10:]:
+        label = entry.get("button") or INFO_TOPIC_ACTION_LABELS.get(entry.get("action_type"), entry.get("action_type") or "Действие")
+        lines.append(f"- {entry.get('date', 'неизвестно')} | {entry.get('tag_admin', 'админ')} | {label}")
+    return "\n".join(lines)
+
+
+async def info_topic_stats_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.callback_query.answer()
+    panel_id = (update.callback_query.data or "").split("_")[-1]
+    panel = context.application.bot_data.setdefault("info_topic_panels", {}).get(panel_id)
+    if not panel:
+        await update.callback_query.answer("Панель устарела", show_alert=True)
+        return
+
+    if str(update.effective_user.id) != str(panel.get("issuer_user_id")):
+        await update.callback_query.answer("Кнопка доступна только автору /info_topic", show_alert=True)
+        return
+
+    target_user_id = str(panel.get("target_user_id") or "")
+    _record_info_topic_action(context, target_user_id, update.effective_user.id, "LOG_VIEW", reason="Полная статистика", panel_id=panel_id)
+    text = _build_info_topic_full_stats_text(context, target_user_id, panel_id=panel_id)
     try:
         await update.callback_query.message.edit_text(text)
     except Exception:
@@ -2189,7 +2423,7 @@ async def _finish_info_topic_action(context: ContextTypes.DEFAULT_TYPE, panel_id
     admin_username = str(active.get("admin_username") or "админ")
 
     if action == "close":
-        _record_info_topic_action(context, target_user_id, panel.get("issuer_user_id") or "system", "❌Закрыть общение", panel_id=panel_id)
+        _record_info_topic_action(context, target_user_id, panel.get("issuer_user_id") or "system", "CLOSE_SESSION", panel_id=panel_id)
         active.pop("management_paused", None)
         active.pop("management_close_pending", None)
         try:
@@ -2228,7 +2462,7 @@ async def _finish_info_topic_action(context: ContextTypes.DEFAULT_TYPE, panel_id
         return
 
     if action == "stop":
-        _record_info_topic_action(context, target_user_id, panel.get("issuer_user_id") or "system", "💤Остановить общение", panel_id=panel_id)
+        _record_info_topic_action(context, target_user_id, panel.get("issuer_user_id") or "system", "PAUSE_SESSION", panel_id=panel_id)
         active["management_paused"] = True
         try:
             await context.bot.edit_forum_topic(
@@ -2261,7 +2495,7 @@ async def _finish_info_topic_action(context: ContextTypes.DEFAULT_TYPE, panel_id
         return
 
     if action == "resume":
-        _record_info_topic_action(context, target_user_id, panel.get("issuer_user_id") or "system", "✅Возомновить сессию", panel_id=panel_id)
+        _record_info_topic_action(context, target_user_id, panel.get("issuer_user_id") or "system", "RESUME_SESSION", panel_id=panel_id)
         active.pop("management_paused", None)
         try:
             await context.bot.edit_forum_topic(
@@ -3372,7 +3606,7 @@ async def admin_take_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
 
     await update.callback_query.answer("Пользователь принят")
-    _record_info_topic_action(context, request_user_id, update.effective_user.id, "Принять запрос", "Запрос принят")
+    _record_info_topic_action(context, request_user_id, update.effective_user.id, "TAKE_USER", reason="Запрос принят")
 
     # delete the original admin request panel
     try:
@@ -3564,7 +3798,7 @@ async def show_user_profile_callback(update: Update, context: ContextTypes.DEFAU
         return
 
     profile = _ensure_profile(context, str(request_user_id), active.get("topic_base_name") or f"id{request_user_id}")
-    _record_info_topic_action(context, request_user_id, update.effective_user.id, "📄Профиль пользователя", "Профиль пользователя открыт")
+    _record_info_topic_action(context, request_user_id, update.effective_user.id, "VIEW_PROFILE", reason="Профиль пользователя открыт")
     await update.callback_query.message.reply_text(_build_user_stats_text(context, str(request_user_id), profile))
 
 
@@ -3594,7 +3828,7 @@ async def warn_user_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     app_requests = context.application.bot_data.setdefault("admin_requests", {})
     req_info = app_requests.get(str(request_user_id))
     username = req_info.get("username") if req_info else f"id{request_user_id}"
-    _record_info_topic_action(context, request_user_id, update.effective_user.id, "⛔️ Выдать предупреждение", "Админ открыл окно предупреждения")
+    _record_info_topic_action(context, request_user_id, update.effective_user.id, "WARN_USER", reason="Админ открыл окно предупреждения")
 
     thread_id = getattr(update.callback_query.message, "message_thread_id", None)
     prompt_text = f'Вы собираетесь предупредить своего пользователя "{username}"?'
@@ -3631,6 +3865,9 @@ async def cancel_warn_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         await update.callback_query.message.delete()
     except Exception as e:
         logging.exception("cancel_warn_callback failed: %s", e)
+    request_user_id = (update.callback_query.data or "").split("_")[-1]
+    if request_user_id:
+        _record_info_topic_action(context, request_user_id, update.effective_user.id, "CANCEL_ACTION", reason="Отмена выдачи предупреждения")
 
 
 
@@ -3727,7 +3964,7 @@ async def handle_warn_reason_message(update: Update, context: ContextTypes.DEFAU
 
     profile["warn"] += 1
     profile["reason"] = reason
-    _record_info_topic_action(context, request_user_id, update.effective_user.id, "Выдать предупреждение", reason)
+    _record_info_topic_action(context, request_user_id, update.effective_user.id, "WARN_USER", reason=reason)
     await enforce_autoban_if_needed(context, str(request_user_id), username)
 
     success_text = (
@@ -3796,7 +4033,7 @@ async def admin_decline_callback(update: Update, context: ContextTypes.DEFAULT_T
     req_info = app_requests.get(str(request_user_id)) or {}
     username = req_info.get("username") or f"id{request_user_id}"
     admin_username = f"@{update.effective_user.username}" if update.effective_user and update.effective_user.username else f"id{update.effective_user.id}"
-    _record_info_topic_action(context, request_user_id, update.effective_user.id, "❌ Отказаться от пользователя", "Админ открыл окно отказа от пользователя")
+    _record_info_topic_action(context, request_user_id, update.effective_user.id, "DECLINE_USER", reason="Админ открыл окно отказа от пользователя")
 
     try:
         if thread_id:
@@ -3862,7 +4099,7 @@ async def admin_decline_request_callback(update: Update, context: ContextTypes.D
     req_info = req_check or {}
     username = req_info.get("username") or f"id{request_user_id}"
     admin_username = f"@{update.effective_user.username}" if update.effective_user and update.effective_user.username else f"id{update.effective_user.id}"
-    _record_info_topic_action(context, request_user_id, update.effective_user.id, "❌ Отказать запрос в поиске админа", "Админ открыл окно отказа запроса")
+    _record_info_topic_action(context, request_user_id, update.effective_user.id, "DECLINE_USER", reason="Админ открыл окно отказа запроса")
 
     try:
         cancel_button = InlineKeyboardMarkup(
@@ -3919,6 +4156,7 @@ async def cancel_decline_request_callback(update: Update, context: ContextTypes.
                 await update.callback_query.message.delete()
             except Exception:
                 pass
+            _record_info_topic_action(context, request_user_id, update.effective_user.id, "CANCEL_ACTION", reason="Отмена отказа от запроса")
             pending_declines.pop(key, None)
             admin_id = pending.get("admin_id")
             if admin_id is not None:
@@ -3998,7 +4236,7 @@ async def handle_decline_input_message(update: Update, context: ContextTypes.DEF
         raise ApplicationHandlerStop
 
     pending["reason_otkaz_ot_username"] = text_reason
-    _record_info_topic_action(context, pending.get("request_user_id") or request_user_id, update.effective_user.id, "❌ Отказать запрос в поиске админа", text_reason)
+    _record_info_topic_action(context, pending.get("request_user_id") or request_user_id, update.effective_user.id, "DECLINE_USER", reason=text_reason)
 
     if pending.get("mode") == "search_request":
         request_user_id = pending.get("request_user_id")
