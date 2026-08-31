@@ -258,6 +258,9 @@ def _build_info_topic_keyboard(panel_id: str, paused: bool = False, pending_acti
         [[
             InlineKeyboardButton("❌Закрыть общение", callback_data=f"info_topic_close_{panel_id}"),
             InlineKeyboardButton(second_label, callback_data=second_callback),
+        ],
+        [
+            InlineKeyboardButton("👁Logs", callback_data=f"info_topic_logs_{panel_id}"),
         ]]
     )
 
