@@ -2092,8 +2092,15 @@ async def user_private_message_handler(update: Update, context: ContextTypes.DEF
         await update.message.reply_text(f"✅Никнейм обновлен: {nickname_text}")
         return
 
-    # If user is in pending cancel flow, accept the text as reason
+    # If user is in pending cancel flow, accept the text as reason.
+    # While waiting for the reason, bot commands must be blocked to avoid breaking the flow.
     if context.user_data.get("pending_admin_cancel"):
+        if update.message.text and update.message.text.startswith("/"):
+            await update.message.reply_text(
+                "⏳ Сначала введите причину отказа от администратора или нажмите «Отмена»."
+            )
+            return
+
         reason = update.message.text or "(без причины)"
         reason_otkazik = reason
         user_id_int = update.effective_user.id
@@ -2392,18 +2399,18 @@ async def admin_cancel_confirm_callback(update: Update, context: ContextTypes.DE
         await update.callback_query.answer("Только владелец запроса может подтвердить", show_alert=True)
         return
 
+    prompt_text = (
+        "╭─ 🚨 Меню отказа / 2 пункт  ─╮\n"
+        "Введите пожалуйста более подробную причину что вам не понравилось в общении с администратором, а мы постараемся это больше не совершать🥺\n"
+        "╰────────────────╯"
+    )
+    cancel_kb = InlineKeyboardMarkup(
+        [[InlineKeyboardButton("Отмена", callback_data=f"deny_admin_cancel_{user_id}")]]
+    )
     try:
-        await update.callback_query.message.edit_text(
-            "╭─ 🚨 Меню отказа / 2 пункт  ─╮\n"
-            "Введите пожалуйста более подробную причину что вам не понравилось в общении с администратором, а мы постараемся это больше не совершать🥺\n"
-            "╰────────────────╯"
-        )
+        await update.callback_query.message.edit_text(prompt_text, reply_markup=cancel_kb)
     except BadRequest:
-        await update.callback_query.message.reply_text(
-            "╭─ 🚨 Меню отказа / 2 пункт  ─╮\n"
-            "Введите пожалуйста более подробную причину что вам не понравилось в общении с администратором, а мы постараемся это больше не совершать🥺\n"
-            "╰────────────────╯"
-        )
+        await update.callback_query.message.reply_text(prompt_text, reply_markup=cancel_kb)
 
     context.user_data["pending_admin_cancel"] = True
 
@@ -2419,6 +2426,7 @@ async def admin_cancel_deny_callback(update: Update, context: ContextTypes.DEFAU
         await update.callback_query.answer("Только владелец запроса может подтвердить", show_alert=True)
         return
 
+    context.user_data.pop("pending_admin_cancel", None)
     try:
         await update.callback_query.message.edit_text("Отмена успешна. Если потребуется, нажмите кнопку снова.")
     except BadRequest:
