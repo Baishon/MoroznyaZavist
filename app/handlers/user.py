@@ -11,7 +11,7 @@ import asyncio
 import html
 import logging
 import time
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 from telegram import (
     InlineKeyboardButton,
@@ -139,6 +139,13 @@ AGREEMENT_TEXT = (
     "⚠️ Если вы не принимаете условия, к функционалу бота получить доступ не получится.\n\n"
     "Нажимая **«Принять»**, вы подтверждаете, что ознакомились с текстом Соглашения и Политики обработки персональных данных в полном объёме и принимаете их условия."
 )
+
+
+def _format_time_kyiv(timestamp: float) -> str:
+    """Convert Unix timestamp to Kyiv timezone (UTC+3) formatted string."""
+    kyiv_tz = timezone(timedelta(hours=3))
+    dt = datetime.fromtimestamp(timestamp, tz=kyiv_tz)
+    return dt.strftime("%d.%m.%Y %H:%M")
 
 
 def _agreement_markup() -> InlineKeyboardMarkup:
@@ -595,7 +602,7 @@ async def check_session_admin_online_handler(update: Update, context: ContextTyp
         return
 
     elapsed = max(0, int(time.time() - last_activity))
-    last_activity_text = time.strftime("%d.%m.%Y %H:%M", time.localtime(last_activity))
+    last_activity_text = _format_time_kyiv(last_activity)
     status = "🟢Онлайн" if elapsed <= 5 * 60 else "🔴Не в сети"
     await update.message.reply_text(
         f"👁‍🗨Был(-а) в сети: {status}\nПоследнее сообщение: {last_activity_text}"
@@ -1433,7 +1440,7 @@ async def send_admin_profile(update: Update, context: ContextTypes.DEFAULT_TYPE)
         (context.application.bot_data.get("admin_work_chat_activity", {}) or {}).get(user_id, 0) or 0
     )
     if last_activity:
-        last_activity_text = time.strftime("%d.%m.%Y %H:%M", time.localtime(last_activity))
+        last_activity_text = _format_time_kyiv(last_activity)
         online_marker = "🟢Онлайн" if time.time() - last_activity <= 5 * 60 else "🔴Не в сети"
         online_text = f"{online_marker} ({last_activity_text})"
     else:
