@@ -12,7 +12,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 from telegram import BotCommand
 from telegram.error import Forbidden
-from telegram.ext import ApplicationBuilder, CallbackQueryHandler, CommandHandler, MessageHandler, MessageReactionHandler, filters
+from telegram.ext import ApplicationBuilder, CallbackQueryHandler, CommandHandler, EditedMessageHandler, MessageHandler, MessageReactionHandler, filters
 
 from app import logging_setup  # noqa: F401  (side effect: attaches Telegram log handler)
 from app.config import COOPERATION_CHAT_ID, HEARTBEAT_USER_ID, LOG_CHAT_ID, TOKEN, WORK_CHAT_ID
@@ -396,7 +396,7 @@ def build_application():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.REPLY & filters.ChatType.PRIVATE, user_private_message_handler))
     # Handler for admin replies to the bot's "Введите причину отклонения запроса" prompt
     app.add_handler(MessageHandler(filters.TEXT & filters.REPLY & (filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), handle_decline_reason_reply))
-    app.add_handler(MessageHandler(filters.ALL, mirror_session_message_edit))
+    app.add_handler(EditedMessageHandler(filters.ALL, mirror_session_message_edit))
     app.add_handler(MessageReactionHandler(mirror_session_message_reaction))
     app.add_handler(CommandHandler("dump_maps", dump_maps_handler))
     return app
