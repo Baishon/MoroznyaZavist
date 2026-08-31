@@ -23,7 +23,7 @@ def _extract_reaction_payload(reaction_value):
     if reaction_value is None:
         return None
 
-    items = reaction_value if isinstance(reaction_value, list) else [reaction_value]
+    items = reaction_value if isinstance(reaction_value, (list, tuple, set)) else [reaction_value]
     cleaned = []
     for item in items:
         if item is None:
@@ -47,6 +47,10 @@ async def mirror_session_message_reaction(update, context: ContextTypes.DEFAULT_
     if not chat_id:
         return
 
+    actor = getattr(reaction, "user", None) or getattr(reaction, "actor_chat", None)
+    if actor is not None and getattr(actor, "is_bot", False):
+        return
+
     message_id = int(getattr(reaction, "message_id", 0) or 0)
     if not message_id:
         return
@@ -65,7 +69,7 @@ async def mirror_session_message_reaction(update, context: ContextTypes.DEFAULT_
         return
 
     lock = context.application.bot_data.setdefault("session_reaction_lock", set())
-    lock_key = (chat_id, message_id, other_chat_id, other_message_id)
+    lock_key = tuple(sorted(((chat_id, message_id), (other_chat_id, other_message_id))))
     if lock_key in lock:
         return
     lock.add(lock_key)
