@@ -998,7 +998,7 @@ async def sendpiar_command_handler(update: Update, context: ContextTypes.DEFAULT
         immune_lines = "\n".join([f"id_profile #{pid} имеет иммунитет к рекламе" for pid in immune_profiles])
         report_text = f"{report_text}\n\n{immune_lines}"
 
-    await update.message.reply_text(report_text)
+    await context.bot.send_message(chat_id=update.effective_chat.id, text=report_text)
 
     bot_data["sendpiar_cooldown_until"] = time.time() + (15 * 60)
     bot_data["sendpiar_cooldown_was_active"] = True
