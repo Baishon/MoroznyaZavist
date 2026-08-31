@@ -5,13 +5,20 @@ sqlite via `app.database.requests`.
 """
 import html
 import time
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 from telegram.ext import ContextTypes
 
 from app.config import ADMIN_LEVEL_TITLES
 from app.database.requests import _save_ban_record, _save_profile_record, _save_profile_seq
 from app.states.form import ACTIVE_CANDIDATE_STAGES
+
+
+def _format_time_kyiv(timestamp: float) -> str:
+    """Convert Unix timestamp to Kyiv timezone (UTC+3) formatted string."""
+    kyiv_tz = timezone(timedelta(hours=3))
+    dt = datetime.fromtimestamp(timestamp, tz=kyiv_tz)
+    return dt.strftime("%d.%m.%Y %H:%M")
 
 
 def is_user_banned(context: ContextTypes.DEFAULT_TYPE, user_id: str) -> bool:
@@ -432,7 +439,7 @@ def _build_admin_stats_text(target_user_id: str, profile: dict) -> str:
     last_activity = float(profile.get("last_work_chat_message_at", 0) or 0)
     if last_activity:
         online_marker = "🟢Онлайн" if time.time() - last_activity <= 5 * 60 else "🔴Не в сети"
-        online_time = datetime.fromtimestamp(last_activity).strftime("%d.%m.%Y %H:%M")
+        online_time = _format_time_kyiv(last_activity)
         online_text = f"{online_marker} ({online_time})"
     else:
         online_text = "🔴Не в сети (данные об активности отсутствуют)"
