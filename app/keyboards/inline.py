@@ -261,6 +261,7 @@ def _build_info_topic_keyboard(panel_id: str, paused: bool = False, pending_acti
         ],
         [
             InlineKeyboardButton("👁Logs", callback_data=f"info_topic_logs_{panel_id}"),
+            InlineKeyboardButton("📊Полная статистика", callback_data=f"info_topic_stats_{panel_id}"),
         ]]
     )
 
