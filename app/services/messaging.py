@@ -18,18 +18,23 @@ def _track_session_message_pair(context: ContextTypes.DEFAULT_TYPE, source_chat_
     mapping[(int(target_chat_id), str(target_message_id))] = source_key
 
 
-def _extract_reaction_payload(reactions):
-    """Return the first user reaction as a Telegram reaction payload suitable for set_message_reaction."""
-    if not reactions:
+def _extract_reaction_payload(reaction_value):
+    """Convert Telegram reaction payloads to a set_message_reaction-compatible list."""
+    if reaction_value is None:
         return None
-    first = reactions[0]
-    if hasattr(first, "emoji") and getattr(first, "emoji", None):
-        return [ReactionTypeEmoji(emoji=first.emoji)]
-    if hasattr(first, "custom_emoji_id") and getattr(first, "custom_emoji_id", None):
-        return [ReactionTypeCustomEmoji(custom_emoji_id=first.custom_emoji_id)]
-    if isinstance(first, str):
-        return [first]
-    return None
+
+    items = reaction_value if isinstance(reaction_value, list) else [reaction_value]
+    cleaned = []
+    for item in items:
+        if item is None:
+            continue
+        if isinstance(item, str):
+            cleaned.append(item)
+        elif hasattr(item, "emoji") and getattr(item, "emoji", None):
+            cleaned.append(ReactionTypeEmoji(emoji=item.emoji))
+        elif hasattr(item, "custom_emoji_id") and getattr(item, "custom_emoji_id", None):
+            cleaned.append(ReactionTypeCustomEmoji(custom_emoji_id=item.custom_emoji_id))
+    return cleaned if cleaned else []
 
 
 async def mirror_session_message_reaction(update, context: ContextTypes.DEFAULT_TYPE):
@@ -46,8 +51,8 @@ async def mirror_session_message_reaction(update, context: ContextTypes.DEFAULT_
     if not message_id:
         return
 
-    target_reaction = _extract_reaction_payload(getattr(reaction, "reactions", None))
-    if not target_reaction:
+    target_reaction = _extract_reaction_payload(getattr(reaction, "new_reaction", None))
+    if target_reaction is None:
         return
 
     mapping = context.application.bot_data.get("session_message_map", {}) or {}
@@ -59,10 +64,18 @@ async def mirror_session_message_reaction(update, context: ContextTypes.DEFAULT_
     if other_chat_id == chat_id and other_message_id == message_id:
         return
 
+    lock = context.application.bot_data.setdefault("session_reaction_lock", set())
+    lock_key = (chat_id, message_id, other_chat_id, other_message_id)
+    if lock_key in lock:
+        return
+    lock.add(lock_key)
+
     try:
         await context.bot.set_message_reaction(chat_id=other_chat_id, message_id=other_message_id, reaction=target_reaction)
     except Exception:
         logging.exception("Failed to mirror reaction from chat %s msg %s to chat %s msg %s", chat_id, message_id, other_chat_id, other_message_id)
+    finally:
+        lock.discard(lock_key)
 
 
 async def deliver_message_to_user(bot, message, user_chat_id: int):
