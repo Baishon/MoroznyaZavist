@@ -168,7 +168,7 @@ from app.handlers.user import (
     agreement_accept_callback,
     admin_search_command_guard,
 )
-from app.services.messaging import mirror_session_message_reaction
+from app.services.messaging import mirror_session_message_edit, mirror_session_message_reaction
 
 
 async def _heartbeat_loop(app) -> None:
@@ -396,6 +396,7 @@ def build_application():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.REPLY & filters.ChatType.PRIVATE, user_private_message_handler))
     # Handler for admin replies to the bot's "Введите причину отклонения запроса" prompt
     app.add_handler(MessageHandler(filters.TEXT & filters.REPLY & (filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), handle_decline_reason_reply))
+    app.add_handler(MessageHandler(filters.ALL, mirror_session_message_edit))
     app.add_handler(MessageReactionHandler(mirror_session_message_reaction))
     app.add_handler(CommandHandler("dump_maps", dump_maps_handler))
     return app

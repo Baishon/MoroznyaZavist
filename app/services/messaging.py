@@ -117,6 +117,79 @@ async def mirror_session_message_reaction(update, context: ContextTypes.DEFAULT_
         lock.discard(lock_key)
 
 
+async def mirror_session_message_edit(update, context: ContextTypes.DEFAULT_TYPE):
+    """Mirror text/caption edits from one side of a session to the paired message on the other side."""
+    edited = getattr(update, "edited_message", None)
+    if edited is None:
+        return
+
+    chat_id = int(getattr(edited, "chat_id", 0) or 0)
+    message_id = int(getattr(edited, "message_id", 0) or 0)
+    if not chat_id or not message_id:
+        return
+
+    text_value = getattr(edited, "text", None)
+    caption_value = getattr(edited, "caption", None)
+    if text_value is None and caption_value is None:
+        return
+
+    mapping = context.application.bot_data.get("session_message_map", {}) or {}
+    counterpart = mapping.get((chat_id, message_id)) or mapping.get((chat_id, str(message_id)))
+    if not counterpart or not isinstance(counterpart, tuple) or len(counterpart) != 2:
+        return
+
+    other_chat_id, other_message_id = int(counterpart[0]), int(counterpart[1])
+    if other_chat_id == chat_id and other_message_id == message_id:
+        return
+
+    lock = context.application.bot_data.get("session_edit_lock")
+    if not isinstance(lock, set):
+        lock = set()
+        context.application.bot_data["session_edit_lock"] = lock
+
+    lock_key = tuple(sorted(((chat_id, message_id), (other_chat_id, other_message_id))))
+    if lock_key in lock:
+        return
+    lock.add(lock_key)
+
+    try:
+        logging.info(
+            "edit_update: source_chat=%s source_msg=%s paired_chat=%s paired_msg=%s text=%r caption=%r",
+            chat_id,
+            message_id,
+            other_chat_id,
+            other_message_id,
+            text_value,
+            caption_value,
+        )
+        if text_value is not None:
+            await context.bot.edit_message_text(
+                chat_id=other_chat_id,
+                message_id=other_message_id,
+                text=text_value,
+                parse_mode=getattr(edited, "parse_mode", None),
+                entities=getattr(edited, "entities", None) or None,
+            )
+        elif caption_value is not None:
+            await context.bot.edit_message_caption(
+                chat_id=other_chat_id,
+                message_id=other_message_id,
+                caption=caption_value,
+                parse_mode=getattr(edited, "parse_mode", None),
+                caption_entities=getattr(edited, "caption_entities", None) or None,
+            )
+    except Exception:
+        logging.exception(
+            "Failed to mirror edited message from chat %s msg %s to chat %s msg %s. Telegram API error:",
+            chat_id,
+            message_id,
+            other_chat_id,
+            other_message_id,
+        )
+    finally:
+        lock.discard(lock_key)
+
+
 async def deliver_message_to_user(bot, message, user_chat_id: int):
     """Fallback delivery for various content types when copy_message fails.
     Sends the appropriate send_* request based on message attributes.
