@@ -5,7 +5,7 @@ import logging
 import re
 import shlex
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from telegram import (
     ChatPermissions,
@@ -102,6 +102,50 @@ from app.services.topics import (
 )
 
 MAX_MODERATION_DURATION_SECONDS = 365 * 24 * 60 * 60
+
+
+def _format_kyiv_datetime(timestamp: float | None = None) -> str:
+    kyiv_tz = timezone(timedelta(hours=3))
+    when = datetime.fromtimestamp(float(timestamp if timestamp is not None else time.time()), tz=kyiv_tz)
+    return when.strftime("%d.%m.%Y %H:%M:%S")
+
+
+def _record_info_topic_action(context: ContextTypes.DEFAULT_TYPE, target_user_id: str | int, admin_user_id: str | int, button_text: str, reason: str | None = None) -> None:
+    target_key = str(target_user_id)
+    admin_key = str(admin_user_id)
+    logs = context.application.bot_data.setdefault("info_topic_logs", {})
+    session_logs = logs.setdefault(target_key, [])
+
+    active = (context.application.bot_data.get("active_chats", {}) or {}).get(target_key) or {}
+    admin_tag = str(
+        active.get("admin_tag")
+        or active.get("admin_username")
+        or (context.application.bot_data.get("profiles", {}) or {}).get(admin_key, {}).get("tag_admin")
+        or (context.application.bot_data.get("profiles", {}) or {}).get(admin_key, {}).get("username")
+        or f"id{admin_user_id}"
+    )
+    entry = {
+        "tag_admin": admin_tag,
+        "button": button_text,
+        "date": _format_kyiv_datetime(),
+    }
+    if reason:
+        entry["reason"] = reason
+    session_logs.append(entry)
+
+
+def _build_info_topic_logs_text(context: ContextTypes.DEFAULT_TYPE, target_user_id: str | int) -> str:
+    logs = (context.application.bot_data.get("info_topic_logs", {}) or {}).get(str(target_user_id), [])
+    if not logs:
+        return "👁‍🗨Действия совершенные inline-кнопками\n\nПока ничего не записано."
+    lines = ["👁‍🗨Действия совершенные inline-кнопками"]
+    for entry in logs:
+        line = f'- {entry.get("tag_admin", "админ")} нажал inline-button "{entry.get("button", "кнопка")}" в {entry.get("date", "неизвестно")}'
+        reason = entry.get("reason")
+        if reason:
+            line = f"{line}\n  Причина: {reason}"
+        lines.append(line)
+    return "\n".join(lines)
 
 # ==== SECTION: Forum-topic management ====
 # /topic del|close|open — lets a topic admin delete, close, or reopen a
@@ -2097,6 +2141,25 @@ async def info_topic_cancel_callback(update: Update, context: ContextTypes.DEFAU
         pass
 
 
+async def info_topic_logs_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.callback_query.answer()
+    panel_id = (update.callback_query.data or "").split("_")[-1]
+    panel = context.application.bot_data.setdefault("info_topic_panels", {}).get(panel_id)
+    if not panel:
+        await update.callback_query.answer("Панель устарела", show_alert=True)
+        return
+
+    if str(update.effective_user.id) != str(panel.get("issuer_user_id")):
+        await update.callback_query.answer("Кнопка доступна только автору /info_topic", show_alert=True)
+        return
+
+    target_user_id = str(panel.get("target_user_id") or "")
+    text = _build_info_topic_logs_text(context, target_user_id)
+    try:
+        await update.callback_query.message.edit_text(text)
+    except Exception:
+        pass
+
 
 async def _finish_info_topic_action(context: ContextTypes.DEFAULT_TYPE, panel_id: str, action: str) -> None:
     panels = context.application.bot_data.setdefault("info_topic_panels", {})
@@ -2115,6 +2178,7 @@ async def _finish_info_topic_action(context: ContextTypes.DEFAULT_TYPE, panel_id
     admin_username = str(active.get("admin_username") or "админ")
 
     if action == "close":
+        _record_info_topic_action(context, target_user_id, panel.get("issuer_user_id") or "system", "❌Закрыть общение")
         active.pop("management_paused", None)
         active.pop("management_close_pending", None)
         try:
@@ -2152,6 +2216,7 @@ async def _finish_info_topic_action(context: ContextTypes.DEFAULT_TYPE, panel_id
         return
 
     if action == "stop":
+        _record_info_topic_action(context, target_user_id, panel.get("issuer_user_id") or "system", "💤Остановить общение")
         active["management_paused"] = True
         try:
             await context.bot.edit_forum_topic(
@@ -2184,6 +2249,7 @@ async def _finish_info_topic_action(context: ContextTypes.DEFAULT_TYPE, panel_id
         return
 
     if action == "resume":
+        _record_info_topic_action(context, target_user_id, panel.get("issuer_user_id") or "system", "✅Возомновить сессию")
         active.pop("management_paused", None)
         try:
             await context.bot.edit_forum_topic(
@@ -3294,6 +3360,7 @@ async def admin_take_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
 
     await update.callback_query.answer("Пользователь принят")
+    _record_info_topic_action(context, request_user_id, update.effective_user.id, "Принять запрос", "Запрос принят")
 
     # delete the original admin request panel
     try:
@@ -3485,6 +3552,7 @@ async def show_user_profile_callback(update: Update, context: ContextTypes.DEFAU
         return
 
     profile = _ensure_profile(context, str(request_user_id), active.get("topic_base_name") or f"id{request_user_id}")
+    _record_info_topic_action(context, request_user_id, update.effective_user.id, "📄Профиль пользователя", "Профиль пользователя открыт")
     await update.callback_query.message.reply_text(_build_user_stats_text(context, str(request_user_id), profile))
 
 
@@ -3514,6 +3582,7 @@ async def warn_user_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     app_requests = context.application.bot_data.setdefault("admin_requests", {})
     req_info = app_requests.get(str(request_user_id))
     username = req_info.get("username") if req_info else f"id{request_user_id}"
+    _record_info_topic_action(context, request_user_id, update.effective_user.id, "⛔️ Выдать предупреждение", "Админ открыл окно предупреждения")
 
     thread_id = getattr(update.callback_query.message, "message_thread_id", None)
     prompt_text = f'Вы собираетесь предупредить своего пользователя "{username}"?'
@@ -3646,6 +3715,7 @@ async def handle_warn_reason_message(update: Update, context: ContextTypes.DEFAU
 
     profile["warn"] += 1
     profile["reason"] = reason
+    _record_info_topic_action(context, request_user_id, update.effective_user.id, "Выдать предупреждение", reason)
     await enforce_autoban_if_needed(context, str(request_user_id), username)
 
     success_text = (
@@ -3714,6 +3784,7 @@ async def admin_decline_callback(update: Update, context: ContextTypes.DEFAULT_T
     req_info = app_requests.get(str(request_user_id)) or {}
     username = req_info.get("username") or f"id{request_user_id}"
     admin_username = f"@{update.effective_user.username}" if update.effective_user and update.effective_user.username else f"id{update.effective_user.id}"
+    _record_info_topic_action(context, request_user_id, update.effective_user.id, "❌ Отказаться от пользователя", "Админ открыл окно отказа от пользователя")
 
     try:
         if thread_id:
@@ -3779,6 +3850,7 @@ async def admin_decline_request_callback(update: Update, context: ContextTypes.D
     req_info = req_check or {}
     username = req_info.get("username") or f"id{request_user_id}"
     admin_username = f"@{update.effective_user.username}" if update.effective_user and update.effective_user.username else f"id{update.effective_user.id}"
+    _record_info_topic_action(context, request_user_id, update.effective_user.id, "❌ Отказать запрос в поиске админа", "Админ открыл окно отказа запроса")
 
     try:
         cancel_button = InlineKeyboardMarkup(
@@ -3914,6 +3986,7 @@ async def handle_decline_input_message(update: Update, context: ContextTypes.DEF
         raise ApplicationHandlerStop
 
     pending["reason_otkaz_ot_username"] = text_reason
+    _record_info_topic_action(context, pending.get("request_user_id") or request_user_id, update.effective_user.id, "❌ Отказать запрос в поиске админа", text_reason)
 
     if pending.get("mode") == "search_request":
         request_user_id = pending.get("request_user_id")

@@ -62,6 +62,7 @@ from app.handlers.admin import (
     info_topic_close_callback,
     info_topic_close_confirm_callback,
     info_topic_command_handler,
+    info_topic_logs_callback,
     info_topic_resume_callback,
     info_topic_stop_callback,
     info_topic_stop_confirm_callback,
@@ -337,6 +338,7 @@ def build_application():
     app.add_handler(CallbackQueryHandler(info_topic_close_callback, pattern=r"^info_topic_close_\d+$"))
     app.add_handler(CallbackQueryHandler(info_topic_stop_callback, pattern=r"^info_topic_stop_\d+$"))
     app.add_handler(CallbackQueryHandler(info_topic_cancel_callback, pattern=r"^info_topic_cancel_\d+$"))
+    app.add_handler(CallbackQueryHandler(info_topic_logs_callback, pattern=r"^info_topic_logs_\d+$"))
     app.add_handler(CallbackQueryHandler(info_topic_close_confirm_callback, pattern=r"^info_topic_close_confirm_\d+$"))
     app.add_handler(CallbackQueryHandler(info_topic_stop_confirm_callback, pattern=r"^info_topic_stop_confirm_\d+$"))
     app.add_handler(CallbackQueryHandler(info_topic_resume_callback, pattern=r"^info_topic_resume_\d+$"))
