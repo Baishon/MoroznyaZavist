@@ -396,7 +396,13 @@ def build_application():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.REPLY & filters.ChatType.PRIVATE, user_private_message_handler))
     # Handler for admin replies to the bot's "Введите причину отклонения запроса" prompt
     app.add_handler(MessageHandler(filters.TEXT & filters.REPLY & (filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), handle_decline_reason_reply))
-    app.add_handler(MessageHandler(filters.UpdateType.EDITED_MESSAGE & filters.ALL, mirror_session_message_edit))
+    # Edited messages must be handled before ordinary message handlers. Several
+    # group handlers use filters.ALL/TEXT and would otherwise consume the only
+    # handler slot for their group before the mirror handler is reached.
+    app.add_handler(
+        MessageHandler(filters.UpdateType.EDITED_MESSAGE & filters.ALL, mirror_session_message_edit),
+        group=-10,
+    )
     app.add_handler(MessageReactionHandler(mirror_session_message_reaction))
     app.add_handler(CommandHandler("dump_maps", dump_maps_handler))
     return app
