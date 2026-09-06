@@ -858,7 +858,7 @@ async def admin_mute_guard_handler(update: Update, context: ContextTypes.DEFAULT
 
 # ==== SECTION: Log-chat routing & cooperation ads ====
 # log_command_router dispatches "/"-commands typed in the log chat;
-# cooperation_admin_command_guard/sendpiar/anpiar manage the
+# cooperation_admin_command_guard/sp/anpiar manage the
 # cooperation-prefix ad text an admin can post in the cooperation chat.
 async def log_command_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = getattr(update, "message", None)
@@ -880,7 +880,7 @@ async def log_command_router(update: Update, context: ContextTypes.DEFAULT_TYPE)
         "/setprefix": setprefix_command_handler,
         "/anpiar": anpiar_command_handler,
         "/fullstats": fullstats_command_handler,
-        "/sendpiar": sendpiar_command_handler,
+        "/sp": sendpiar_command_handler,
         "/pm": pm_command_handler,
         "/prava": prava_command_handler,
         "/ban": ban_command_handler,
@@ -1201,11 +1201,11 @@ async def sendpiar_command_handler(update: Update, context: ContextTypes.DEFAULT
 
     source_text = update.message.text or update.message.caption or ""
     source_text_stripped = source_text.strip()
-    if not source_text_stripped.startswith("/sendpiar") and not source_text_stripped.startswith("/sendpiar@"):
+    if not re.match(r"^/sp(?:@[\w_]+)?(?:\s|$)", source_text_stripped):
         return
 
     if int(update.effective_chat.id) != COOPERATION_CHAT_ID:
-        await update.message.reply_text("Команда /sendpiar доступна только в чате сотрудничества.")
+        await update.message.reply_text("Команда /sp доступна только в чате сотрудничества.")
         return
 
     bot_data = context.application.bot_data
@@ -1217,12 +1217,12 @@ async def sendpiar_command_handler(update: Update, context: ContextTypes.DEFAULT
         remaining_seconds = int(cooldown_until - now_ts)
         remaining_minutes = max(1, (remaining_seconds + 59) // 60)
         await update.message.reply_text(
-            f"⏳Команда /sendpiar на кулдауне. Подождите {remaining_minutes} мин."
+            f"⏳Команда /sp на кулдауне. Подождите {remaining_minutes} мин."
         )
         return
 
     if cooldown_until and cooldown_was_active and now_ts >= cooldown_until:
-        await update.message.reply_text("✅Кулдаун завершен. Команда /sendpiar снова доступна.")
+        await update.message.reply_text("✅Кулдаун завершен. Команда /sp снова доступна.")
         bot_data["sendpiar_cooldown_was_active"] = False
 
     issuer_profile = _ensure_profile(
@@ -1236,11 +1236,11 @@ async def sendpiar_command_handler(update: Update, context: ContextTypes.DEFAULT
 
     cmd_entities = update.message.entities if update.message.text else (update.message.caption_entities or [])
     cmd_entity = cmd_entities[0] if cmd_entities else None
-    cmd_len = cmd_entity.length if cmd_entity and cmd_entity.type == "bot_command" else len("/sendpiar")
+    cmd_len = cmd_entity.length if cmd_entity and cmd_entity.type == "bot_command" else len("/sp")
     args_text = source_text[cmd_len:]
 
     if not str(args_text).strip():
-        await update.message.reply_text('Используйте: /sendpiar "текст" (можно с фото или видео).')
+        await update.message.reply_text('Используйте: /sp "текст" (можно с фото или видео).')
         return
 
     quoted = re.match(r'^\s*"([\s\S]*)"\s*$', args_text)
@@ -1258,20 +1258,23 @@ async def sendpiar_command_handler(update: Update, context: ContextTypes.DEFAULT
         payload_entities = []
 
     profiles = context.application.bot_data.setdefault("profiles", {})
-    recipients: list[int] = []
-    immune_profiles: list[int] = []
-    for user_id, profile_obj in profiles.items():
-        profile_data = profile_obj or {}
-        if bool(profile_data.get("ad_disable_enabled", False)):
-            try:
-                immune_profiles.append(int(profile_data.get("id_profile", 0) or 0))
-            except Exception:
-                pass
-            continue
+    recipient_ids = set()
+    for user_id in profiles:
         try:
-            recipients.append(int(user_id))
-        except Exception:
+            recipient_ids.add(int(user_id))
+        except (TypeError, ValueError):
             continue
+    for user_id in (context.application.bot_data.get("active_chats", {}) or {}):
+        try:
+            recipient_ids.add(int(user_id))
+        except (TypeError, ValueError):
+            continue
+    for user_id in (context.application.bot_data.get("admin_requests", {}) or {}):
+        try:
+            recipient_ids.add(int(user_id))
+        except (TypeError, ValueError):
+            continue
+    recipients = sorted(recipient_ids)
 
     if not recipients:
         await update.message.reply_text("В базе нет пользователей для рассылки.")
@@ -1388,7 +1391,7 @@ async def sendpiar_command_handler(update: Update, context: ContextTypes.DEFAULT
                         entities=spec.get("entities") or None,
                     )
             except RetryAfter as exc:
-                logging.warning("sendpiar rate limit hit for recipient %s; retrying after %s seconds", recipient_id, exc.retry_after)
+                logging.warning("sp rate limit hit for recipient %s; retrying after %s seconds", recipient_id, exc.retry_after)
                 await asyncio.sleep(float(exc.retry_after) + 1.0)
                 try:
                     if spec["kind"] == "media":
@@ -1407,12 +1410,20 @@ async def sendpiar_command_handler(update: Update, context: ContextTypes.DEFAULT
                             text=spec.get("text"),
                             entities=spec.get("entities") or None,
                         )
-                except Exception:
-                    logging.exception("sendpiar retry failed for recipient %s after rate limit", recipient_id)
+                except Forbidden:
+                    logging.info("sp retry recipient %s cannot receive bot messages", recipient_id)
                     recipient_ok = False
                     break
+                except Exception:
+                    logging.exception("sp retry failed for recipient %s after rate limit", recipient_id)
+                    recipient_ok = False
+                    break
+            except Forbidden:
+                logging.info("sp recipient %s cannot receive bot messages", recipient_id)
+                recipient_ok = False
+                break
             except Exception:
-                logging.exception("sendpiar failed for recipient %s", recipient_id)
+                logging.exception("sp failed for recipient %s", recipient_id)
                 recipient_ok = False
                 break
         if recipient_ok:
@@ -1421,11 +1432,6 @@ async def sendpiar_command_handler(update: Update, context: ContextTypes.DEFAULT
             failed_count += 1
 
     report_text = f"✅Рассылка отправлена всем пользователям бота.\nУспешно: {success_count}\nОшибок: {failed_count}"
-    if immune_profiles:
-        immune_profiles = sorted([pid for pid in immune_profiles if int(pid or 0) > 0])
-        immune_lines = "\n".join([f"id_profile #{pid} имеет иммунитет к рекламе" for pid in immune_profiles])
-        report_text = f"{report_text}\n\n{immune_lines}"
-
     await context.bot.send_message(chat_id=update.effective_chat.id, text=report_text)
 
     bot_data["sendpiar_cooldown_until"] = time.time() + (15 * 60)
@@ -1437,7 +1443,7 @@ async def sendpiar_media_router(update: Update, context: ContextTypes.DEFAULT_TY
     if not update.message:
         return
     caption = str(update.message.caption or "").strip()
-    if not caption.startswith("/sendpiar") and not caption.startswith("/sendpiar@"):
+    if not re.match(r"^/sp(?:@[\w_]+)?(?:\s|$)", caption):
         return
     await sendpiar_command_handler(update, context)
     raise ApplicationHandlerStop
