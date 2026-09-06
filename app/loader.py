@@ -393,7 +393,7 @@ def build_application():
         filters.TEXT & filters.Regex(r"^/кусь(?:@[\w_]+)?(?:\s+.*)?$") & (filters.ChatType.PRIVATE | filters.Chat(WORK_CHAT_ID)),
         kus_command_handler,
     ), group=-1)
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.REPLY & filters.ChatType.PRIVATE, user_private_message_handler))
+    app.add_handler(MessageHandler(filters.ALL & ~filters.REPLY & filters.ChatType.PRIVATE, user_private_message_handler))
     # Handler for admin replies to the bot's "Введите причину отклонения запроса" prompt
     app.add_handler(MessageHandler(filters.TEXT & filters.REPLY & (filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), handle_decline_reason_reply))
     # Edited messages must be handled before ordinary message handlers. Several
