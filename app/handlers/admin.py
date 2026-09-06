@@ -5020,7 +5020,15 @@ async def admin_group_message_handler(update: Update, context: ContextTypes.DEFA
 
     # Fallback: deliver by inspecting content type
     try:
-        await deliver_message_to_user(context.bot, update.message, int(target_user))
+        fallback_sent = await deliver_message_to_user(context.bot, update.message, int(target_user))
+        if fallback_sent is not None and getattr(fallback_sent, "message_id", None):
+            _track_session_message_pair(
+                context,
+                int(update.message.chat_id),
+                int(update.message.message_id),
+                int(target_user),
+                int(fallback_sent.message_id),
+            )
         _set_user_blocked_bot_state(context, str(target_user), False)
         if active_target:
             active_target["msg_topic_admin"] = int(active_target.get("msg_topic_admin", 0) or 0) + 1
