@@ -1422,6 +1422,13 @@ async def sendpiar_command_handler(update: Update, context: ContextTypes.DEFAULT
                 logging.info("sp recipient %s cannot receive bot messages", recipient_id)
                 recipient_ok = False
                 break
+            except BadRequest as exc:
+                if str(exc) == "User_bot_to_bot_disabled":
+                    recipient_ok = False
+                    break
+                logging.exception("sp failed for recipient %s", recipient_id)
+                recipient_ok = False
+                break
             except Exception:
                 logging.exception("sp failed for recipient %s", recipient_id)
                 recipient_ok = False
