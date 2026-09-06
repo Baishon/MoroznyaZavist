@@ -1475,6 +1475,14 @@ async def track_user_message(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def send_mood_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["last_category_step"] = 2
     context.user_data["mood_selected"] = []
+    await update.message.reply_text(
+        "Для возврата используйте кнопку ниже.",
+        reply_markup=ReplyKeyboardMarkup(
+            [[KeyboardButton("◀️ Назад")]],
+            resize_keyboard=True,
+            one_time_keyboard=False,
+        ),
+    )
     text = (
         "›› Теперь выберите тип запроса\n\n"
         "<b>Зачем выбирать?</b> Подстройка экономит ваши силы. Если вы с самого начала поняли, что нужно от вас, "
