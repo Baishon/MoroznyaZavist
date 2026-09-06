@@ -40,6 +40,7 @@ from app.keyboards.inline import (
 )
 from app.services.bans import block_if_banned, check_active_chat_block, enforce_autoban_if_needed
 from app.services.messaging import deliver_message_to_user
+from app.services.profiles import _set_user_blocked_bot_state
 from app.services.profiles import (
     _candidate_block_text,
     _ensure_profile,
@@ -2054,6 +2055,8 @@ async def user_private_message_handler(update: Update, context: ContextTypes.DEF
 
     if await block_if_banned(update, context):
         return
+    # A successful incoming message proves that the user has unblocked the bot.
+    _set_user_blocked_bot_state(context, user_id, False)
 
     profile = _ensure_profile(context, user_id, user.username or f"id{user_id}")
     refresh_timed_warnings(profile)

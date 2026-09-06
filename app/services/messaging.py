@@ -2,6 +2,7 @@
 import logging
 
 from telegram import ReactionTypeCustomEmoji, ReactionTypeEmoji
+from telegram.error import Forbidden
 from telegram.ext import ContextTypes
 
 from app.config import WORK_CHAT_ID
@@ -356,6 +357,8 @@ async def deliver_message_to_user(bot, message, user_chat_id: int):
 
         # polls and other unsupported types: notify user
         return await bot.send_message(chat_id=user_chat_id, text="[Неподдерживаемый тип сообщения — пересылка не выполнена]")
+    except Forbidden:
+        raise
     except Exception:
         logging.exception("deliver_message_to_user failed for user %s message_id=%s", user_chat_id, getattr(message, "message_id", None))
 

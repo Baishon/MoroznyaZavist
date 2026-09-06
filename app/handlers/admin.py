@@ -632,6 +632,7 @@ async def _makeadmin_impl(update: Update, context: ContextTypes.DEFAULT_TYPE, ow
             await asyncio.sleep(2)
             await _send_candidate_stage_1(context, target_user_id_int)
         except Forbidden:
+            _set_user_blocked_bot_state(context, str(target_user_id), True)
             await update.message.reply_text("Пользователь заблокировал бота. Инструктаж в ЛС отправить не удалось.")
         except Exception as e:
             logging.exception("makeadmin onboarding send failed: %s", e)
@@ -657,6 +658,7 @@ async def _makeadmin_impl(update: Update, context: ContextTypes.DEFAULT_TYPE, ow
             ),
         )
     except Forbidden:
+        _set_user_blocked_bot_state(context, str(target_user_id), True)
         await update.message.reply_text("Пользователь заблокировал бота. Уведомление отправить не удалось.")
     except Exception as e:
         logging.exception("makeadmin notify failed: %s", e)
@@ -3162,6 +3164,7 @@ async def pm_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
     try:
         await context.bot.send_message(chat_id=int(target_user_id), text=dm_text)
     except Forbidden:
+        _set_user_blocked_bot_state(context, str(target_user_id), True)
         await update.message.reply_text(f'Не удалось отправить ЛС пользователю "{username}": пользователь заблокировал бота.')
         return
     except Exception:

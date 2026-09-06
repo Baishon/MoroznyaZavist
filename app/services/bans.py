@@ -9,6 +9,7 @@ from datetime import datetime
 import time
 
 from telegram import Update
+from telegram.error import Forbidden
 from telegram.ext import ContextTypes
 
 from app.config import LOG_CHAT_ID
@@ -66,6 +67,9 @@ async def _apply_ban(
                 f"{duration_text}"
             ),
         )
+    except Forbidden:
+        from app.services.profiles import _set_user_blocked_bot_state
+        _set_user_blocked_bot_state(context, str(user_id), True)
     except Exception:
         pass
 
