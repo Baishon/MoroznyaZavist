@@ -3698,18 +3698,6 @@ async def admin_take_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         "💌 Если ожидание немного затянется — просто отправьте любое сообщение. Администратор обязательно ответит.\n\n"
         "╰────────────────╯"
     )
-    user_text_2 = (
-        "╭─ 📌 𝓘𝓷𝓯𝓸 ─╮\n\n"
-        "⚙️ Временно недоступна пересылка:\n\n"
-        "• 📷 Фото\n"
-        "• 🎥 Видео\n"
-        "• 🎞 GIF\n"
-        "• 😊 Стикеров\n"
-        "• 📁 Файлов\n\n"
-        "Это связано с технической ошибкой на стороне сервера.\n\n"
-        "🛠 Мы уже занимаемся её устранением. Спасибо за терпение!\n\n"
-        "╰────────────────╯"
-    )
     bio_button = InlineKeyboardMarkup(
         [[InlineKeyboardButton("🔭Биография админа", callback_data=f"show_admin_bio_{request_user_id}")]]
     )
@@ -3723,7 +3711,6 @@ async def admin_take_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
             )
         except Exception:
             pass
-        await context.bot.send_message(chat_id=requester_chat_id, text=user_text_2)
     except Exception:
         pass
 
