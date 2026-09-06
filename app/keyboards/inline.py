@@ -33,6 +33,28 @@ def _build_candidate_tip_keyboard(user_id: str, selected_keys: list[str]) -> Inl
     )
 
 
+def _build_mood_selection_keyboard(user_id: str, selected_keys: list[str]) -> InlineKeyboardMarkup:
+    labels = {
+        "chat": "🗣️ Общение",
+        "support": "❤️ Поддержка",
+        "flirt": "🔥 Флирт",
+    }
+    buttons = [
+        InlineKeyboardButton(
+            f"{'✅' if key in selected_keys else ''}{label}",
+            callback_data=f"mood_toggle_{user_id}_{key}",
+        )
+        for key, label in labels.items()
+    ]
+    return InlineKeyboardMarkup(
+        [
+            [buttons[0], buttons[1]],
+            [buttons[2]],
+            [InlineKeyboardButton("▶️ Далее", callback_data=f"mood_next_{user_id}")],
+        ]
+    )
+
+
 def _build_candidate_gender_keyboard(user_id: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [[

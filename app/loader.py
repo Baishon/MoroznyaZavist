@@ -133,6 +133,8 @@ from app.handlers.user import (
     change_nickname_callback,
     choose_admin_gender_callback,
     choose_mood_callback,
+    mood_selection_callback,
+    mood_selection_next_callback,
     check_session_admin_online_handler,
     complaint_admin_back_handler,
     complaint_admin_last_admin_handler,
@@ -306,6 +308,8 @@ def build_application():
     app.add_handler(CallbackQueryHandler(reject_candidate_callback, pattern=r"^reject_candidate_\d+$"))
     app.add_handler(CallbackQueryHandler(candidate_tip_toggle_callback, pattern=r"^candidate_tip_toggle_\d+_(chat|support|flirt)$"))
     app.add_handler(CallbackQueryHandler(candidate_tip_next_callback, pattern=r"^candidate_tip_next_\d+$"))
+    app.add_handler(CallbackQueryHandler(mood_selection_callback, pattern=r"^mood_toggle_\d+_(chat|support|flirt)$"))
+    app.add_handler(CallbackQueryHandler(mood_selection_next_callback, pattern=r"^mood_next_\d+$"))
     app.add_handler(CallbackQueryHandler(candidate_gender_callback, pattern=r"^candidate_gender_\d+_(male|female)$"))
     app.add_handler(CallbackQueryHandler(candidate_application_callback, pattern=r"^candidate_application_\d+$"))
     app.add_handler(CallbackQueryHandler(candidate_character_callback, pattern=r"^candidate_character_\d+$"))
