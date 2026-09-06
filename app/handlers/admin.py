@@ -1742,6 +1742,53 @@ async def fullstats_command_handler(update: Update, context: ContextTypes.DEFAUL
     )
 
 
+async def admins_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or not update.effective_user or not update.effective_chat:
+        return
+    if (
+        update.effective_chat.type != ChatType.PRIVATE
+        and update.effective_chat.id not in _special_admin_chat_ids()
+    ):
+        return
+
+    issuer_profile = _ensure_profile(
+        context,
+        str(update.effective_user.id),
+        update.effective_user.username or f"id{update.effective_user.id}",
+    )
+    if _effective_admin_level(issuer_profile) < 3:
+        await update.message.reply_text("Команда доступна только администраторам 3 категории и выше.")
+        return
+
+    admin_rows = []
+    for telegram_id, profile in (context.application.bot_data.get("profiles", {}) or {}).items():
+        profile = profile or {}
+        level = _effective_admin_level(profile)
+        if level < 1:
+            continue
+        username = str(profile.get("username") or "").strip()
+        username_text = username if username.startswith("@") else f"@{username}" if username else "не указан"
+        nick = str(profile.get("tag_admin") or profile.get("user_nickname") or "не указан").strip()
+        prefix = str(profile.get("prefix") or "не установлен").strip()
+        try:
+            profile_id = int(profile.get("id_profile", 0) or 0)
+        except (TypeError, ValueError):
+            profile_id = 0
+        admin_rows.append((profile_id, nick, username_text, telegram_id, prefix))
+
+    admin_rows.sort(key=lambda row: (row[0] <= 0, row[0], row[3]))
+    if not admin_rows:
+        await update.message.reply_text("Администраторы не найдены.")
+        return
+
+    lines = ["👥 Список администраторов", ""]
+    for profile_id, nick, username_text, telegram_id, prefix in admin_rows:
+        lines.append(
+            f"Ник: {nick} | {username_text} | id_profile: {profile_id} | "
+            f"id_telegram: {telegram_id} | \"{prefix}\""
+        )
+    await update.message.reply_text("\n".join(lines))
+
 
 async def astats_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     allowed_special_chats = _special_admin_chat_ids()

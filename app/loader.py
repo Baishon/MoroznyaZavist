@@ -51,6 +51,7 @@ from app.handlers.admin import (
     del_rule_handler,
     admin_decline_callback,
     admin_decline_request_callback,
+    admins_command_handler,
     dump_maps_handler,
     fullstats_command_handler,
     givetopic_command_handler,
@@ -263,6 +264,7 @@ def build_application():
     app.add_handler(CommandHandler("setprefix", setprefix_command_handler, filters=filters.ChatType.PRIVATE | filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), group=-1)
     app.add_handler(CommandHandler("anpiar", anpiar_command_handler, filters=filters.ChatType.PRIVATE | filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), group=-1)
     app.add_handler(CommandHandler("fullstats", fullstats_command_handler, filters=filters.ChatType.PRIVATE | filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), group=-1)
+    app.add_handler(CommandHandler("admins", admins_command_handler, filters=filters.ChatType.PRIVATE | filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), group=-1)
     app.add_handler(CommandHandler("sendpiar", sendpiar_command_handler, filters=filters.ChatType.PRIVATE | filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), group=-1)
     app.add_handler(CommandHandler("pm", pm_command_handler, filters=filters.ChatType.PRIVATE | filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), group=-1)
     app.add_handler(CommandHandler("prava", prava_command_handler, filters=filters.ChatType.PRIVATE | filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), group=-1)
