@@ -52,6 +52,7 @@ from app.handlers.admin import (
     admin_decline_callback,
     admin_decline_request_callback,
     admins_command_handler,
+    banlist_command_handler,
     dump_maps_handler,
     fullstats_command_handler,
     givetopic_command_handler,
@@ -96,6 +97,7 @@ from app.handlers.admin import (
     warn_command_handler,
     warn_user_callback,
     warn_user_cancel_callback,
+    warnlist_command_handler,
 )
 from app.handlers.candidates import (
     candidate_gender_callback,
@@ -265,6 +267,8 @@ def build_application():
     app.add_handler(CommandHandler("anpiar", anpiar_command_handler, filters=filters.ChatType.PRIVATE | filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), group=-1)
     app.add_handler(CommandHandler("fullstats", fullstats_command_handler, filters=filters.ChatType.PRIVATE | filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), group=-1)
     app.add_handler(CommandHandler("admins", admins_command_handler, filters=filters.ChatType.PRIVATE | filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), group=-1)
+    app.add_handler(CommandHandler("banlist", banlist_command_handler, filters=filters.ChatType.PRIVATE | filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), group=-1)
+    app.add_handler(CommandHandler("warnlist", warnlist_command_handler, filters=filters.ChatType.PRIVATE | filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), group=-1)
     app.add_handler(CommandHandler("sendpiar", sendpiar_command_handler, filters=filters.ChatType.PRIVATE | filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), group=-1)
     app.add_handler(CommandHandler("pm", pm_command_handler, filters=filters.ChatType.PRIVATE | filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), group=-1)
     app.add_handler(CommandHandler("prava", prava_command_handler, filters=filters.ChatType.PRIVATE | filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), group=-1)
