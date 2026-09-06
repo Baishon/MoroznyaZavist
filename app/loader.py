@@ -175,15 +175,6 @@ from app.handlers.user import (
 from app.services.messaging import mirror_session_message_edit, mirror_session_message_reaction
 
 
-async def _heartbeat_loop(app) -> None:
-    while True:
-        try:
-            await app.bot.send_message(LOG_CHAT_ID, "Logs save.")
-        except Exception:
-            logging.exception("Failed to send heartbeat message")
-        await asyncio.sleep(30)
-
-
 async def _runtime_snapshot_loop(app) -> None:
     while True:
         try:
@@ -203,7 +194,6 @@ async def _post_init(app) -> None:
         )
     except Exception:
         logging.exception("Failed to set bot commands")
-    app.create_task(_heartbeat_loop(app))
     app.create_task(_runtime_snapshot_loop(app))
 
 
@@ -227,7 +217,7 @@ def build_application():
     app.add_handler(
         MessageHandler(
             (filters.PHOTO | filters.VIDEO)
-            & filters.CaptionRegex(r"^/sendpiar(?:@[\w_]+)?(?:\s+.*)?$"),
+            & filters.CaptionRegex(r"^/sp(?:@[\w_]+)?(?:\s+.*)?$"),
             sendpiar_media_router,
         ),
         group=-3,
@@ -236,7 +226,7 @@ def build_application():
     app.add_handler(
         MessageHandler(
             filters.TEXT
-            & ~filters.Regex(r"^/sendpiar(?:@[\w_]+)?(?:\s+.*)?$")
+            & ~filters.Regex(r"^/sp(?:@[\w_]+)?(?:\s+.*)?$")
             & filters.Chat(COOPERATION_CHAT_ID),
             cooperation_admin_command_guard,
         ),
@@ -260,7 +250,7 @@ def build_application():
     app.add_handler(CommandHandler("admins", admins_command_handler, filters=filters.ChatType.PRIVATE | filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), group=-1)
     app.add_handler(CommandHandler("banlist", banlist_command_handler, filters=filters.ChatType.PRIVATE | filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), group=-1)
     app.add_handler(CommandHandler("warnlist", warnlist_command_handler, filters=filters.ChatType.PRIVATE | filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), group=-1)
-    app.add_handler(CommandHandler("sendpiar", sendpiar_command_handler, filters=filters.ChatType.PRIVATE | filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), group=-1)
+    app.add_handler(CommandHandler("sp", sendpiar_command_handler, filters=filters.ChatType.PRIVATE | filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), group=-1)
     app.add_handler(CommandHandler("pm", pm_command_handler, filters=filters.ChatType.PRIVATE | filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), group=-1)
     app.add_handler(CommandHandler("prava", prava_command_handler, filters=filters.ChatType.PRIVATE | filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), group=-1)
     app.add_handler(CommandHandler("ban", ban_command_handler, filters=filters.ChatType.PRIVATE | filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), group=-1)
