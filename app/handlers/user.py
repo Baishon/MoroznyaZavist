@@ -35,6 +35,7 @@ from app.keyboards.inline import (
     _build_complaint_admin_menu_keyboard,
     _build_complaint_menu_keyboard,
     _build_main_menu_keyboard,
+    _build_mood_selection_keyboard,
     _build_session_settings_keyboard,
     _build_settings_menu_keyboard,
 )
@@ -1473,6 +1474,7 @@ async def track_user_message(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 async def send_mood_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["last_category_step"] = 2
+    context.user_data["mood_selected"] = []
     text = (
         "›› Теперь выберите тип запроса\n\n"
         "<b>Зачем выбирать?</b> Подстройка экономит ваши силы. Если вы с самого начала поняли, что нужно от вас, "
@@ -1481,16 +1483,148 @@ async def send_mood_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "❤️<b>Поддержка</b> - если накопилось обиды или гнева и хочется, чтобы кто то послушал и пожалел.\n\n"
         "🔥<b>Флирт</b> - Для тех, кто любит поролить и называть милыми словами"
     )
-    menu_keyboard = ReplyKeyboardMarkup(
-        [
-            [KeyboardButton("🗣️ Общение"), KeyboardButton("❤️ Поддержка")],
-            [KeyboardButton("🔥 Флирт")],
-            [KeyboardButton("◀️ Назад")]
-        ],
-        resize_keyboard=True,
-        one_time_keyboard=False,
+    user_id = str(update.effective_user.id)
+    await update.message.reply_text(
+        text,
+        parse_mode=ParseMode.HTML,
+        reply_markup=_build_mood_selection_keyboard(user_id, []),
     )
-    await update.message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=menu_keyboard)
+
+
+async def mood_selection_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = query.data or ""
+    parts = data.split("_")
+    if len(parts) != 4:
+        return
+
+    user_id, mood_key = parts[2], parts[3]
+    if not update.effective_user or str(update.effective_user.id) != user_id:
+        await query.answer("Кнопка доступна только владельцу запроса", show_alert=True)
+        return
+    if mood_key not in {"chat", "support", "flirt"}:
+        return
+    if context.user_data.get("profile") != 2:
+        await query.answer("Этап выбора типа запроса уже завершен", show_alert=True)
+        return
+
+    selected = list(context.user_data.get("mood_selected") or [])
+    if mood_key in selected:
+        selected.remove(mood_key)
+    else:
+        selected.append(mood_key)
+    context.user_data["mood_selected"] = selected
+    await query.message.edit_reply_markup(
+        reply_markup=_build_mood_selection_keyboard(user_id, selected)
+    )
+
+
+async def mood_selection_next_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = query.data or ""
+    parts = data.split("_")
+    if len(parts) != 3:
+        return
+
+    user_id = parts[2]
+    if not update.effective_user or str(update.effective_user.id) != user_id:
+        await query.answer("Кнопка доступна только владельцу запроса", show_alert=True)
+        return
+    if context.user_data.get("profile") != 2:
+        await query.answer("Этап выбора типа запроса уже завершен", show_alert=True)
+        return
+
+    mood_labels = {"chat": "общение", "support": "поддержка", "flirt": "флирт"}
+    selected = list(context.user_data.get("mood_selected") or [])
+    if not selected:
+        await query.answer("Выберите хотя бы один тип общения", show_alert=True)
+        return
+
+    await _submit_admin_search(update, context, [mood_labels[key] for key in selected])
+
+
+async def _submit_admin_search(update: Update, context: ContextTypes.DEFAULT_TYPE, moods: list[str]):
+    user_id = str(update.effective_user.id)
+    profile = _ensure_profile(
+        context, user_id, update.effective_user.username or f"id{user_id}"
+    )
+    blocked, block_message = _check_admin_search_cooldown(context, user_id, profile)
+    if blocked:
+        await context.bot.send_message(chat_id=user_id, text=block_message)
+        return
+    if await check_active_chat_block(update, context):
+        return
+
+    context.user_data["mood"] = ", ".join(moods)
+    context.user_data["profile"] = 0
+    first_confirmation = await context.bot.send_message(
+        chat_id=user_id,
+        text=(
+            "››› Запрос успешно создан 🔎\n"
+            "Все свободные администраторы уведомлены, ожидайте от 10 до 120 минут❤️\n\n"
+            "Если ваш запрос не был рассмотрен больше 2 часов, пожалуйста отправьте сообщение в техническую поддержку а мы разберемся с админами."
+        ),
+        reply_markup=ReplyKeyboardRemove(),
+    )
+    user = update.effective_user
+    user_confirmation = await context.bot.send_message(
+        chat_id=user_id,
+        text="Если хотите отменить поиск администратора — нажмите кнопку ниже.",
+        reply_markup=InlineKeyboardMarkup(
+            [[InlineKeyboardButton("Отменить", callback_data=f"cancel_search_{user.id}")]]
+        ),
+    )
+
+    chat_id = WORK_CHAT_ID
+    username = f"@{user.username}" if user.username else f"id{user.id}"
+    gender_key = context.user_data.get("admin_gender")
+    admin_gender = "Мальчик" if gender_key == "male" else "Девочка"
+    mood = ", ".join(moods)
+    topic_name = username if user.username else f"user_{user.id}"
+    try:
+        topic = await context.bot.create_forum_topic(chat_id=chat_id, name=topic_name)
+        topic_id = topic.message_thread_id
+    except BadRequest:
+        topic = None
+        topic_id = None
+
+    topic_message = (
+        "❗️Новый пользователь\n"
+        f"Пол: {admin_gender}\n"
+        f"Тип общения: {mood}\n"
+        f"Юзернейм пользователя: {username}"
+    )
+    buttons = InlineKeyboardMarkup(
+        [[
+            InlineKeyboardButton("✅ Взять пользователя", callback_data=f"take_user_{user.id}"),
+            InlineKeyboardButton("❌Отказать запрос", callback_data=f"decline_request_{user.id}"),
+        ]]
+    )
+    if topic is not None:
+        sent = await context.bot.send_message(
+            chat_id=chat_id, text=topic_message, message_thread_id=topic_id, reply_markup=buttons
+        )
+    else:
+        sent = await context.bot.send_message(chat_id=chat_id, text=topic_message, reply_markup=buttons)
+
+    group_map = context.application.bot_data.setdefault("group_message_map", {})
+    group_map[sent.message_id] = user_id
+    group_map[str(sent.message_id)] = user_id
+    request_data = {
+        "chat_id": chat_id,
+        "topic_id": topic_id,
+        "topic_message_id": sent.message_id,
+        "user_confirmation_message_id": user_confirmation.message_id,
+        "first_confirmation_message_id": first_confirmation.message_id,
+        "username": username,
+        "mood": mood,
+        "gender": gender_key,
+    }
+    context.user_data.setdefault("admin_request", {})[user_id] = request_data
+    context.application.bot_data.setdefault("admin_requests", {})[user_id] = request_data
+    _save_runtime_snapshot(context)
 
 
 async def choose_mood_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
