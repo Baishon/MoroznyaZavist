@@ -1790,6 +1790,63 @@ async def admins_command_handler(update: Update, context: ContextTypes.DEFAULT_T
     await update.message.reply_text("\n".join(lines))
 
 
+async def _send_moderation_user_list(update: Update, context: ContextTypes.DEFAULT_TYPE, *, list_type: str) -> None:
+    if not update.message or not update.effective_user or not _is_special_admin_chat(update.effective_chat.id):
+        return
+
+    issuer_profile = _ensure_profile(
+        context,
+        str(update.effective_user.id),
+        update.effective_user.username or f"id{update.effective_user.id}",
+    )
+    if not _can_use_moderation_commands(context, str(update.effective_user.id)):
+        await update.message.reply_text("Команда доступна только администраторам 2 категории и выше.")
+        return
+
+    rows = []
+    profiles = context.application.bot_data.get("profiles", {}) or {}
+    for telegram_id, profile in profiles.items():
+        profile = profile or {}
+        if list_type == "ban":
+            if not is_user_banned(context, str(telegram_id)):
+                continue
+        elif refresh_timed_warnings(profile) <= 0:
+            continue
+
+        username = str(profile.get("username") or "").strip()
+        username_text = username if username.startswith("@") else f"@{username}" if username else "не указан"
+        nickname = str(profile.get("user_nickname") or "не указан").strip()
+        try:
+            profile_id = int(profile.get("id_profile", 0) or 0)
+        except (TypeError, ValueError):
+            profile_id = 0
+        rows.append((profile_id, nickname, username_text, telegram_id))
+
+    rows.sort(key=lambda row: (row[0] <= 0, row[0], str(row[3])))
+    title = "⛔ Список пользователей с действующей блокировкой" if list_type == "ban" else "⚠️ Список пользователей с предупреждениями"
+    if not rows:
+        await update.message.reply_text(f"{title}\n\nСписок пуст.")
+        return
+
+    lines = [title, ""]
+    for profile_id, nickname, username_text, telegram_id in rows:
+        lines.append(
+            f"Ник: {nickname}\n"
+            f"{username_text}\n"
+            f"id_profile: {profile_id}\n"
+            f"id_telegram: {telegram_id}\n"
+        )
+    await update.message.reply_text("\n".join(lines).rstrip())
+
+
+async def banlist_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await _send_moderation_user_list(update, context, list_type="ban")
+
+
+async def warnlist_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await _send_moderation_user_list(update, context, list_type="warn")
+
+
 async def astats_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     allowed_special_chats = _special_admin_chat_ids()
     if update.effective_chat.id not in allowed_special_chats or not update.message:
