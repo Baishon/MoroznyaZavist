@@ -2037,6 +2037,16 @@ async def handle_decline_reason_reply(update: Update, context: ContextTypes.DEFA
 
 
 async def user_private_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Edited private messages are handled by the mirror service only when they
+    # originate in the work-chat forum. Ignore a user's own DM edits before
+    # accessing update.message, which is absent on edited_message updates.
+    if update.edited_message is not None:
+        edited_chat = getattr(update.edited_message, "chat", None)
+        if edited_chat is None or edited_chat.type == ChatType.PRIVATE:
+            return
+    if update.message is None:
+        return
+
     user = update.effective_user
     if not user:
         return
