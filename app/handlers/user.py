@@ -25,7 +25,13 @@ from telegram.constants import ChatType, ParseMode
 from telegram.error import BadRequest
 from telegram.ext import ApplicationHandlerStop, ContextTypes
 
-from app.config import ADMIN_LEVEL_TITLES, LOG_CHAT_ID, TRUSTED_ADMIN_CHAT_ID, WORK_CHAT_ID
+from app.config import (
+    ADMIN_LEVEL_TITLES,
+    LOG_CHAT_ID,
+    OFFICIAL_CHANNEL_ID,
+    TRUSTED_ADMIN_CHAT_ID,
+    WORK_CHAT_ID,
+)
 from app.database.requests import _save_profile_record, _save_runtime_snapshot
 from app.handlers.candidates import _send_candidate_stage_1, admin_candidate_private_flow
 from app.keyboards.inline import (
@@ -64,6 +70,7 @@ from app.services.topics import (
     _rp_display_name_user,
     _topic_url,
 )
+from app.services.topics import _is_member_of_chat
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -152,6 +159,86 @@ def _format_time_kyiv(timestamp: float) -> str:
 
 def _agreement_markup() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[InlineKeyboardButton("✅ Принять", callback_data="agreement_accept")]])
+
+
+def _subscription_markup() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton("📢 Подписаться", url="https://t.me/berlogaAskly")],
+            [InlineKeyboardButton("🔄 Проверить подписку", callback_data="subscription_check")],
+        ]
+    )
+
+
+async def _send_subscription_message_for_user(chat_id: int, context: ContextTypes.DEFAULT_TYPE):
+    await context.bot.send_message(
+        chat_id=chat_id,
+        text=(
+            "⛔️ Чтобы пользоваться ботом, сначала подпишитесь на официальный канал "
+            "@berlogaAskly.\n\nПосле подписки нажмите «Проверить подписку»."
+        ),
+        reply_markup=_subscription_markup(),
+    )
+
+
+async def _user_has_official_subscription(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    if not update.effective_user:
+        return True
+    return await _is_member_of_chat(
+        context,
+        OFFICIAL_CHANNEL_ID,
+        int(update.effective_user.id),
+    )
+
+
+async def subscription_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or not update.effective_user:
+        return
+    if getattr(update.effective_user, "is_bot", False):
+        return
+    if await _user_has_official_subscription(update, context):
+        return
+
+    await _send_subscription_message_for_user(int(update.effective_user.id), context)
+    if update.effective_chat and update.effective_chat.type != ChatType.PRIVATE:
+        try:
+            await update.message.reply_text(
+                "⚠️ Подпишитесь на официальный канал бота и нажмите «Проверить подписку» в личных сообщениях."
+            )
+        except Exception:
+            pass
+    raise ApplicationHandlerStop
+
+
+async def subscription_callback_guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if not query or not update.effective_user:
+        return
+    if getattr(query.from_user, "is_bot", False):
+        return
+    if (query.data or "") == "subscription_check":
+        return
+    if await _user_has_official_subscription(update, context):
+        return
+
+    await query.answer("Сначала подпишитесь на официальный канал", show_alert=True)
+    await _send_subscription_message_for_user(int(update.effective_user.id), context)
+    raise ApplicationHandlerStop
+
+
+async def subscription_check_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if not query or not update.effective_user:
+        return
+    if await _user_has_official_subscription(update, context):
+        await query.answer("✅ Подписка подтверждена")
+        try:
+            await query.message.edit_text("✅ Подписка подтверждена. Теперь бот снова доступен.")
+        except Exception:
+            pass
+        return
+
+    await query.answer("Подписка не найдена. Подпишитесь и попробуйте снова.", show_alert=True)
 
 
 async def _send_agreement_message_for_user(chat_id: int, context: ContextTypes.DEFAULT_TYPE):
