@@ -120,7 +120,9 @@ async def _is_member_of_chat(context: ContextTypes.DEFAULT_TYPE, chat_id: int, u
     try:
         member = await context.bot.get_chat_member(chat_id=chat_id, user_id=user_id)
         status = getattr(member, "status", "")
-        return status not in {"left", "kicked"}
+        if status in {"left", "kicked"}:
+            return False
+        return bool(getattr(member, "is_member", True))
     except Exception:
         return False
 
