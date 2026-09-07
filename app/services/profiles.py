@@ -348,15 +348,25 @@ def _admin_supports_mood(profile: dict | None, mood: str | None) -> bool:
     requested mood (e.g. "общение", "поддержка", "флирт"). Used to prevent an
     admin from taking a request for a communication type they didn't select
     on their profile."""
-    mood_normalized = str(mood or "").strip().lower()
-    if not mood_normalized:
+    requested_moods = {
+        item.strip()
+        for item in str(mood or "").lower().replace(";", ",").split(",")
+        if item.strip()
+    }
+    if not requested_moods:
         return True
 
     tip_admin = str((profile or {}).get("tip_admin") or "").strip().lower()
     if not tip_admin or tip_admin == "не указано":
         return False
 
-    return mood_normalized in tip_admin
+    return bool(requested_moods.intersection(
+        {
+            mood_name
+            for mood_name in ("общение", "поддержка", "флирт")
+            if mood_name in tip_admin
+        }
+    ))
 
 
 def _admin_matches_gender(profile: dict | None, requested_gender: str | None) -> bool:
