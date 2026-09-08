@@ -45,3 +45,7 @@ STATE_DB_PATH = os.path.join(STATE_DIR, "bot_state.sqlite3")
 # persistence uses this database instead of the local SQLite file, so state
 # survives restarts/redeploys on hosts with an ephemeral filesystem.
 DATABASE_URL = os.environ.get("DATABASE_URL")
+
+# Public Render URL used by Telegram to deliver webhook updates.
+WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
+PORT = int(os.environ.get("PORT", "8080"))

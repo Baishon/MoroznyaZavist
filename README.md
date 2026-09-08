@@ -45,11 +45,14 @@ only: Telegram polling must not run in multiple replicas at the same time.
 Add these environment variables in Render:
 
 - `TELEGRAM_TOKEN` — the bot token, stored as a secret.
+- `WEBHOOK_URL` — the public Render service URL, for example
+  `https://your-service.onrender.com`.
 - `DATABASE_URL` — the **Internal Database URL** from a Render PostgreSQL
   database in the same region.
 
-Set the health check path to `/`. The bot exposes a small HTTP health endpoint
-on Render's `$PORT` while receiving Telegram updates through polling.
+Set the health check path to `/`. The bot listens on Render's `$PORT`, receives
+Telegram POST requests at `/webhook`, and configures that webhook automatically
+from `WEBHOOK_URL`. The `/set_webhook` command is restricted to `OWNER_ID`.
 
 Do not upload `config/.env`, `.venv/`, or `bot_storage/` to Render. The
 filesystem of a Web Service is not a database; PostgreSQL is used automatically
@@ -68,6 +71,7 @@ pip install -r requirements.txt
 
 ```bash
 TELEGRAM_TOKEN=your_bot_token_here
+WEBHOOK_URL=https://your-service.onrender.com
 ```
 
 4. Run the bot:
