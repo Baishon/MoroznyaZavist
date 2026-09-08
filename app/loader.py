@@ -5,16 +5,22 @@ stays a straightforward, auditable 1:1 mapping of command/callback -> handler.
 """
 import asyncio
 import logging
-import os
-import threading
 from types import SimpleNamespace
-from http.server import BaseHTTPRequestHandler, HTTPServer
 
+from aiohttp import web
 from telegram import BotCommand
-from telegram.ext import ApplicationBuilder, CallbackQueryHandler, CommandHandler, MessageHandler, MessageReactionHandler, filters
+from telegram import Update
+from telegram.ext import (
+    ApplicationBuilder,
+    CallbackQueryHandler,
+    CommandHandler,
+    MessageHandler,
+    MessageReactionHandler,
+    filters,
+)
 
 from app import logging_setup  # noqa: F401  (side effect: attaches Telegram log handler)
-from app.config import COOPERATION_CHAT_ID, LOG_CHAT_ID, TOKEN, WORK_CHAT_ID
+from app.config import COOPERATION_CHAT_ID, LOG_CHAT_ID, OWNER_ID, PORT, TOKEN, WEBHOOK_URL, WORK_CHAT_ID
 from app.database.requests import _init_persistent_storage, _save_runtime_snapshot
 from app.handlers.admin import (
     add_rules_handler,
@@ -193,6 +199,7 @@ async def _post_init(app) -> None:
             [
                 BotCommand("start", "Запустить бота"),
                 BotCommand("restart", "Обновить текущее подменю"),
+                BotCommand("set_webhook", "Переустановить webhook (администратор)"),
             ]
         )
     except Exception:
@@ -200,9 +207,79 @@ async def _post_init(app) -> None:
     app.create_task(_runtime_snapshot_loop(app))
 
 
+async def _set_webhook_command(update: Update, context) -> None:
+    """Set the configured webhook again without restarting the Render service."""
+    if update.effective_user is None or update.effective_user.id != OWNER_ID:
+        return
+    webhook_url = _webhook_endpoint()
+    await context.bot.set_webhook(url=webhook_url)
+    if update.effective_message:
+        await update.effective_message.reply_text(f"Webhook установлен: {webhook_url}")
+
+
+async def _error_handler(update: object, context) -> None:
+    """Log update errors; the HTTP webhook handler still returns 200 to Telegram."""
+    logging.error("Unhandled Telegram update error: %s", context.error, exc_info=context.error)
+
+
+def _webhook_endpoint() -> str:
+    if not WEBHOOK_URL:
+        raise RuntimeError("WEBHOOK_URL is not set. Configure the public Render service URL.")
+    base_url = WEBHOOK_URL.rstrip("/")
+    return base_url if base_url.endswith("/webhook") else f"{base_url}/webhook"
+
+
+async def _webhook_handler(request: web.Request) -> web.Response:
+    """Pass Telegram's JSON update to PTB and acknowledge every request."""
+    application = request.app["telegram_application"]
+    try:
+        update_data = await request.json()
+        update = Update.de_json(update_data, application.bot)
+        if update is None:
+            raise ValueError("Telegram sent an empty update")
+        await application.process_update(update)
+    except Exception:
+        logging.exception("Failed to process Telegram webhook update")
+    return web.Response(status=200, text="OK")
+
+
+async def _health_handler(request: web.Request) -> web.Response:
+    return web.Response(status=200, text="OK")
+
+
+async def _run_webhook() -> None:
+    if not WEBHOOK_URL:
+        raise RuntimeError("WEBHOOK_URL is required when running in webhook mode.")
+
+    application = build_application()
+    await application.initialize()
+    await _post_init(application)
+    await application.start()
+    await application.bot.set_webhook(url=_webhook_endpoint())
+
+    server = web.Application()
+    server["telegram_application"] = application
+    server.router.add_post("/webhook", _webhook_handler)
+    server.router.add_get("/", _health_handler)
+    runner = web.AppRunner(server)
+    await runner.setup()
+    site = web.TCPSite(runner, host="0.0.0.0", port=PORT)
+    await site.start()
+    logging.info("Webhook server listening on 0.0.0.0:%s", PORT)
+
+    try:
+        await asyncio.Event().wait()
+    finally:
+        await runner.cleanup()
+        await application.stop()
+        await application.shutdown()
+
+
 def build_application():
-    app = ApplicationBuilder().token(TOKEN).post_init(_post_init).build()
+    # The custom aiohttp endpoint feeds updates directly; no PTB Updater/polling is needed.
+    app = ApplicationBuilder().token(TOKEN).updater(None).job_queue(None).build()
     _init_persistent_storage(app)
+    app.add_error_handler(_error_handler)
 
     # Agreement enforcement: block users who haven't accepted terms (default: 0)
     # Runs early to prevent other handlers from executing when user hasn't agreed.
@@ -400,42 +477,9 @@ def build_application():
     )
     app.add_handler(MessageReactionHandler(mirror_session_message_reaction))
     app.add_handler(CommandHandler("dump_maps", dump_maps_handler))
+    app.add_handler(CommandHandler("set_webhook", _set_webhook_command))
     return app
 
 
-class _HealthCheckHandler(BaseHTTPRequestHandler):
-    def do_GET(self) -> None:
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b"OK")
-
-    def log_message(self, format: str, *args) -> None:  # noqa: A002 - stdlib signature
-        pass
-
-
-def _start_health_check_server() -> None:
-    """Bind a dummy HTTP server to $PORT so Render's port scan succeeds.
-
-    Render's free web-service tier expects the process to listen on a port;
-    this bot only needs outbound polling, so this thread exists purely to
-    satisfy that health check.
-    """
-    port = int(os.environ.get("PORT", "10000"))
-    server = HTTPServer(("0.0.0.0", port), _HealthCheckHandler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-
-
 def main() -> None:
-    _start_health_check_server()
-    app = build_application()
-    app.run_polling(
-        allowed_updates=[
-            "message",
-            "edited_message",
-            "callback_query",
-            "message_reaction",
-            "message_reaction_count",
-        ],
-        close_loop=False,
-    )
+    asyncio.run(_run_webhook())
