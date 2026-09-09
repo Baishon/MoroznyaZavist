@@ -110,6 +110,21 @@ def _format_kyiv_datetime(timestamp: float | None = None) -> str:
     return when.strftime("%d.%m.%Y %H:%M:%S")
 
 
+def _recent_info_topic_actions(actions: list[dict], hours: int = 48) -> list[dict]:
+    cutoff = datetime.now(timezone(timedelta(hours=3))) - timedelta(hours=hours)
+    recent = []
+    for entry in actions:
+        try:
+            action_time = datetime.strptime(
+                str(entry.get("date", "")), "%d.%m.%Y %H:%M:%S"
+            ).replace(tzinfo=timezone(timedelta(hours=3)))
+        except (TypeError, ValueError):
+            continue
+        if action_time >= cutoff:
+            recent.append(entry)
+    return recent
+
+
 INFO_TOPIC_ACTION_LABELS = {
     "OPEN_PANEL": "Открытие панели",
     "CLOSE_SESSION": "Закрытие сессии",
@@ -208,6 +223,7 @@ def _record_info_topic_action(
     action_name = INFO_TOPIC_ACTION_LABELS.get(str(action_type), str(action_type or "Неизвестное действие"))
     entry = {
         "action_type": str(action_type),
+        "admin_id": admin_key,
         "tag_admin": admin_tag,
         "button": action_name,
         "date": _format_kyiv_datetime(),
@@ -2476,13 +2492,22 @@ def _build_info_topic_full_stats_text(context: ContextTypes.DEFAULT_TYPE, target
     if session is None:
         return "📊Полная статистика\n\nДанные по этой сессии отсутствуют."
     stats = session.get("stats", {}) or {}
-    admin_ids = stats.get("admin_ids", []) or []
     actions = session.get("actions", []) or []
+    recent_actions = _recent_info_topic_actions(actions)
+    recent_admin_ids = {str(entry.get("admin_id")) for entry in recent_actions if entry.get("admin_id") is not None}
+    admin_ids = list(recent_admin_ids)
     unique_admins = [
         (context.application.bot_data.get("profiles", {}) or {}).get(str(admin_id), {}).get("tag_admin")
         or f"id{admin_id}"
         for admin_id in admin_ids
     ]
+    recent_counts = {
+        "total": len(recent_actions),
+        "warnings": sum(entry.get("action_type") == "WARN_USER" for entry in recent_actions),
+        "close": sum(entry.get("action_type") == "CLOSE_SESSION" for entry in recent_actions),
+        "pause": sum(entry.get("action_type") == "PAUSE_SESSION" for entry in recent_actions),
+        "resume": sum(entry.get("action_type") == "RESUME_SESSION" for entry in recent_actions),
+    }
 
     lines = [
         "📊Полная статистика по сессии",
@@ -2494,13 +2519,13 @@ def _build_info_topic_full_stats_text(context: ContextTypes.DEFAULT_TYPE, target
         f"- Дата открытия: {session.get('opened_at') or 'неизвестно'}",
         f"- Последнее действие: {session.get('last_action_at') or 'неизвестно'}",
         "",
-        "📈 Общая статистика:",
-        f"- Всего действий: {stats.get('total_actions', len(actions))}",
+        "📈 Действия админов за последние 48 часов:",
+        f"- Всего нажатий кнопок: {recent_counts['total']}",
         f"- Уникальных админов: {len(unique_admins)}",
-        f"- Предупреждения: {stats.get('warnings', 0)}",
-        f"- Закрытия: {stats.get('close_count', 0)}",
-        f"- Приостановки: {stats.get('pause_count', 0)}",
-        f"- Возобновления: {stats.get('resume_count', 0)}",
+        f"- Предупреждения: {recent_counts['warnings']}",
+        f"- Закрытия: {recent_counts['close']}",
+        f"- Приостановки: {recent_counts['pause']}",
+        f"- Возобновления: {recent_counts['resume']}",
         "",
         "🧑‍💼 Администраторы:",
     ]
@@ -2511,7 +2536,7 @@ def _build_info_topic_full_stats_text(context: ContextTypes.DEFAULT_TYPE, target
         lines.append("- Нет данных")
 
     lines.extend(["", "⏱ Ключевые события:"])
-    for entry in actions[-10:]:
+    for entry in recent_actions[-10:]:
         label = entry.get("button") or INFO_TOPIC_ACTION_LABELS.get(entry.get("action_type"), entry.get("action_type") or "Действие")
         lines.append(f"- {entry.get('date', 'неизвестно')} | {entry.get('tag_admin', 'админ')} | {label}")
     return "\n".join(lines)
