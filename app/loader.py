@@ -166,6 +166,7 @@ from app.handlers.user import (
     settings_menu_handler,
     show_admin_bio_callback,
     start,
+    thanks_command_handler,
     user_private_message_handler,
     # Agreement handlers
     agreement_message_handler,
@@ -275,6 +276,7 @@ def build_application():
     app.add_handler(CommandHandler("taketopic", taketopic_command_handler, filters=filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), group=-1)
     app.add_handler(CommandHandler("topic", topic_command_handler, filters=filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), group=-1)
     app.add_handler(CommandHandler("start", start, filters=filters.ChatType.PRIVATE))
+    app.add_handler(CommandHandler("thanks", thanks_command_handler, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("restart", restart_command_handler, filters=filters.ChatType.PRIVATE))
     app.add_handler(CallbackQueryHandler(cancel_search_callback, pattern=r"^cancel_search_\d+$"))
     app.add_handler(CallbackQueryHandler(confirm_cancel_callback, pattern=r"^confirm_cancel_\d+$"))

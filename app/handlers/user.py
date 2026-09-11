@@ -22,7 +22,7 @@ from telegram import (
     Update,
 )
 from telegram.constants import ChatType, ParseMode
-from telegram.error import BadRequest
+from telegram.error import BadRequest, Forbidden
 from telegram.ext import ApplicationHandlerStop, ContextTypes
 
 from app.config import (
@@ -2266,6 +2266,67 @@ async def handle_decline_reason_reply(update: Update, context: ContextTypes.DEFA
     except Exception:
         pass
 
+
+
+async def thanks_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or not update.effective_user or update.effective_chat.type != ChatType.PRIVATE:
+        return
+
+    user_id = str(update.effective_user.id)
+    user_profile = _ensure_profile(
+        context,
+        user_id,
+        update.effective_user.username or f"id{user_id}",
+    )
+    cooldown_until = float(user_profile.get("thanks_cooldown_until", 0) or 0)
+    now = time.time()
+    if cooldown_until > now:
+        remaining = max(1, int(cooldown_until - now))
+        hours, remainder = divmod(remaining, 3600)
+        minutes = (remainder + 59) // 60
+        if hours:
+            waiting = f"{hours} ч. {minutes} мин."
+        else:
+            waiting = f"{minutes} мин."
+        await update.message.reply_text(
+            f"⏳Поблагодарить администратора снова можно через {waiting}."
+        )
+        return
+
+    raw_text = update.message.text or ""
+    cmd_entity = update.message.entities[0] if update.message.entities else None
+    cmd_len = cmd_entity.length if cmd_entity and cmd_entity.type == "bot_command" else len("/thanks")
+    tag_admin = raw_text[cmd_len:].strip()
+    if not tag_admin:
+        await update.message.reply_text("Используйте: /thanks tag_admin")
+        return
+
+    target_user_id, admin_profile = _find_admin_profile_by_tag_admin(context, tag_admin)
+    if not admin_profile or not target_user_id or not _has_admin_rights_level_1_5(admin_profile):
+        await update.message.reply_text(f'Администратор с тегом "{tag_admin}" не найден.')
+        return
+
+    reputation = int(admin_profile.get("admin_reputation", 0) or 0) + 50
+    admin_profile["admin_reputation"] = reputation
+    user_profile["thanks_cooldown_until"] = now + 12 * 60 * 60
+    _save_profile_record(context, target_user_id)
+    _save_profile_record(context, user_id)
+
+    nick_user = str(
+        user_profile.get("user_nickname")
+        or user_profile.get("username")
+        or f"id{user_id}"
+    )
+    await update.message.reply_text("✅Спасибо отправлено администратору!")
+    try:
+        await context.bot.send_message(
+            chat_id=int(target_user_id),
+            text=f"💛Пользователь {nick_user} отблагодарил вас за работу.\n⭐Вам начислено +50 репутации.",
+        )
+    except Forbidden:
+        logging.warning("thanks notification failed: admin %s blocked the bot", target_user_id)
+    except Exception:
+        logging.exception("thanks notification failed for admin %s", target_user_id)
 
 
 async def user_private_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
