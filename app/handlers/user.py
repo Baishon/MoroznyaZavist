@@ -2278,6 +2278,12 @@ async def thanks_command_handler(update: Update, context: ContextTypes.DEFAULT_T
         user_id,
         update.effective_user.username or f"id{user_id}",
     )
+    if _has_admin_rights_level_1_5(user_profile):
+        await update.message.reply_text(
+            "⛔Команда /thanks доступна только пользователям без админских прав."
+        )
+        return
+
     cooldown_until = float(user_profile.get("thanks_cooldown_until", 0) or 0)
     now = time.time()
     if cooldown_until > now:
