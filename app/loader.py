@@ -167,6 +167,9 @@ from app.handlers.user import (
     show_admin_bio_callback,
     start,
     thanks_command_handler,
+    thanks_cancel_callback,
+    thanks_confirm_callback,
+    thanks_from_session_prompt,
     user_private_message_handler,
     # Agreement handlers
     agreement_message_handler,
@@ -321,6 +324,8 @@ def build_application():
     app.add_handler(CallbackQueryHandler(resume_session_callback, pattern=r"^resume_session_\d+$"))
     app.add_handler(CallbackQueryHandler(session_rp_disable_confirm_callback, pattern=r"^session_rp_disable_confirm_\d+$"))
     app.add_handler(CallbackQueryHandler(session_rp_disable_cancel_callback, pattern=r"^session_rp_disable_cancel_\d+$"))
+    app.add_handler(CallbackQueryHandler(thanks_confirm_callback, pattern=r"^thanks_confirm_\d+$"))
+    app.add_handler(CallbackQueryHandler(thanks_cancel_callback, pattern=r"^thanks_cancel_\d+$"))
     app.add_handler(CallbackQueryHandler(setprefix_select_callback, pattern=r"^prefix_select_\d+_[a-z]+$"))
     app.add_handler(CallbackQueryHandler(setprefix_apply_callback, pattern=r"^prefix_apply_\d+$"))
     app.add_handler(CallbackQueryHandler(astats_tag_change_callback, pattern=r"^astats_tag_change_\d+$"))
@@ -370,6 +375,7 @@ def build_application():
     app.add_handler(MessageHandler(filters.Regex("^💤Приостановить общение$") & filters.ChatType.PRIVATE, pause_session_request))
     app.add_handler(MessageHandler(filters.Regex("^➕Настройки сессии$") & filters.ChatType.PRIVATE, session_settings_menu_handler))
     app.add_handler(MessageHandler(filters.Regex("^💔Отключить RP$") & filters.ChatType.PRIVATE, session_rp_disable_prompt))
+    app.add_handler(MessageHandler(filters.Regex("^💛Отблагодарить админа$") & filters.ChatType.PRIVATE, thanks_from_session_prompt))
     app.add_handler(MessageHandler(filters.Regex("^💞Включить RP$") & filters.ChatType.PRIVATE, session_rp_enable_handler))
     app.add_handler(MessageHandler(filters.Regex("^🕘Проверить онлайн админа$") & filters.ChatType.PRIVATE, check_session_admin_online_handler))
     app.add_handler(MessageHandler(filters.Regex("^↩️Вернуться к кнопкам диалога$") & filters.ChatType.PRIVATE, return_to_dialog_menu_handler))
