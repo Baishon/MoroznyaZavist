@@ -538,6 +538,117 @@ async def session_settings_menu_handler(update: Update, context: ContextTypes.DE
     )
 
 
+def _thanks_cooldown_text(seconds: int) -> str:
+    hours, remainder = divmod(max(1, seconds), 3600)
+    minutes = (remainder + 59) // 60
+    return f"{hours} ч. {minutes} мин." if hours else f"{minutes} мин."
+
+
+async def _complete_thanks(
+    context: ContextTypes.DEFAULT_TYPE,
+    user_id: str,
+    user_profile: dict,
+    target_user_id: str,
+    admin_profile: dict,
+) -> str:
+    reputation = int(admin_profile.get("admin_reputation", 0) or 0) + 50
+    admin_profile["admin_reputation"] = reputation
+    user_profile["thanks_cooldown_until"] = time.time() + 12 * 60 * 60
+    _save_profile_record(context, target_user_id)
+    _save_profile_record(context, user_id)
+
+    nick_user = str(
+        user_profile.get("user_nickname")
+        or user_profile.get("username")
+        or f"id{user_id}"
+    )
+    try:
+        await context.bot.send_message(
+            chat_id=int(target_user_id),
+            text=f"💛Пользователь {nick_user} отблагодарил вас за работу.\n⭐Вам начислено +50 репутации.",
+        )
+    except Forbidden:
+        logging.warning("thanks notification failed: admin %s blocked the bot", target_user_id)
+    except Exception:
+        logging.exception("thanks notification failed for admin %s", target_user_id)
+    return nick_user
+
+
+async def thanks_from_session_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or update.effective_chat.type != ChatType.PRIVATE:
+        return
+    if await block_if_banned(update, context):
+        return
+
+    user_id = str(update.effective_user.id)
+    user_profile = _ensure_profile(context, user_id, update.effective_user.username or f"id{user_id}")
+    if _has_admin_rights_level_1_5(user_profile):
+        await update.message.reply_text("⛔Отблагодарить администратора могут только пользователи без админских прав.")
+        return
+
+    cooldown_until = float(user_profile.get("thanks_cooldown_until", 0) or 0)
+    if cooldown_until > time.time():
+        await update.message.reply_text(
+            f"⏳Отблагодарить администратора снова можно через {_thanks_cooldown_text(int(cooldown_until - time.time()))}."
+        )
+        return
+
+    active = (context.application.bot_data.get("active_chats", {}) or {}).get(user_id)
+    target_user_id = str(active.get("admin_id") or "") if active and active.get("active") else ""
+    admin_profile = (context.application.bot_data.get("profiles", {}) or {}).get(target_user_id)
+    if not target_user_id or not admin_profile or not _has_admin_rights_level_1_5(admin_profile):
+        await update.message.reply_text("Активный администратор не найден.")
+        return
+
+    confirm_kb = InlineKeyboardMarkup(
+        [[
+            InlineKeyboardButton("✅ Да, отблагодарить", callback_data=f"thanks_confirm_{user_id}"),
+            InlineKeyboardButton("❌ Нет", callback_data=f"thanks_cancel_{user_id}"),
+        ]]
+    )
+    await update.message.reply_text(
+        "💛Вы действительно хотите отблагодарить администратора своей темы?\n\n"
+        "Администратору будет начислено +50 репутации. Использовать благодарность можно раз в 12 часов.",
+        reply_markup=confirm_kb,
+    )
+
+
+async def thanks_confirm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    parts = (query.data or "").split("_")
+    if len(parts) != 3 or not update.effective_user or str(update.effective_user.id) != parts[2]:
+        await query.answer("Кнопка доступна только владельцу сессии", show_alert=True)
+        return
+
+    user_id = parts[2]
+    user_profile = _ensure_profile(context, user_id, update.effective_user.username or f"id{user_id}")
+    cooldown_until = float(user_profile.get("thanks_cooldown_until", 0) or 0)
+    if cooldown_until > time.time():
+        await query.message.edit_text(
+            f"⏳Отблагодарить администратора снова можно через {_thanks_cooldown_text(int(cooldown_until - time.time()))}."
+        )
+        return
+
+    active = (context.application.bot_data.get("active_chats", {}) or {}).get(user_id)
+    target_user_id = str(active.get("admin_id") or "") if active and active.get("active") else ""
+    admin_profile = (context.application.bot_data.get("profiles", {}) or {}).get(target_user_id)
+    if not target_user_id or not admin_profile or not _has_admin_rights_level_1_5(admin_profile):
+        await query.message.edit_text("Активный администратор не найден.")
+        return
+
+    await _complete_thanks(context, user_id, user_profile, target_user_id, admin_profile)
+    await query.message.edit_text("✅Спасибо отправлено администратору! Ему начислено +50 репутации.")
+
+
+async def thanks_cancel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer("Отмена")
+    parts = (query.data or "").split("_")
+    if len(parts) == 3 and update.effective_user and str(update.effective_user.id) == parts[2]:
+        await query.message.delete()
+
+
 async def session_rp_disable_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or update.effective_chat.type != ChatType.PRIVATE:
         return
@@ -2288,14 +2399,8 @@ async def thanks_command_handler(update: Update, context: ContextTypes.DEFAULT_T
     now = time.time()
     if cooldown_until > now:
         remaining = max(1, int(cooldown_until - now))
-        hours, remainder = divmod(remaining, 3600)
-        minutes = (remainder + 59) // 60
-        if hours:
-            waiting = f"{hours} ч. {minutes} мин."
-        else:
-            waiting = f"{minutes} мин."
         await update.message.reply_text(
-            f"⏳Поблагодарить администратора снова можно через {waiting}."
+            f"⏳Поблагодарить администратора снова можно через {_thanks_cooldown_text(remaining)}."
         )
         return
 
@@ -2312,27 +2417,9 @@ async def thanks_command_handler(update: Update, context: ContextTypes.DEFAULT_T
         await update.message.reply_text(f'Администратор с тегом "{tag_admin}" не найден.')
         return
 
-    reputation = int(admin_profile.get("admin_reputation", 0) or 0) + 50
-    admin_profile["admin_reputation"] = reputation
     user_profile["thanks_cooldown_until"] = now + 12 * 60 * 60
-    _save_profile_record(context, target_user_id)
-    _save_profile_record(context, user_id)
-
-    nick_user = str(
-        user_profile.get("user_nickname")
-        or user_profile.get("username")
-        or f"id{user_id}"
-    )
+    nick_user = await _complete_thanks(context, user_id, user_profile, target_user_id, admin_profile)
     await update.message.reply_text("✅Спасибо отправлено администратору!")
-    try:
-        await context.bot.send_message(
-            chat_id=int(target_user_id),
-            text=f"💛Пользователь {nick_user} отблагодарил вас за работу.\n⭐Вам начислено +50 репутации.",
-        )
-    except Forbidden:
-        logging.warning("thanks notification failed: admin %s blocked the bot", target_user_id)
-    except Exception:
-        logging.exception("thanks notification failed for admin %s", target_user_id)
 
 
 async def user_private_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
