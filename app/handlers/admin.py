@@ -895,6 +895,7 @@ async def log_command_router(update: Update, context: ContextTypes.DEFAULT_TYPE)
         "/delrules": del_rule_handler,
         "/makeadmin": makeadmin_command_handler,
         "/setprefix": setprefix_command_handler,
+        "/setrep": setrep_command_handler,
         "/anpiar": anpiar_command_handler,
         "/fullstats": fullstats_command_handler,
         "/sp": sendpiar_command_handler,
@@ -3364,6 +3365,68 @@ async def setprefix_command_handler(update: Update, context: ContextTypes.DEFAUL
         reply_markup=_build_setprefix_keyboard(panel_id, pending_panels[panel_id]["selected_prefix_keys"]),
     )
 
+
+async def setrep_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or not _is_special_admin_chat(update.effective_chat.id):
+        return
+
+    issuer_profile = _ensure_profile(
+        context,
+        str(update.effective_user.id),
+        update.effective_user.username or f"id{update.effective_user.id}",
+    )
+    if _effective_admin_level(issuer_profile) != 5:
+        await update.message.reply_text("Команда доступна только администраторам 5 категории.")
+        return
+
+    raw_text = update.message.text or ""
+    cmd_entity = update.message.entities[0] if update.message.entities else None
+    cmd_len = cmd_entity.length if cmd_entity and cmd_entity.type == "bot_command" else len("/setrep")
+    args_text = raw_text[cmd_len:].strip()
+    if not args_text:
+        await update.message.reply_text('Используйте: /setrep "id_profile" "count"')
+        return
+
+    try:
+        parts = shlex.split(args_text)
+    except ValueError:
+        await update.message.reply_text('Некорректный формат. Используйте: /setrep "id_profile" "count"')
+        return
+
+    if len(parts) < 2 or not parts[1].isdigit():
+        await update.message.reply_text('Используйте: /setrep "id_profile" "count", где count — целое число не меньше 0.')
+        return
+
+    target_identifier = parts[0]
+    reputation = int(parts[1])
+    target_user_id, profile = _resolve_warn_target(context, target_identifier)
+    if not profile:
+        await update.message.reply_text(f'Пользователь с id_profile "{target_identifier}" не найден.')
+        return
+    if not _has_admin_rights_level_1_5(profile):
+        await update.message.reply_text(
+            f'Нельзя изменить репутацию: id_profile #{profile.get("id_profile")} не является администратором.'
+        )
+        return
+
+    profile["admin_reputation"] = reputation
+    _save_profile_record(context, str(target_user_id))
+    target_id_profile = int(profile.get("id_profile", 0) or 0)
+    await update.message.reply_text(
+        f"✅Репутация администратора id_profile #{target_id_profile} изменена на {reputation}."
+    )
+
+    try:
+        await context.bot.send_message(
+            chat_id=int(target_user_id),
+            text=f"⭐Ваша репутация администратора изменена на {reputation}.",
+        )
+    except Forbidden:
+        await update.message.reply_text(
+            "Не удалось уведомить администратора в личных сообщениях: пользователь заблокировал бота."
+        )
+    except Exception:
+        logging.exception("setrep_command_handler failed to notify admin %s", target_user_id)
 
 
 async def setprefix_select_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
