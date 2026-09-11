@@ -1,5 +1,6 @@
 """Admin-facing command/callback/message handlers (staff group + log chat)."""
 import asyncio
+import difflib
 import json
 import logging
 import re
@@ -896,6 +897,7 @@ async def log_command_router(update: Update, context: ContextTypes.DEFAULT_TYPE)
         "/makeadmin": makeadmin_command_handler,
         "/setprefix": setprefix_command_handler,
         "/setrep": setrep_command_handler,
+        "/searchuser": searchuser_command_handler,
         "/anpiar": anpiar_command_handler,
         "/fullstats": fullstats_command_handler,
         "/sp": sendpiar_command_handler,
@@ -1821,6 +1823,81 @@ async def admins_command_handler(update: Update, context: ContextTypes.DEFAULT_T
             f"Ник: {nick} | {username_text} | id_profile: {profile_id} | "
             f"id_telegram: {telegram_id} | \"{prefix}\" | ⭐ Репутация: {reputation}"
         )
+    await update.message.reply_text("\n".join(lines))
+
+
+async def searchuser_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or not update.effective_user or not update.effective_chat:
+        return
+    if (
+        update.effective_chat.type != ChatType.PRIVATE
+        and update.effective_chat.id not in _special_admin_chat_ids()
+    ):
+        return
+
+    issuer_profile = _ensure_profile(
+        context,
+        str(update.effective_user.id),
+        update.effective_user.username or f"id{update.effective_user.id}",
+    )
+    if _effective_admin_level(issuer_profile) < 3:
+        await update.message.reply_text("Команда доступна только администраторам 3 категории и выше.")
+        return
+
+    raw_text = update.message.text or ""
+    cmd_entity = update.message.entities[0] if update.message.entities else None
+    cmd_len = cmd_entity.length if cmd_entity and cmd_entity.type == "bot_command" else len("/searchuser")
+    query = raw_text[cmd_len:].strip()
+    if not query:
+        await update.message.reply_text("Используйте: /searchuser текст")
+        return
+
+    query_normalized = " ".join(query.casefold().split())
+    search_fields = (
+        ("профиль: username", "username"),
+        ("профиль: никнейм", "user_nickname"),
+        ("профиль: причина", "reason"),
+        ("админ-профиль: тег", "tag_admin"),
+        ("админ-профиль: префикс", "prefix"),
+        ("админ-профиль: биография", "biography_admin"),
+        ("админ-профиль: тип диалогов", "tip_admin"),
+        ("админ-профиль: пол", "admin_gender"),
+    )
+    matches = []
+    for telegram_id, profile in (context.application.bot_data.get("profiles", {}) or {}).items():
+        profile = profile or {}
+        profile_id = profile.get("id_profile", "не указан")
+        for location, field_name in search_fields:
+            value = str(profile.get(field_name) or "").strip()
+            if not value:
+                continue
+            value_normalized = " ".join(value.casefold().split())
+            score = (
+                1.0
+                if query_normalized in value_normalized
+                else difflib.SequenceMatcher(None, query_normalized, value_normalized).ratio()
+            )
+            if score >= 0.42:
+                matches.append((score, str(telegram_id), str(profile_id), location, value))
+
+    matches.sort(key=lambda item: (-item[0], item[2], item[1]))
+    if not matches:
+        await update.message.reply_text(f'По запросу "{query}" совпадений не найдено.')
+        return
+
+    lines = [f'🔎 Результаты поиска по запросу "{query}":', ""]
+    for score, telegram_id, profile_id, location, value in matches[:15]:
+        lines.extend(
+            [
+                f"🆔 id_profile: {profile_id} | id_telegram: {telegram_id}",
+                f"📍 Где найдено: {location}",
+                f"📝 Значение: {value[:300]}",
+                f"🎯 Совпадение: {round(score * 100)}%",
+                "",
+            ]
+        )
+    if len(matches) > 15:
+        lines.append(f"Показаны первые 15 совпадений из {len(matches)}.")
     await update.message.reply_text("\n".join(lines))
 
 
