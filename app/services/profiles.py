@@ -152,6 +152,11 @@ def _ensure_profile(context: ContextTypes.DEFAULT_TYPE, user_id: str, username_h
             "id_profile": _allocate_next_profile_id(context),
             "username": username_hint or f"id{user_id}",
             "message_user": 0,
+            "admin_reputation": 0,
+            "admin_reputation_messages": 0,
+            "admin_reputation_rp_commands": 0,
+            "admin_reputation_message_awards": 0,
+            "admin_reputation_rp_awards": 0,
             "last_admin_tag": "не указан",
             "warn": 0,
             "reason": "нет причин",
@@ -184,6 +189,40 @@ def _ensure_profile(context: ContextTypes.DEFAULT_TYPE, user_id: str, username_h
         _save_profile_record(context, str(user_id))
 
     return profile
+
+
+def _record_admin_reputation_activity(
+    context: ContextTypes.DEFAULT_TYPE,
+    admin_user_id: str | int,
+    *,
+    messages: int = 0,
+    rp_commands: int = 0,
+) -> None:
+    """Record successful admin work and award reputation at fixed milestones."""
+    admin_key = str(admin_user_id)
+    profile = (context.application.bot_data.get("profiles", {}) or {}).get(admin_key)
+    if not profile or _effective_admin_level(profile) < 1:
+        return
+
+    def _counter(name: str) -> int:
+        try:
+            return max(0, int(profile.get(name, 0) or 0))
+        except (TypeError, ValueError):
+            return 0
+
+    message_count = _counter("admin_reputation_messages") + max(0, int(messages or 0))
+    rp_count = _counter("admin_reputation_rp_commands") + max(0, int(rp_commands or 0))
+    message_awards = _counter("admin_reputation_message_awards")
+    rp_awards = _counter("admin_reputation_rp_awards")
+    new_message_awards = max(0, message_count // 20 - message_awards)
+    new_rp_awards = max(0, rp_count // 5 - rp_awards)
+
+    profile["admin_reputation_messages"] = message_count
+    profile["admin_reputation_rp_commands"] = rp_count
+    profile["admin_reputation_message_awards"] = message_awards + new_message_awards
+    profile["admin_reputation_rp_awards"] = rp_awards + new_rp_awards
+    profile["admin_reputation"] = _counter("admin_reputation") + new_message_awards + new_rp_awards
+    _save_profile_record(context, admin_key)
 
 
 def _find_admin_profile_by_tag_admin(context: ContextTypes.DEFAULT_TYPE, tag: str):
@@ -446,6 +485,7 @@ def _build_admin_stats_text(target_user_id: str, profile: dict) -> str:
     admin_gender = html.escape(str(profile.get("admin_gender") or "не указан"))
     admin_bio = html.escape(str(profile.get("biography_admin") or "не заполнена"))
     profile_username = html.escape(str(profile.get("username") or f"id{target_user_id}"))
+    reputation = int(profile.get("admin_reputation", 0) or 0)
     last_activity = float(profile.get("last_work_chat_message_at", 0) or 0)
     if last_activity:
         online_marker = "🟢Онлайн" if time.time() - last_activity <= 5 * 60 else "🔴Не в сети"
@@ -460,6 +500,7 @@ def _build_admin_stats_text(target_user_id: str, profile: dict) -> str:
         f"👤 <b>Username:</b> {profile_username}\n"
         f"🎀 <b>Префикс:</b> {prefix_text}\n"
         f"🎖 <b>Уровень:</b> {admin_level} ({rank_title})\n"
+        f"⭐ <b>Репутация:</b> {reputation}\n"
         f"🏷 <b>Тег:</b> {admin_tag}\n"
         f"💕Тип диалогов: {tip_admin}\n"
         f"👨‍👩‍👦 Пол: {admin_gender}\n"
