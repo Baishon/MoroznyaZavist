@@ -1524,6 +1524,7 @@ async def send_admin_profile(update: Update, context: ContextTypes.DEFAULT_TYPE)
     tip_admin = html.escape(str(profile.get("tip_admin") or "не указано"))
     admin_gender = html.escape(str(profile.get("admin_gender") or "не указан"))
     admin_bio = html.escape(str(profile.get("biography_admin") or "не заполнена"))
+    reputation = int(profile.get("admin_reputation", 0) or 0)
     profile_username = html.escape(str(profile.get("username") or ""))
     last_activity = float(
         (context.application.bot_data.get("admin_work_chat_activity", {}) or {}).get(user_id, 0) or 0
@@ -1541,6 +1542,7 @@ async def send_admin_profile(update: Update, context: ContextTypes.DEFAULT_TYPE)
         f"👤 <b>Username:</b> {profile_username}\n"
         f"🎀 <b>Префикс:</b> {prefix_text}\n"
         f"🎖 <b>Уровень:</b> {admin_level} ({rank_title})\n"
+        f"⭐ <b>Репутация:</b> {reputation}\n"
         f"🏷 <b>Тег:</b> {admin_tag}\n"
         f"💕Тип диалогов: {tip_admin}\n"
         f"👨‍👩‍👦 Пол: {admin_gender}\n"
