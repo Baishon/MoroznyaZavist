@@ -7,6 +7,9 @@ import android.view.Gravity
 import android.view.View
 import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
+import android.view.Window
+import android.view.WindowInsets
+import android.view.WindowInsetsController
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
@@ -15,45 +18,59 @@ import java.net.URLEncoder
 import java.util.concurrent.Executors
 
 class MainActivity : AppCompatActivity() {
-    private val apiBaseUrl = "https://YOUR-SERVER.example.com"
+    private val apiBaseUrl = "https://explained-sandwich-homeland-chemicals.trycloudflare.com"
     private val executor = Executors.newSingleThreadExecutor()
-    private lateinit var root: LinearLayout
+    private lateinit var root: FrameLayout
     private lateinit var content: LinearLayout
     private lateinit var status: TextView
     private val prefs by lazy { getSharedPreferences("admin_session", Context.MODE_PRIVATE) }
 
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
+        window.setStatusBarColor(Color.TRANSPARENT)
+        window.setNavigationBarColor(Color.TRANSPARENT)
+        if (android.os.Build.VERSION.SDK_INT >= 30) {
+            window.insetsController?.let {
+                it.hide(WindowInsets.Type.statusBars() or WindowInsets.Type.navigationBars())
+                it.systemBarsBehavior = WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            }
+        }
         if (prefs.getString("token", null) == null) showOwnerLogin() else showUsers()
     }
 
     private fun baseLayout(title: String): LinearLayout {
-        root = LinearLayout(this).apply {
+        root = FrameLayout(this).apply {
+            setBackgroundColor(Color.rgb(239, 243, 250))
+        }
+        val page = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(24, 20, 24, 16)
-            setBackgroundColor(Color.rgb(245, 247, 250))
         }
         val bar = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
         val heading = TextView(this).apply {
-            text = title
+            this.text = title
             textSize = 24f
-            setTextColor(Color.rgb(20, 30, 45))
+            setTextColor(Color.rgb(24, 35, 55))
         }
         bar.addView(heading, LinearLayout.LayoutParams(0, -2, 1f))
-        root.addView(bar)
+        page.addView(bar)
         content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(0, 24, 0, 0)
         }
-        root.addView(content, LinearLayout.LayoutParams(-1, 0, 1f))
+        page.addView(content, LinearLayout.LayoutParams(-1, 0, 1f))
         status = TextView(this).apply { setTextColor(Color.DKGRAY) }
-        root.addView(status)
+        page.addView(status)
+        root.addView(page, FrameLayout.LayoutParams(-1, -1))
         setContentView(root)
-        return root
+        root.alpha = 0f
+        root.animate().alpha(1f).setDuration(220).start()
+        return page
     }
 
     private fun showOwnerLogin() {
         baseLayout("Вход владельца")
+        content.gravity = Gravity.CENTER
         val hint = TextView(this).apply {
             this.text = "Введите ID владельца, чтобы продолжить"
             textSize = 16f
@@ -75,13 +92,14 @@ class MainActivity : AppCompatActivity() {
             next.setBackgroundColor(if (valid) Color.rgb(25, 118, 210) else Color.GRAY)
         })
         next.setOnClickListener {
-            if (input.text.toString() == "7545068007") showPasswordLogin()
+            if (input.text.toString() == "7545068007") transitionTo { showPasswordLogin() }
             else status.text = "Неверный ID владельца"
         }
     }
 
     private fun showPasswordLogin() {
         baseLayout("Пароль администратора")
+        content.gravity = Gravity.CENTER
         val input = EditText(this).apply {
             hint = "Пароль"
             inputType = 0x81
@@ -114,9 +132,15 @@ class MainActivity : AppCompatActivity() {
 
     private fun showUsers() {
         baseLayout("Пользователи бота")
-        val logout = button("Выйти")
-        (root.getChildAt(0) as LinearLayout).addView(logout)
-        logout.setOnClickListener { prefs.edit().clear().apply(); showOwnerLogin() }
+        val page = root.getChildAt(0) as LinearLayout
+        val bar = page.getChildAt(0) as LinearLayout
+        val menu = button("☰").apply {
+            textSize = 22f
+            setTextColor(Color.rgb(70, 90, 130))
+            setBackgroundColor(Color.TRANSPARENT)
+        }
+        bar.addView(menu, 56, 56)
+        menu.setOnClickListener { showProfileDrawer() }
         status.text = "Загрузка..."
         request("GET", "/api/users?limit=500", prefs.getString("token", null), null) { code, body ->
             runOnUiThread {
@@ -149,8 +173,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun showMessages(userId: String, name: String) {
         baseLayout(name)
+        val page = root.getChildAt(0) as LinearLayout
         val back = button("← Назад")
-        (root.getChildAt(0) as LinearLayout).addView(back)
+        (page.getChildAt(0) as LinearLayout).addView(back)
         back.setOnClickListener { showUsers() }
         status.text = "Загрузка истории..."
         request("GET", "/api/users/$userId/messages?limit=500", prefs.getString("token", null), null) { code, body ->
@@ -169,8 +194,50 @@ class MainActivity : AppCompatActivity() {
                         setTextColor(if (direction == "Бот") Color.rgb(25, 90, 160) else Color.DKGRAY)
                     })
                 }
+
             }
         }
+    }
+
+    private fun transitionTo(next: () -> Unit) {
+        root.animate().alpha(0f).setDuration(160).withEndAction { next() }.start()
+    }
+
+    private fun showProfileDrawer() {
+        val scrim = View(this).apply {
+            setBackgroundColor(Color.argb(90, 0, 0, 0))
+            setOnClickListener { hideProfileDrawer(this) }
+        }
+        val drawer = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(28, 42, 22, 24)
+            setBackgroundColor(Color.rgb(27, 38, 55))
+            elevation = 18f
+        }
+        drawer.addView(TextView(this).apply {
+            this.text = "Профиль администратора"
+            textSize = 21f
+            setTextColor(Color.WHITE)
+        })
+        drawer.addView(TextView(this).apply {
+            this.text = "\nID владельца: 7545068007\nСтатус: авторизован"
+            textSize = 16f
+            setTextColor(Color.rgb(205, 218, 238))
+        })
+        root.addView(scrim, FrameLayout.LayoutParams(-1, -1))
+        val params = FrameLayout.LayoutParams((resources.displayMetrics.widthPixels * 0.82).toInt(), -1)
+        params.gravity = Gravity.START
+        root.addView(drawer, params)
+        drawer.translationX = -params.width.toFloat()
+        drawer.animate().translationX(0f).setDuration(260).start()
+    }
+
+    private fun hideProfileDrawer(scrim: View) {
+        val drawer = root.getChildAt(root.childCount - 1)
+        drawer.animate().translationX(-drawer.width.toFloat()).setDuration(200).withEndAction {
+            root.removeView(drawer)
+            root.removeView(scrim)
+        }.start()
     }
 
     private fun request(method: String, path: String, token: String?, body: JSONObject?, done: (Int, String) -> Unit) {
