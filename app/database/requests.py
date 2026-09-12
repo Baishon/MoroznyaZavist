@@ -7,6 +7,8 @@ either Postgres (when ``DATABASE_URL`` is set) or the local
 import json
 import logging
 import os
+from datetime import datetime, timezone
+from uuid import uuid4
 
 from telegram.ext import ContextTypes
 
@@ -106,6 +108,215 @@ def _save_ban_record(context: ContextTypes.DEFAULT_TYPE, user_id: str | int) -> 
         _save_runtime_snapshot(context)
     except Exception:
         logging.exception("Failed to persist ban record %s", user_id)
+
+
+def _save_incoming_message(
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    update_id: int | None,
+    message,
+    actor=None,
+    callback_data: str | None = None,
+) -> None:
+    """Persist one incoming Telegram message or callback for the future admin panel."""
+    conn = _state_db_connection(context)
+    if conn is None:
+        return
+
+    user = actor or getattr(message, "from_user", None)
+    chat = getattr(message, "chat", None)
+    text = getattr(message, "text", None)
+    caption = getattr(message, "caption", None)
+
+    if callback_data is not None:
+        message_type = "callback"
+    elif getattr(message, "text", None) is not None:
+        message_type = "text"
+    elif getattr(message, "photo", None):
+        message_type = "photo"
+    elif getattr(message, "video", None):
+        message_type = "video"
+    elif getattr(message, "document", None):
+        message_type = "document"
+    elif getattr(message, "voice", None):
+        message_type = "voice"
+    elif getattr(message, "audio", None):
+        message_type = "audio"
+    elif getattr(message, "sticker", None):
+        message_type = "sticker"
+    else:
+        message_type = "other"
+
+    try:
+        conn.execute(
+            "INSERT INTO message_history ("
+            "id, update_id, telegram_message_id, user_id, username, first_name, "
+            "last_name, chat_id, chat_type, direction, message_type, text, caption, "
+            "callback_data, created_at"
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                str(uuid4()),
+                str(update_id) if update_id is not None else None,
+                str(getattr(message, "message_id", "")) or None,
+                str(getattr(user, "id", "")) or None,
+                getattr(user, "username", None),
+                getattr(user, "first_name", None),
+                getattr(user, "last_name", None),
+                str(getattr(chat, "id", "")) or None,
+                getattr(chat, "type", None),
+                "incoming",
+                message_type,
+                text,
+                caption,
+                callback_data,
+                getattr(message, "date", None).isoformat()
+                if getattr(message, "date", None) is not None
+                else None,
+            ),
+        )
+        conn.commit()
+    except Exception:
+        logging.exception("Failed to persist incoming Telegram update")
+
+
+def _save_outgoing_message(connection, message, recipient_chat_id=None) -> None:
+    """Persist a successfully sent bot message without affecting delivery."""
+    if connection is None or message is None:
+        return
+
+    chat = getattr(message, "chat", None)
+    text = getattr(message, "text", None)
+    caption = getattr(message, "caption", None)
+    if getattr(message, "photo", None):
+        message_type = "photo"
+    elif getattr(message, "video", None):
+        message_type = "video"
+    elif getattr(message, "document", None):
+        message_type = "document"
+    elif getattr(message, "voice", None):
+        message_type = "voice"
+    elif getattr(message, "audio", None):
+        message_type = "audio"
+    elif getattr(message, "animation", None):
+        message_type = "animation"
+    elif getattr(message, "sticker", None):
+        message_type = "sticker"
+    elif getattr(message, "location", None):
+        message_type = "location"
+    elif text is not None:
+        message_type = "text"
+    else:
+        message_type = "other"
+
+    try:
+        connection.execute(
+            "INSERT INTO message_history ("
+            "id, update_id, telegram_message_id, user_id, username, first_name, "
+            "last_name, chat_id, chat_type, direction, message_type, text, caption, "
+            "callback_data, created_at"
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                str(uuid4()),
+                None,
+                str(getattr(message, "message_id", "")) or None,
+                str(recipient_chat_id if recipient_chat_id is not None else getattr(chat, "id", "")) or None,
+                None,
+                None,
+                None,
+                str(getattr(chat, "id", "")) or None,
+                getattr(chat, "type", None),
+                "outgoing",
+                message_type,
+                text,
+                caption,
+                None,
+                getattr(message, "date", None).isoformat()
+                if getattr(message, "date", None) is not None
+                else None,
+            ),
+        )
+        connection.commit()
+    except Exception:
+        logging.exception("Failed to persist outgoing Telegram message")
+
+
+def _save_outgoing_reference(
+    connection,
+    message_id,
+    recipient_chat_id,
+    message_type: str,
+) -> None:
+    """Persist a sent message when Telegram returns only its message ID."""
+    if connection is None or message_id is None:
+        return
+    try:
+        connection.execute(
+            "INSERT INTO message_history ("
+            "id, update_id, telegram_message_id, user_id, username, first_name, "
+            "last_name, chat_id, chat_type, direction, message_type, text, caption, "
+            "callback_data, created_at"
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                str(uuid4()),
+                None,
+                str(message_id),
+                str(recipient_chat_id) if recipient_chat_id is not None else None,
+                None,
+                None,
+                None,
+                str(recipient_chat_id) if recipient_chat_id is not None else None,
+                None,
+                "outgoing",
+                message_type,
+                None,
+                None,
+                None,
+                datetime.now(timezone.utc).isoformat(),
+            ),
+        )
+        connection.commit()
+    except Exception:
+        logging.exception("Failed to persist outgoing Telegram message reference")
+
+
+def _get_message_history(
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    user_id: str | int | None = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> list[dict]:
+    """Read message history in a stable shape for the future backend API."""
+    conn = _state_db_connection(context)
+    if conn is None:
+        return []
+
+    safe_limit = max(1, min(int(limit), 500))
+    safe_offset = max(0, int(offset))
+    if user_id is None:
+        cursor = conn.execute(
+            "SELECT id, update_id, telegram_message_id, user_id, username, "
+            "first_name, last_name, chat_id, chat_type, direction, message_type, "
+            "text, caption, callback_data, created_at "
+            "FROM message_history ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            (safe_limit, safe_offset),
+        )
+    else:
+        cursor = conn.execute(
+            "SELECT id, update_id, telegram_message_id, user_id, username, "
+            "first_name, last_name, chat_id, chat_type, direction, message_type, "
+            "text, caption, callback_data, created_at "
+            "FROM message_history WHERE user_id = ? "
+            "ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            (str(user_id), safe_limit, safe_offset),
+        )
+
+    columns = (
+        "id", "update_id", "telegram_message_id", "user_id", "username",
+        "first_name", "last_name", "chat_id", "chat_type", "direction",
+        "message_type", "text", "caption", "callback_data", "created_at",
+    )
+    return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
 
 def _init_persistent_storage(app) -> None:
