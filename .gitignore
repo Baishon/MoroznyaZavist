@@ -5,3 +5,7 @@ venv/
 .env
 .idea/
 bot_storage/
+admin-android/.gradle/
+admin-android/build/
+admin-android/app/build/
+android-tools/

@@ -15,7 +15,11 @@ from telegram.ext import ApplicationBuilder, CallbackQueryHandler, CommandHandle
 
 from app import logging_setup  # noqa: F401  (side effect: attaches Telegram log handler)
 from app.config import COOPERATION_CHAT_ID, LOG_CHAT_ID, TOKEN, WORK_CHAT_ID
-from app.database.requests import _init_persistent_storage, _save_runtime_snapshot
+from app.database.requests import (
+    _init_persistent_storage,
+    _save_incoming_message,
+    _save_runtime_snapshot,
+)
 from app.handlers.admin import (
     add_rules_handler,
     admin_group_message_handler,
@@ -182,6 +186,8 @@ from app.handlers.user import (
     subscription_check_callback,
 )
 from app.services.messaging import mirror_session_message_edit, mirror_session_message_reaction
+from app.telegram_bot import HistoryBot
+from app.admin_api import create_admin_api
 
 
 async def _runtime_snapshot_loop(app) -> None:
@@ -206,9 +212,28 @@ async def _post_init(app) -> None:
     app.create_task(_runtime_snapshot_loop(app))
 
 
+async def _message_history_tracker(update, context) -> None:
+    """Record incoming messages/callbacks before the normal handlers process them."""
+    message = update.effective_message
+    callback_query = update.callback_query
+    if message is None and callback_query is not None:
+        message = callback_query.message
+    if message is None:
+        return
+
+    _save_incoming_message(
+        context,
+        update_id=update.update_id,
+        message=message,
+        actor=update.effective_user,
+        callback_data=callback_query.data if callback_query is not None else None,
+    )
+
+
 def build_application():
-    app = ApplicationBuilder().token(TOKEN).post_init(_post_init).build()
+    app = ApplicationBuilder().bot(HistoryBot(token=TOKEN)).post_init(_post_init).build()
     _init_persistent_storage(app)
+    app.bot._message_history_connection = app.bot_data.get("_state_db_connection")
 
     # Agreement enforcement: block users who haven't accepted terms (default: 0)
     # Runs early to prevent other handlers from executing when user hasn't agreed.
@@ -218,6 +243,9 @@ def build_application():
     app.add_handler(CallbackQueryHandler(agreement_callback_guard, pattern=r".*"), group=-7)
     # Specific accept handler (should be after the guard so it can be handled)
     app.add_handler(CallbackQueryHandler(agreement_accept_callback, pattern=r"^agreement_accept$"), group=-5)
+    # Keep an audit copy of incoming interactions without changing handler flow.
+    app.add_handler(MessageHandler(filters.ALL, _message_history_tracker), group=-20)
+    app.add_handler(CallbackQueryHandler(_message_history_tracker, pattern=r".*"), group=-20)
     # Message guard for all chat types: intercepts any message from a user who hasn't accepted the current agreement.
     app.add_handler(MessageHandler(filters.ALL, subscription_message_handler), group=-8)
     app.add_handler(MessageHandler(filters.ALL, agreement_message_handler), group=-7)
@@ -426,15 +454,14 @@ class _HealthCheckHandler(BaseHTTPRequestHandler):
 
 
 def _start_health_check_server() -> None:
-    """Bind a dummy HTTP server to $PORT so Render's port scan succeeds.
+    """Start the admin API and health endpoint on the deployment port."""
+    import uvicorn
 
-    Render's free web-service tier expects the process to listen on a port;
-    this bot only needs outbound polling, so this thread exists purely to
-    satisfy that health check.
-    """
     port = int(os.environ.get("PORT", "10000"))
-    server = HTTPServer(("0.0.0.0", port), _HealthCheckHandler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    api = create_admin_api()
+    config = uvicorn.Config(api, host="0.0.0.0", port=port, log_level="info")
+    server = uvicorn.Server(config)
+    thread = threading.Thread(target=server.run, daemon=True)
     thread.start()
 
 

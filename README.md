@@ -47,9 +47,25 @@ Add these environment variables in Render:
 - `TELEGRAM_TOKEN` — the bot token, stored as a secret.
 - `DATABASE_URL` — the **Internal Database URL** from a Render PostgreSQL
   database in the same region.
+- `ADMIN_API_TOKEN` — a long random secret used by the Android admin panel in
+  the `X-Admin-Token` header. The API rejects requests without this token.
+- `ADMIN_OWNER_ID` — owner ID accepted by the admin login (defaults to
+  `7545068007`).
+- `ADMIN_PASSWORD` — admin password accepted by the admin login (defaults to
+  `Martinez231107`). Set both credential variables as deployment secrets in
+  production.
 
 Set the health check path to `/`. The bot exposes a small HTTP health endpoint
-on Render's `$PORT` while receiving Telegram updates through polling.
+on Render's `$PORT` while receiving Telegram updates through polling. The same
+port also serves the protected admin API:
+
+- `GET /api/users`
+- `GET /api/users/{telegram_id}/messages`
+- `GET /api/messages`
+- `POST /api/auth/login`
+
+Send `X-Admin-Token: <ADMIN_API_TOKEN>` with API requests. The root `/`
+health endpoint remains public.
 
 Do not upload `config/.env`, `.venv/`, or `bot_storage/` to Render. The
 filesystem of a Web Service is not a database; PostgreSQL is used automatically
