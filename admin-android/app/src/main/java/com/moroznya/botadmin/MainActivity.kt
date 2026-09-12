@@ -29,13 +29,17 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(state)
         window.setStatusBarColor(Color.TRANSPARENT)
         window.setNavigationBarColor(Color.TRANSPARENT)
-        if (android.os.Build.VERSION.SDK_INT >= 30) {
-            window.insetsController?.let {
+        if (prefs.getString("token", null) == null) showOwnerLogin() else showUsers()
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus && android.os.Build.VERSION.SDK_INT >= 30) {
+            window.decorView.windowInsetsController?.let {
                 it.hide(WindowInsets.Type.statusBars() or WindowInsets.Type.navigationBars())
                 it.systemBarsBehavior = WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
             }
         }
-        if (prefs.getString("token", null) == null) showOwnerLogin() else showUsers()
     }
 
     private fun baseLayout(title: String): LinearLayout {
