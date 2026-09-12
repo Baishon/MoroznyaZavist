@@ -68,7 +68,19 @@ def create_admin_api() -> FastAPI:
                 count = connection.execute(
                     "SELECT COUNT(*) FROM message_history WHERE user_id = ?", (str(user_id),)
                 ).fetchone()[0]
-                rows.append({"telegram_id": str(user_id), "message_count": count, "profile": profile})
+                latest = connection.execute(
+                    "SELECT MAX(created_at) FROM message_history WHERE user_id = ?",
+                    (str(user_id),),
+                ).fetchone()[0]
+                rows.append(
+                    {
+                        "telegram_id": str(user_id),
+                        "message_count": count,
+                        "last_message_at": latest,
+                        "profile": profile,
+                    }
+                )
+            rows.sort(key=lambda item: item["last_message_at"] or "", reverse=True)
             return {"items": rows[offset : offset + limit], "total": len(rows)}
         finally:
             connection.close()

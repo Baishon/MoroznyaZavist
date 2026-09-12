@@ -2,8 +2,12 @@
     <style name="AppTheme" parent="Theme.Material3.DayNight.NoActionBar">
         <item name="android:fontFamily">sans</item>
         <item name="android:colorAccent">#1976D2</item>
-        <item name="android:navigationBarColor">#F5F7FA</item>
-        <item name="android:statusBarColor">#F5F7FA</item>
-        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowActionModeOverlay">true</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:fontFamily">sans</item>
+        <item name="android:colorAccent">#6D8DFF</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:navigationBarColor">#111827</item>
+        <item name="android:statusBarColor">#111827</item>
     </style>
 </resources>
