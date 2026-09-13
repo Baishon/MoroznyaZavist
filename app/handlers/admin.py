@@ -1980,7 +1980,7 @@ async def addrest_command_handler(update: Update, context: ContextTypes.DEFAULT_
     entity = update.message.entities[0] if update.message.entities else None
     args = raw_text[entity.length if entity and entity.type == "bot_command" else len("/addrest"):].strip()
     parts = args.split()
-    if len(parts) != 2 or not parts[1].isdigit() or parts[1] == "0":
+    if len(parts) != 2:
         await update.message.reply_text('Используйте: /addrest "id_profile" "time" (s/m/h/d)')
         return
     match = re.fullmatch(r"([1-9]\d*)(s|m|h|d)", parts[1].lower())
