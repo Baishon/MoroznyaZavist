@@ -78,6 +78,8 @@ from app.services.profiles import (
     _resolve_ban_target,
     _resolve_warn_target,
     _record_admin_reputation_activity,
+    _admin_rest_until,
+    _is_admin_on_rest,
     _set_last_admin_tag_for_user,
     _set_user_blocked_bot_state,
     is_user_banned,
@@ -857,6 +859,8 @@ async def admin_mute_guard_handler(update: Update, context: ContextTypes.DEFAULT
         return
 
     profile = (context.application.bot_data.get("profiles", {}) or {}).get(str(update.effective_user.id), {})
+    if _is_admin_on_rest(profile):
+        return
     if not _is_admin_muted(profile):
         if _get_admin_mute_until(profile) and not _is_admin_muted(profile):
             _clear_admin_mute(profile)
@@ -898,6 +902,8 @@ async def log_command_router(update: Update, context: ContextTypes.DEFAULT_TYPE)
         "/setprefix": setprefix_command_handler,
         "/setrep": setrep_command_handler,
         "/searchuser": searchuser_command_handler,
+        "/addrest": addrest_command_handler,
+        "/delrest": delrest_command_handler,
         "/anpiar": anpiar_command_handler,
         "/fullstats": fullstats_command_handler,
         "/sp": sendpiar_command_handler,
@@ -1434,6 +1440,13 @@ async def sendpiar_command_handler(update: Update, context: ContextTypes.DEFAULT
                     logging.info("sp retry recipient %s cannot receive bot messages", recipient_id)
                     recipient_ok = False
                     break
+                except BadRequest as exc:
+                    if "chat not found" in str(exc).lower():
+                        logging.info("sp retry recipient %s is unavailable", recipient_id)
+                    else:
+                        logging.exception("sp retry failed for recipient %s after rate limit", recipient_id)
+                    recipient_ok = False
+                    break
                 except Exception:
                     logging.exception("sp retry failed for recipient %s after rate limit", recipient_id)
                     recipient_ok = False
@@ -1443,7 +1456,12 @@ async def sendpiar_command_handler(update: Update, context: ContextTypes.DEFAULT
                 recipient_ok = False
                 break
             except BadRequest as exc:
+                error_text = str(exc).lower()
                 if str(exc) == "User_bot_to_bot_disabled":
+                    recipient_ok = False
+                    break
+                if "chat not found" in error_text:
+                    logging.info("sp recipient %s is unavailable", recipient_id)
                     recipient_ok = False
                     break
                 logging.exception("sp failed for recipient %s", recipient_id)
@@ -1899,6 +1917,165 @@ async def searchuser_command_handler(update: Update, context: ContextTypes.DEFAU
     if len(matches) > 15:
         lines.append(f"Показаны первые 15 совпадений из {len(matches)}.")
     await update.message.reply_text("\n".join(lines))
+
+
+async def _finish_admin_rest(
+    context: ContextTypes.DEFAULT_TYPE,
+    admin_user_id: str,
+    rest_until: float,
+    admin_message: str = "✅Вы вышли с реста по истечению времени. Вы снова можете работать.",
+) -> None:
+    profile = (context.application.bot_data.get("profiles", {}) or {}).get(str(admin_user_id))
+    if not profile or _admin_rest_until(profile) != rest_until:
+        return
+    profile.pop("rest_admin_until", None)
+    profile.pop("rest_admin_date", None)
+    _save_profile_record(context, str(admin_user_id))
+    try:
+        await context.bot.send_message(chat_id=int(admin_user_id), text=admin_message)
+    except Exception:
+        logging.exception("Failed to notify admin %s about rest completion", admin_user_id)
+
+    for user_id, active in (context.application.bot_data.get("active_chats", {}) or {}).items():
+        if str((active or {}).get("admin_id") or "") != str(admin_user_id):
+            continue
+        if not active.get("rest_paused"):
+            continue
+        active.pop("rest_paused", None)
+        try:
+            await context.bot.send_message(
+                chat_id=int(user_id),
+                text="✅Ваш администратор вышел с реста. Общение снова доступно.",
+            )
+            chat_id = active.get("chat_id")
+            topic_id = active.get("topic_id")
+            if chat_id is not None and topic_id is not None:
+                await context.bot.send_message(
+                    chat_id=int(chat_id),
+                    message_thread_id=int(topic_id),
+                    text="✅Администратор вышел с реста. Тема разморожена.",
+                )
+        except Exception:
+            logging.exception("Failed to resume rest session for user %s", user_id)
+
+
+async def _admin_rest_expiry_job(context: ContextTypes.DEFAULT_TYPE):
+    data = context.job.data or {}
+    await _finish_admin_rest(context, str(data.get("admin_user_id")), float(data.get("rest_until", 0)))
+
+
+async def addrest_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or not _is_special_admin_chat(update.effective_chat.id):
+        return
+    issuer = _ensure_profile(
+        context,
+        str(update.effective_user.id),
+        update.effective_user.username or f"id{update.effective_user.id}",
+    )
+    if _effective_admin_level(issuer) < 5:
+        await update.message.reply_text("Команда доступна только администраторам 5 категории.")
+        return
+
+    raw_text = update.message.text or ""
+    entity = update.message.entities[0] if update.message.entities else None
+    args = raw_text[entity.length if entity and entity.type == "bot_command" else len("/addrest"):].strip()
+    parts = args.split()
+    if len(parts) != 2 or not parts[1].isdigit() or parts[1] == "0":
+        await update.message.reply_text('Используйте: /addrest "id_profile" "time" (s/m/h/d)')
+        return
+    match = re.fullmatch(r"([1-9]\d*)(s|m|h|d)", parts[1].lower())
+    if not match:
+        await update.message.reply_text('Время укажите в формате: 30s, 2m, 4h или 1d.')
+        return
+
+    target_user_id, profile = _resolve_warn_target(context, parts[0])
+    if not profile or not _has_admin_rights_level_1_5(profile):
+        await update.message.reply_text("Указанный id_profile не является администратором.")
+        return
+    duration = int(match.group(1)) * {"s": 1, "m": 60, "h": 3600, "d": 86400}[match.group(2)]
+    rest_until = time.time() + duration
+    profile["rest_admin_until"] = rest_until
+    profile["rest_admin_date"] = datetime.fromtimestamp(rest_until, tz=timezone(timedelta(hours=3))).strftime("%d.%m.%Y %H:%M:%S")
+    _save_profile_record(context, str(target_user_id))
+
+    frozen = 0
+    for user_id, active in (context.application.bot_data.get("active_chats", {}) or {}).items():
+        if str((active or {}).get("admin_id") or "") != str(target_user_id) or not active.get("active"):
+            continue
+        active["rest_paused"] = True
+        frozen += 1
+        date_rest = profile["rest_admin_date"]
+        try:
+            await context.bot.send_message(
+                chat_id=int(user_id),
+                text=f"🛥Ваш администратор находится в ресте до {date_rest}. Он не сможет вам ответить до конца времени",
+            )
+            if active.get("chat_id") is not None and active.get("topic_id") is not None:
+                await context.bot.send_message(
+                    chat_id=int(active["chat_id"]),
+                    message_thread_id=int(active["topic_id"]),
+                    text=f"🛥Тема заморожена: администратор находится в ресте до {date_rest}.",
+                )
+        except Exception:
+            logging.exception("Failed to freeze rest session for user %s", user_id)
+
+    if context.job_queue:
+        context.job_queue.run_once(
+            _admin_rest_expiry_job,
+            duration,
+            data={"admin_user_id": str(target_user_id), "rest_until": rest_until},
+            name=f"admin_rest:{target_user_id}",
+        )
+    try:
+        await context.bot.send_message(
+            chat_id=int(target_user_id),
+            text=f"✈️Вас добавили в список отдыхающих администраторов до {profile['rest_admin_date']}.",
+        )
+    except Exception:
+        logging.exception("Failed to notify admin %s about rest start", target_user_id)
+    await update.message.reply_text(
+        f"✅Администратор id_profile #{profile.get('id_profile')} добавлен в рест до {profile['rest_admin_date']}. "
+        f"Заморожено ПЗ: {frozen}."
+    )
+
+
+async def delrest_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or not _is_special_admin_chat(update.effective_chat.id):
+        return
+    issuer = _ensure_profile(
+        context,
+        str(update.effective_user.id),
+        update.effective_user.username or f"id{update.effective_user.id}",
+    )
+    if _effective_admin_level(issuer) < 4:
+        await update.message.reply_text("Команда доступна только администраторам 4 категории и выше.")
+        return
+
+    raw_text = update.message.text or ""
+    entity = update.message.entities[0] if update.message.entities else None
+    identifier = raw_text[entity.length if entity and entity.type == "bot_command" else len("/delrest"):].strip()
+    if not identifier:
+        await update.message.reply_text('Используйте: /delrest "id_profile"')
+        return
+
+    target_user_id, profile = _resolve_warn_target(context, identifier)
+    rest_until = _admin_rest_until(profile)
+    if not profile or not _has_admin_rights_level_1_5(profile) or rest_until <= time.time():
+        await update.message.reply_text("Указанный администратор не находится в ресте.")
+        return
+
+    if context.job_queue:
+        for job in context.job_queue.get_jobs_by_name(f"admin_rest:{target_user_id}"):
+            job.schedule_removal()
+    await _finish_admin_rest(
+        context,
+        str(target_user_id),
+        rest_until,
+        "✅Вас убрали из списка отдыхающих администраторов. Вы снова можете работать.",
+    )
+    await update.message.reply_text(
+        f"✅Администратор id_profile #{profile.get('id_profile')} убран из списка отдыхающих."
+    )
 
 
 async def _send_moderation_user_list(update: Update, context: ContextTypes.DEFAULT_TYPE, *, list_type: str) -> None:
@@ -5110,6 +5287,8 @@ async def admin_group_message_handler(update: Update, context: ContextTypes.DEFA
         return
     if active_target and active_target.get("management_paused"):
         logging.info("Target user %s session is management-paused; skip forwarding", target_user)
+        return
+    if active_target and active_target.get("rest_paused"):
         return
 
     sender_id = str(update.effective_user.id)
