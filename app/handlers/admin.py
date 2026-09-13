@@ -904,6 +904,7 @@ async def log_command_router(update: Update, context: ContextTypes.DEFAULT_TYPE)
         "/searchuser": searchuser_command_handler,
         "/addrest": addrest_command_handler,
         "/delrest": delrest_command_handler,
+        "/restlist": restlist_command_handler,
         "/anpiar": anpiar_command_handler,
         "/fullstats": fullstats_command_handler,
         "/sp": sendpiar_command_handler,
@@ -2076,6 +2077,55 @@ async def delrest_command_handler(update: Update, context: ContextTypes.DEFAULT_
     await update.message.reply_text(
         f"✅Администратор id_profile #{profile.get('id_profile')} убран из списка отдыхающих."
     )
+
+
+async def restlist_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or not _is_special_admin_chat(update.effective_chat.id):
+        return
+
+    issuer = _ensure_profile(
+        context,
+        str(update.effective_user.id),
+        update.effective_user.username or f"id{update.effective_user.id}",
+    )
+    if _effective_admin_level(issuer) < 4:
+        await update.message.reply_text("Команда доступна только администраторам 4 категории и выше.")
+        return
+
+    now = time.time()
+    rows = []
+    profiles = context.application.bot_data.get("profiles", {}) or {}
+    for telegram_id, profile in profiles.items():
+        profile = profile or {}
+        rest_until = _admin_rest_until(profile)
+        if rest_until <= now or not _has_admin_rights_level_1_5(profile):
+            continue
+        rows.append(
+            (
+                rest_until,
+                profile.get("id_profile"),
+                profile.get("username") or f"id{telegram_id}",
+                telegram_id,
+            )
+        )
+
+    rows.sort(key=lambda row: row[0])
+    if not rows:
+        await update.message.reply_text("✈️Сейчас ни один администратор не находится в ресте.")
+        return
+
+    lines = ["✈️Администраторы в ресте:", ""]
+    for rest_until, profile_id, username, telegram_id in rows:
+        username_text = str(username)
+        if username_text and not username_text.startswith("@") and not username_text.startswith("id"):
+            username_text = f"@{username_text}"
+        lines.append(
+            f"👤 {username_text}\n"
+            f"🆔 id_profile: {profile_id}\n"
+            f"🆔 id_telegram: {telegram_id}\n"
+            f"⏳ До: {_format_kyiv_datetime(rest_until)}\n"
+        )
+    await update.message.reply_text("\n".join(lines).rstrip())
 
 
 async def _send_moderation_user_list(update: Update, context: ContextTypes.DEFAULT_TYPE, *, list_type: str) -> None:
