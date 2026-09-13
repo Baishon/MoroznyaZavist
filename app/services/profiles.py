@@ -225,6 +225,17 @@ def _record_admin_reputation_activity(
     _save_profile_record(context, admin_key)
 
 
+def _admin_rest_until(profile: dict | None) -> float:
+    try:
+        return float((profile or {}).get("rest_admin_until", 0) or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _is_admin_on_rest(profile: dict | None) -> bool:
+    return _admin_rest_until(profile) > time.time()
+
+
 def _find_admin_profile_by_tag_admin(context: ContextTypes.DEFAULT_TYPE, tag: str):
     normalized = str(tag or "").strip().lower()
     if not normalized:
@@ -486,6 +497,8 @@ def _build_admin_stats_text(target_user_id: str, profile: dict) -> str:
     admin_bio = html.escape(str(profile.get("biography_admin") or "не заполнена"))
     profile_username = html.escape(str(profile.get("username") or f"id{target_user_id}"))
     reputation = int(profile.get("admin_reputation", 0) or 0)
+    rest_date = str(profile.get("rest_admin_date") or "").strip()
+    rest_text = f'\n✈️Находится в ресте до {html.escape(rest_date)}' if _admin_rest_until(profile) > time.time() and rest_date else ""
     last_activity = float(profile.get("last_work_chat_message_at", 0) or 0)
     if last_activity:
         online_marker = "🟢Онлайн" if time.time() - last_activity <= 5 * 60 else "🔴Не в сети"
@@ -506,4 +519,5 @@ def _build_admin_stats_text(target_user_id: str, profile: dict) -> str:
         f"👨‍👩‍👦 Пол: {admin_gender}\n"
         f"👁‍🗨Был(-а) в сети: {online_text}\n"
         f"📖 <b>Биография:</b> {admin_bio}"
+        f"{rest_text}"
     )
