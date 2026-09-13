@@ -7,6 +7,7 @@ import re
 import shlex
 import time
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from telegram import (
     ChatPermissions,
@@ -106,12 +107,20 @@ from app.services.topics import (
 )
 
 MAX_MODERATION_DURATION_SECONDS = 365 * 24 * 60 * 60
+KYIV_TIMEZONE = ZoneInfo("Europe/Kyiv")
 
 
 def _format_kyiv_datetime(timestamp: float | None = None) -> str:
-    kyiv_tz = timezone(timedelta(hours=3))
-    when = datetime.fromtimestamp(float(timestamp if timestamp is not None else time.time()), tz=kyiv_tz)
+    when = datetime.fromtimestamp(float(timestamp if timestamp is not None else time.time()), tz=KYIV_TIMEZONE)
     return when.strftime("%d.%m.%Y %H:%M:%S")
+
+
+def _rest_topic_name(active: dict, on_rest: bool) -> str:
+    base_name = str(active.get("topic_base_name") or "тема").strip()
+    suffix = "(Рест)"
+    if on_rest:
+        return base_name if base_name.endswith(suffix) else f"{base_name} {suffix}"
+    return base_name.removesuffix(f" {suffix}").removesuffix(suffix).rstrip()
 
 
 def _recent_info_topic_actions(actions: list[dict], hours: int = 48) -> list[dict]:
@@ -1956,6 +1965,11 @@ async def _finish_admin_rest(
                     message_thread_id=int(topic_id),
                     text="✅Администратор вышел с реста. Тема разморожена.",
                 )
+                await context.bot.edit_forum_topic(
+                    chat_id=int(chat_id),
+                    message_thread_id=int(topic_id),
+                    name=_rest_topic_name(active, on_rest=False),
+                )
         except Exception:
             logging.exception("Failed to resume rest session for user %s", user_id)
 
@@ -1993,10 +2007,23 @@ async def addrest_command_handler(update: Update, context: ContextTypes.DEFAULT_
     if not profile or not _has_admin_rights_level_1_5(profile):
         await update.message.reply_text("Указанный id_profile не является администратором.")
         return
-    duration = int(match.group(1)) * {"s": 1, "m": 60, "h": 3600, "d": 86400}[match.group(2)]
-    rest_until = time.time() + duration
+    amount = int(match.group(1))
+    unit = match.group(2)
+    if unit == "d" and amount > 30:
+        await update.message.reply_text("Максимальная продолжительность реста — 30 дней.")
+        return
+
+    now = time.time()
+    if unit == "d":
+        rest_until_dt = datetime.now(KYIV_TIMEZONE).replace(
+            hour=0, minute=10, second=0, microsecond=0
+        ) + timedelta(days=amount)
+        rest_until = rest_until_dt.timestamp()
+    else:
+        duration = amount * {"s": 1, "m": 60, "h": 3600}[unit]
+        rest_until = now + duration
     profile["rest_admin_until"] = rest_until
-    profile["rest_admin_date"] = datetime.fromtimestamp(rest_until, tz=timezone(timedelta(hours=3))).strftime("%d.%m.%Y %H:%M:%S")
+    profile["rest_admin_date"] = _format_kyiv_datetime(rest_until)
     _save_profile_record(context, str(target_user_id))
 
     frozen = 0
@@ -2007,6 +2034,12 @@ async def addrest_command_handler(update: Update, context: ContextTypes.DEFAULT_
         frozen += 1
         date_rest = profile["rest_admin_date"]
         try:
+            if active.get("chat_id") is not None and active.get("topic_id") is not None:
+                await context.bot.edit_forum_topic(
+                    chat_id=int(active["chat_id"]),
+                    message_thread_id=int(active["topic_id"]),
+                    name=_rest_topic_name(active, on_rest=True),
+                )
             await context.bot.send_message(
                 chat_id=int(user_id),
                 text=f"🛥Ваш администратор находится в ресте до {date_rest}. Он не сможет вам ответить до конца времени",
@@ -2021,9 +2054,11 @@ async def addrest_command_handler(update: Update, context: ContextTypes.DEFAULT_
             logging.exception("Failed to freeze rest session for user %s", user_id)
 
     if context.job_queue:
+        for job in context.job_queue.get_jobs_by_name(f"admin_rest:{target_user_id}"):
+            job.schedule_removal()
         context.job_queue.run_once(
             _admin_rest_expiry_job,
-            duration,
+            max(0, rest_until - time.time()),
             data={"admin_user_id": str(target_user_id), "rest_until": rest_until},
             name=f"admin_rest:{target_user_id}",
         )
