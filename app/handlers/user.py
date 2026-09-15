@@ -42,6 +42,7 @@ from app.keyboards.inline import (
     _build_complaint_menu_keyboard,
     _build_main_menu_keyboard,
     _build_mood_selection_keyboard,
+    _build_quests_menu_keyboard,
     _build_session_settings_keyboard,
     _build_settings_menu_keyboard,
 )
@@ -51,7 +52,9 @@ from app.services.profiles import _set_user_blocked_bot_state
 from app.services.profiles import (
     _candidate_block_text,
     _ensure_profile,
+    _effective_admin_level,
     _find_admin_profile_by_tag_admin,
+    _is_admin_on_rest,
     _has_admin_rights_level_1_5,
     _is_active_admin_candidate,
     _is_user_nickname_taken,
@@ -833,6 +836,103 @@ async def settings_menu_handler(update: Update, context: ContextTypes.DEFAULT_TY
     user_id = str(update.effective_user.id)
     profile = _ensure_profile(context, user_id, update.effective_user.username or f"id{user_id}")
     await update.message.reply_text("⚙️Раздел настроек", reply_markup=_build_settings_menu_keyboard(profile))
+
+
+def _quests_access_allowed(profile: dict) -> bool:
+    return not _has_admin_rights_level_1_5(profile) or _effective_admin_level(profile) <= 3
+
+
+async def quests_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or update.effective_chat.type != ChatType.PRIVATE:
+        return
+    if await block_if_banned(update, context):
+        return
+
+    user = update.effective_user
+    user_id = str(user.id)
+    profile = _ensure_profile(context, user_id, user.username or f"id{user_id}")
+    if not _quests_access_allowed(profile):
+        await update.message.reply_text("⛔ Этот раздел недоступен администраторам 4–5 категории.")
+        return
+
+    active = (context.application.bot_data.get("active_chats", {}) or {}).get(user_id)
+    if active and active.get("active") and active.get("chat_id") is not None and active.get("topic_id") is not None:
+        try:
+            await context.bot.send_message(
+                chat_id=int(active["chat_id"]),
+                message_thread_id=int(active["topic_id"]),
+                text="👨‍🏫Пользователь зашел в раздел квестов и загадок.",
+            )
+        except Exception:
+            logging.exception("Failed to notify admin about quests section for user %s", user_id)
+
+    text = (
+        "🗝️ **РАЗДЕЛ: ЗАГАДКИ И КВЕСТЫ**\n\n"
+        "Добро пожаловать в раздел **«Загадки и квесты»**!\n\n"
+        "Здесь вас ждут различные загадки, головоломки и небольшие задания, для прохождения которых потребуется "
+        "**внимательность, логика и смекалка**.\n\n"
+        "📜 **Что вас ожидает:**\n"
+        "— 🧩 Загадки и логические задачи\n"
+        "— 🔎 Поиск скрытых подсказок\n"
+        "— 🗺️ Квесты с несколькими этапами\n"
+        "— 🔐 Тайны, секретные коды и шифры\n"
+        "— 🎯 Необычные задания и испытания\n\n"
+        "Некоторые задания могут быть простыми на первый взгляд, но скрывать **неожиданный ответ или дополнительный смысл**.\n\n"
+        "**Ваша задача — найти подсказки, разгадать тайну или пройти квест до конца.**\n\n"
+        "> ⚠️ Внимательно изучайте условия. Иногда самая маленькая деталь может оказаться ключом к разгадке."
+    )
+    await update.message.reply_text(
+        text,
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=_build_quests_menu_keyboard(),
+    )
+
+
+async def quests_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if not query or not update.effective_user:
+        return
+    await query.answer()
+    user_id = str(update.effective_user.id)
+    profile = _ensure_profile(context, user_id, update.effective_user.username or f"id{user_id}")
+    if not _quests_access_allowed(profile):
+        await query.answer("Раздел недоступен для вашей категории.", show_alert=True)
+        return
+    await query.message.reply_text("🗺️Раздел квестов скоро будет доступен.")
+
+
+async def riddles_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if not query or not update.effective_user:
+        return
+    await query.answer()
+    user_id = str(update.effective_user.id)
+    profile = _ensure_profile(context, user_id, update.effective_user.username or f"id{user_id}")
+    if not _quests_access_allowed(profile):
+        await query.answer("Раздел недоступен для вашей категории.", show_alert=True)
+        return
+    await query.message.reply_text("🧩Раздел загадок скоро будет доступен.")
+
+
+async def quests_exit_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if not query or not update.effective_user:
+        return
+    await query.answer()
+    try:
+        await query.message.delete()
+    except Exception:
+        pass
+    await context.bot.send_message(
+        chat_id=update.effective_user.id,
+        text="Вы вышли из раздела квестов и загадок.",
+        reply_markup=_build_main_menu_keyboard(
+            context,
+            update.effective_user.id,
+            update.effective_user.username,
+        ),
+    )
+
 
 
 

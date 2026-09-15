@@ -10,7 +10,12 @@ handing out sequence ids, no Telegram API calls.
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup
 from telegram.ext import ContextTypes
 
-from app.services.profiles import _candidate_tip_choices, _ensure_profile, _has_admin_rights_level_1_5
+from app.services.profiles import (
+    _candidate_tip_choices,
+    _effective_admin_level,
+    _ensure_profile,
+    _has_admin_rights_level_1_5,
+)
 
 
 def _build_candidate_tip_keyboard(user_id: str, selected_keys: list[str]) -> InlineKeyboardMarkup:
@@ -123,6 +128,8 @@ def _build_main_menu_keyboard(context: ContextTypes.DEFAULT_TYPE, user_id: int |
         [KeyboardButton("👤 Найти админа")],
         [KeyboardButton(profile_button)],
     ]
+    if not _has_admin_rights_level_1_5(profile) or _effective_admin_level(profile) <= 3:
+        rows.append([KeyboardButton("👨‍🏫Квесты и загадки")])
     active = (context.application.bot_data.get("active_chats", {}) or {}).get(str(user_id))
     if active and active.get("active"):
         rows.append([KeyboardButton("↩️Вернуться к кнопкам диалога")])
@@ -131,6 +138,18 @@ def _build_main_menu_keyboard(context: ContextTypes.DEFAULT_TYPE, user_id: int |
         rows,
         resize_keyboard=True,
         one_time_keyboard=False,
+    )
+
+
+def _build_quests_menu_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("🗺️Квесты", callback_data="quests_open"),
+                InlineKeyboardButton("🧩Загадки", callback_data="riddles_open"),
+            ],
+            [InlineKeyboardButton("↩️Выйти", callback_data="quests_exit")],
+        ]
     )
 
 
