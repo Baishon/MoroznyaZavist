@@ -158,6 +158,10 @@ from app.handlers.user import (
     pause_session_request,
     resume_session_callback,
     restart_command_handler,
+    quests_exit_callback,
+    quests_callback,
+    quests_menu_handler,
+    riddles_callback,
     return_to_dialog_menu_handler,
     return_to_main_menu_handler,
     send_admin_profile,
@@ -362,6 +366,9 @@ def build_application():
     app.add_handler(CallbackQueryHandler(session_rp_disable_cancel_callback, pattern=r"^session_rp_disable_cancel_\d+$"))
     app.add_handler(CallbackQueryHandler(thanks_confirm_callback, pattern=r"^thanks_confirm_\d+$"))
     app.add_handler(CallbackQueryHandler(thanks_cancel_callback, pattern=r"^thanks_cancel_\d+$"))
+    app.add_handler(CallbackQueryHandler(quests_callback, pattern=r"^quests_open$"))
+    app.add_handler(CallbackQueryHandler(riddles_callback, pattern=r"^riddles_open$"))
+    app.add_handler(CallbackQueryHandler(quests_exit_callback, pattern=r"^quests_exit$"))
     app.add_handler(CallbackQueryHandler(setprefix_select_callback, pattern=r"^prefix_select_\d+_[a-z]+$"))
     app.add_handler(CallbackQueryHandler(setprefix_apply_callback, pattern=r"^prefix_apply_\d+$"))
     app.add_handler(CallbackQueryHandler(astats_tag_change_callback, pattern=r"^astats_tag_change_\d+$"))
@@ -404,6 +411,7 @@ def build_application():
     app.add_handler(MessageHandler(filters.Regex("^↩️В настройки$") & filters.ChatType.PRIVATE, settings_menu_handler))
     app.add_handler(MessageHandler(filters.Regex("^🔕Отключить рекламу$") & filters.ChatType.PRIVATE, settings_disable_ad_handler))
     app.add_handler(MessageHandler(filters.Regex("^🔔Включить рекламу$") & filters.ChatType.PRIVATE, settings_enable_ad_handler))
+    app.add_handler(MessageHandler(filters.Regex("^👨‍🏫Квесты и загадки$") & filters.ChatType.PRIVATE, quests_menu_handler))
     app.add_handler(MessageHandler(filters.Regex("^↩️Назад$") & filters.ChatType.PRIVATE, settings_back_handler))
     app.add_handler(MessageHandler(filters.Regex("^👤 Профиль$"), send_profile))
     app.add_handler(MessageHandler(filters.Regex("^🔰Админ-профиль$") & filters.ChatType.PRIVATE, send_admin_profile))
