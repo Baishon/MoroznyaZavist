@@ -108,6 +108,7 @@ from app.services.topics import (
 
 MAX_MODERATION_DURATION_SECONDS = 365 * 24 * 60 * 60
 KYIV_TIMEZONE = ZoneInfo("Europe/Kyiv")
+SENIOR_FORWARD_PREFIXES = {"👁Logs", "💋Владелец", "💘Заместитель владельца"}
 
 
 def _format_kyiv_datetime(timestamp: float | None = None) -> str:
@@ -121,6 +122,17 @@ def _rest_topic_name(active: dict, on_rest: bool) -> str:
     if on_rest:
         return base_name if base_name.endswith(suffix) else f"{base_name} {suffix}"
     return base_name.removesuffix(f" {suffix}").removesuffix(suffix).rstrip()
+
+
+def _senior_admin_forward_signature(profile: dict | None) -> str | None:
+    if not profile:
+        return None
+    prefixes = profile.get("prefixes")
+    if not isinstance(prefixes, list):
+        prefixes = str(profile.get("prefix") or "").split(",")
+    if not SENIOR_FORWARD_PREFIXES.intersection(str(value).strip() for value in prefixes):
+        return None
+    return str(profile.get("tag_admin") or profile.get("username") or "старший администратор")
 
 
 def _recent_info_topic_actions(actions: list[dict], hours: int = 48) -> list[dict]:
@@ -5448,6 +5460,16 @@ async def admin_group_message_handler(update: Update, context: ContextTypes.DEFA
             )
         return
 
+    senior_signature = (
+        _senior_admin_forward_signature(profile)
+        if sender_id != session_admin_id
+        else None
+    )
+    senior_footer = (
+        f"\n\nЭто сообщение было отправлено старшим администратором {senior_signature}"
+        if senior_signature
+        else ""
+    )
     profile = (context.application.bot_data.get("profiles", {}) or {}).get(str(target_user), {})
     allowed_username = profile.get("username")
     suspicious_text = (getattr(message, "text", None) or getattr(message, "caption", None) or "").strip()
@@ -5511,7 +5533,7 @@ async def admin_group_message_handler(update: Update, context: ContextTypes.DEFA
             name_user=user_name,
             trigger_name=trigger_name,
         )
-        wrapped_text = f"💞RP : {rendered}"
+        wrapped_text = f"💞RP : {rendered}{senior_footer}"
         try:
             topic_message = await context.bot.send_message(chat_id=update.effective_chat.id, message_thread_id=topic_id, text=wrapped_text)
             try:
@@ -5538,7 +5560,10 @@ async def admin_group_message_handler(update: Update, context: ContextTypes.DEFA
     # Forward the message to the user's private chat.
     try:
         if update.message.text:
-            sent = await context.bot.send_message(chat_id=int(target_user), text=update.message.text)
+            sent = await context.bot.send_message(
+                chat_id=int(target_user),
+                text=f"{update.message.text}{senior_footer}",
+            )
             _track_session_message_pair(context, int(update.message.chat_id), int(update.message.message_id), int(target_user), int(sent.message_id))
             _set_user_blocked_bot_state(context, str(target_user), False)
             if active_target:
@@ -5558,6 +5583,8 @@ async def admin_group_message_handler(update: Update, context: ContextTypes.DEFA
 
         res = await context.bot.copy_message(chat_id=int(target_user), from_chat_id=update.message.chat_id, message_id=update.message.message_id)
         _track_session_message_pair(context, int(update.message.chat_id), int(update.message.message_id), int(target_user), int(res.message_id))
+        if senior_footer:
+            await context.bot.send_message(chat_id=int(target_user), text=senior_footer.strip())
         _set_user_blocked_bot_state(context, str(target_user), False)
         if active_target:
             active_target["msg_topic_admin"] = int(active_target.get("msg_topic_admin", 0) or 0) + 1
@@ -5600,6 +5627,8 @@ async def admin_group_message_handler(update: Update, context: ContextTypes.DEFA
                 int(target_user),
                 int(fallback_sent.message_id),
             )
+        if senior_footer:
+            await context.bot.send_message(chat_id=int(target_user), text=senior_footer.strip())
         _set_user_blocked_bot_state(context, str(target_user), False)
         if active_target:
             active_target["msg_topic_admin"] = int(active_target.get("msg_topic_admin", 0) or 0) + 1
