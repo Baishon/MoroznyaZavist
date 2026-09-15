@@ -109,6 +109,12 @@ from app.services.topics import (
 MAX_MODERATION_DURATION_SECONDS = 365 * 24 * 60 * 60
 KYIV_TIMEZONE = ZoneInfo("Europe/Kyiv")
 SENIOR_FORWARD_PREFIXES = {"👁Logs", "💋Владелец", "💘Заместитель владельца"}
+KD_ALLOWED_PREFIXES = {
+    "👁Logs",
+    "💋Владелец",
+    "💘Заместитель владельца",
+    "👨‍💻Технический специалист",
+}
 
 
 def _format_kyiv_datetime(timestamp: float | None = None) -> str:
@@ -924,6 +930,7 @@ async def log_command_router(update: Update, context: ContextTypes.DEFAULT_TYPE)
         "/setrep": setrep_command_handler,
         "/searchuser": searchuser_command_handler,
         "/addrest": addrest_command_handler,
+        "/kd": kd_command_handler,
         "/delrest": delrest_command_handler,
         "/restlist": restlist_command_handler,
         "/anpiar": anpiar_command_handler,
@@ -3785,6 +3792,71 @@ async def setrep_command_handler(update: Update, context: ContextTypes.DEFAULT_T
         )
     except Exception:
         logging.exception("setrep_command_handler failed to notify admin %s", target_user_id)
+
+
+async def kd_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or not _is_special_admin_chat(update.effective_chat.id):
+        return
+
+    issuer_profile = _ensure_profile(
+        context,
+        str(update.effective_user.id),
+        update.effective_user.username or f"id{update.effective_user.id}",
+    )
+    prefixes = issuer_profile.get("prefixes")
+    if not isinstance(prefixes, list):
+        prefixes = str(issuer_profile.get("prefix") or "").split(",")
+    has_allowed_prefix = bool(
+        KD_ALLOWED_PREFIXES.intersection(str(prefix).strip() for prefix in prefixes)
+    )
+    if _effective_admin_level(issuer_profile) < 4 or not has_allowed_prefix:
+        await update.message.reply_text(
+            "⛔Команда доступна администраторам 4-5 категории с разрешенным префиксом."
+        )
+        return
+
+    raw_text = update.message.text or ""
+    cmd_entity = update.message.entities[0] if update.message.entities else None
+    cmd_len = cmd_entity.length if cmd_entity and cmd_entity.type == "bot_command" else len("/kd")
+    try:
+        parts = shlex.split(raw_text[cmd_len:].strip())
+    except ValueError:
+        parts = []
+    if len(parts) != 3 or parts[1].lower() != "bug-" or not parts[2].isdigit():
+        await update.message.reply_text(
+            'Используйте: /kd "id_profile" bug- "time_kd", где time_kd — минуты.'
+        )
+        return
+
+    minutes = int(parts[2])
+    target_user_id, target_profile = _resolve_warn_target(context, parts[0])
+    if not target_profile or not target_user_id:
+        await update.message.reply_text(f'Пользователь с id_profile "{parts[0]}" не найден.')
+        return
+
+    if minutes == 0:
+        target_profile.pop("bug_report_cooldown_until", None)
+    else:
+        target_profile["bug_report_cooldown_until"] = time.time() + minutes * 60
+    _save_profile_record(context, str(target_user_id))
+
+    await update.message.reply_text(
+        f"✅Кулдаун bug- для id_profile #{target_profile.get('id_profile')} установлен на {minutes} мин."
+    )
+    try:
+        await context.bot.send_message(
+            chat_id=int(target_user_id),
+            text=(
+                "🛠Технический раздел изменил количество кулдауна "
+                f"для кнопки «Сообщить о баге» на {minutes} мин."
+            ),
+        )
+    except Forbidden:
+        await update.message.reply_text(
+            "Не удалось уведомить пользователя в личных сообщениях: пользователь заблокировал бота."
+        )
+    except Exception:
+        logging.exception("kd_command_handler failed to notify user %s", target_user_id)
 
 
 async def setprefix_select_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
