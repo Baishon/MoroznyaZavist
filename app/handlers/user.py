@@ -1909,6 +1909,7 @@ async def send_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"✉️ <b>Сообщений:</b> {profile.get('message_user')}\n"
         f"👨‍💼 <b>Последний админ:</b> {profile_last_admin}\n"
         f"⚠️ <b>Предупреждений:</b> {profile.get('warn')} | <b>Последняя причина:</b> {profile_reason}\n"
+        f"🪙Токенов: {int(profile.get('count_tokens', 0) or 0)}\n"
         f"🪙 <b>Админ-коинов:</b> {profile.get('coin')}\n\n"
         "--------------------\n\n"
         f"📅 <b>В боте с:</b> {profile_date}"

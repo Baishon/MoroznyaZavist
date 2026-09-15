@@ -161,6 +161,7 @@ def _ensure_profile(context: ContextTypes.DEFAULT_TYPE, user_id: str, username_h
             "warn": 0,
             "reason": "нет причин",
             "coin": 0,
+            "count_tokens": 0,
             "date_registration": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"),
         }
         profiles[str(user_id)] = profile
@@ -183,6 +184,9 @@ def _ensure_profile(context: ContextTypes.DEFAULT_TYPE, user_id: str, username_h
 
     if not str(profile.get("last_admin_tag") or "").strip():
         profile["last_admin_tag"] = "не указан"
+        changed = True
+    if "count_tokens" not in profile:
+        profile["count_tokens"] = 0
         changed = True
 
     if changed:
@@ -482,6 +486,7 @@ def _build_user_stats_text(context: ContextTypes.DEFAULT_TYPE, target_user_id: s
         f"⚠️Предупреждений: {warn_value} // Последняя причина: {profile_reason}\n"
         f"🔰Уровень админ-прав: {rank_title}\n"
         f"📲Активная сессия: {session} // Последний админ: {admin_tag}\n\n"
+        f"🪙Токенов: {int(profile.get('count_tokens', 0) or 0)}\n"
         f"💿Регистрация в базе данных: {date_value}"
         f"{extra_status_text}"
     )
