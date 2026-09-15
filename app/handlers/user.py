@@ -77,6 +77,118 @@ from app.services.topics import (
 from app.services.topics import _is_member_of_chat
 
 
+BUG_TICKET_ADMIN_ID = 7545068007
+
+
+def _ticket_close_keyboard(ticket_id: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [[InlineKeyboardButton("🔒 Закрыть тикет", callback_data=f"ticket_close_{ticket_id}")]]
+    )
+
+
+def _ticket_confirmation_keyboard(ticket_id: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [[
+            InlineKeyboardButton("✅ Да, открыть", callback_data=f"bug_report_confirm_{ticket_id}"),
+            InlineKeyboardButton("❌ Нет", callback_data=f"bug_report_reject_{ticket_id}"),
+        ]]
+    )
+
+
+def _next_bug_ticket_id(context: ContextTypes.DEFAULT_TYPE) -> str:
+    sequence = int(context.application.bot_data.get("bug_ticket_seq", 0) or 0) + 1
+    context.application.bot_data["bug_ticket_seq"] = sequence
+    return str(sequence)
+
+
+def _find_user_ticket(context: ContextTypes.DEFAULT_TYPE, user_id: str) -> tuple[str | None, dict | None]:
+    tickets = context.application.bot_data.get("bug_tickets", {}) or {}
+    for ticket_id, ticket in tickets.items():
+        if str((ticket or {}).get("user_id") or "") == str(user_id) and (ticket or {}).get("status") in {"pending", "accepted"}:
+            return str(ticket_id), ticket
+    return None, None
+
+
+def _find_admin_ticket(context: ContextTypes.DEFAULT_TYPE, admin_id: str) -> tuple[str | None, dict | None]:
+    tickets = context.application.bot_data.get("bug_tickets", {}) or {}
+    for ticket_id, ticket in tickets.items():
+        if str((ticket or {}).get("admin_id") or "") == str(admin_id) and (ticket or {}).get("status") == "accepted":
+            return str(ticket_id), ticket
+    return None, None
+
+
+async def _close_bug_ticket(context: ContextTypes.DEFAULT_TYPE, ticket_id: str, reason: str) -> None:
+    tickets = context.application.bot_data.setdefault("bug_tickets", {})
+    ticket = tickets.get(str(ticket_id))
+    if not ticket or ticket.get("status") == "closed":
+        return
+    ticket["status"] = "closed"
+    user_id = str(ticket.get("user_id"))
+    active = (context.application.bot_data.get("active_chats", {}) or {}).get(user_id)
+    if active and active.get("ticket_paused"):
+        active.pop("ticket_paused", None)
+        active["paused"] = False
+    profile = _ensure_profile(context, user_id, f"id{user_id}")
+    try:
+        await context.bot.send_message(chat_id=int(user_id), text=f"🔒Тикет #{ticket_id} закрыт. {reason}")
+    except Exception:
+        pass
+    try:
+        await context.bot.send_message(
+            chat_id=BUG_TICKET_ADMIN_ID,
+            text=f"🔒Тикет #{ticket_id} закрыт.",
+        )
+    except Exception:
+        pass
+    for chat_id, message_id in (
+        (user_id, ticket.get("user_message_id")),
+        (user_id, ticket.get("accepted_user_message_id")),
+        (BUG_TICKET_ADMIN_ID, ticket.get("admin_message_id")),
+    ):
+        if message_id:
+            try:
+                await context.bot.unpin_chat_message(chat_id=int(chat_id), message_id=int(message_id))
+            except Exception:
+                pass
+    _save_profile_record(context, user_id)
+    _save_runtime_snapshot(context)
+
+
+async def _route_bug_ticket_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    if not update.message or not update.effective_user:
+        return False
+    sender_id = str(update.effective_user.id)
+    ticket_id, ticket = _find_user_ticket(context, sender_id)
+    recipient_id = None
+    if ticket and ticket.get("status") == "accepted":
+        recipient_id = BUG_TICKET_ADMIN_ID
+    else:
+        ticket_id, ticket = _find_admin_ticket(context, sender_id)
+        if ticket:
+            recipient_id = int(ticket.get("user_id"))
+    if not ticket or recipient_id is None:
+        return False
+
+    try:
+        if update.message.text:
+            sent = await context.bot.send_message(
+                chat_id=recipient_id,
+                text=f"🎫Тикет #{ticket_id}\n\n{update.message.text}",
+            )
+        else:
+            sent = await context.bot.copy_message(
+                chat_id=recipient_id,
+                from_chat_id=update.message.chat_id,
+                message_id=update.message.message_id,
+            )
+        ticket.setdefault("message_pairs", []).append(
+            {"source": update.message.message_id, "target": sent.message_id, "sender_id": sender_id}
+        )
+    except Exception:
+        logging.exception("Failed to route bug ticket message %s", ticket_id)
+    return True
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     if user:
@@ -1099,25 +1211,11 @@ async def complaint_bug_menu_handler(update: Update, context: ContextTypes.DEFAU
         return
 
     pending = context.application.bot_data.setdefault("pending_bug_reports", {})
-    pending[user_id] = {
-        "state": "await_text",
-    }
-
-    # Hide the reply submenu while the bug report flow is active.
-    await update.message.reply_text("🛠Режим отправки бага активирован.", reply_markup=ReplyKeyboardRemove())
-
+    ticket_id = _next_bug_ticket_id(context)
+    pending[user_id] = {"state": "await_confirmation", "ticket_id": ticket_id}
     await update.message.reply_text(
-        "Спасибо, что помогаете нам стать лучше. Чтобы мы быстро решили проблему, опишите ситуацию максимально конкретно.\n\n"
-        "**Что считается багом (ошибкой в коде):**\n"
-        "Функция работает не так, как описано в инструкции (крашится, зависает, выдает неверный результат).\n"
-        "Интерфейс отображается криво (наложение элементов, съехавшие кнопки, нечитаемый текст).\n"
-        "Данные сохраняются/загружаются с ошибками или теряются.\n"
-        "Действие не выполняется, хотя нет блокировок (нет интернета, нет прав).\n"
-        "Грамматические ошибки в боте при нажатии кнопок",
-        parse_mode=ParseMode.MARKDOWN,
-        reply_markup=InlineKeyboardMarkup(
-            [[InlineKeyboardButton("отмена", callback_data=f"bug_report_cancel_{user_id}")]]
-        ),
+        f"🎫Вы действительно хотите открыть тикет #{ticket_id}?",
+        reply_markup=_ticket_confirmation_keyboard(ticket_id),
     )
 
 
@@ -1335,6 +1433,10 @@ async def admin_complaint_confirm_callback(update: Update, context: ContextTypes
 
     pending = context.application.bot_data.setdefault("pending_admin_complaints", {})
     entry = pending.get(str(user_id))
+    if not entry:
+        await update.callback_query.answer("Заявка устарела", show_alert=True)
+        return
+
     if not entry or str(entry.get("state")) not in {"await_proof", "await_confirm"}:
         await update.callback_query.answer("Заявка устарела", show_alert=True)
         return
@@ -1345,7 +1447,6 @@ async def admin_complaint_confirm_callback(update: Update, context: ContextTypes
     via_last_admin = bool(entry.get("via_last_admin", False))
     complaint_text = str(entry.get("draft_text") or "").strip()
     photo_file_id = entry.get("photo_file_id")
-
     if via_last_admin:
         notification_text = (
             f"👮‍♀️Поступила жалоба на администратора {admin_tag} \n\n"
@@ -1358,7 +1459,6 @@ async def admin_complaint_confirm_callback(update: Update, context: ContextTypes
             f"От пользователя #{id_profile}\n"
             f"Суть жалобы: {complaint_text}"
         )
-
     try:
         if photo_file_id:
             await context.bot.send_photo(chat_id=LOG_CHAT_ID, photo=photo_file_id, caption=notification_text)
@@ -1367,15 +1467,11 @@ async def admin_complaint_confirm_callback(update: Update, context: ContextTypes
         _activate_complaint_cooldown(context, str(user_id), profile, "admin_complaint_cooldown_until")
     except Exception:
         logging.exception("admin complaint send failed")
-
     pending.pop(str(user_id), None)
-    try:
-        await update.callback_query.message.reply_text(
-            "✅Жалоба отправлена руководству.",
-            reply_markup=_build_complaint_menu_keyboard(),
-        )
-    except Exception:
-        pass
+    await update.callback_query.message.reply_text(
+        "✅Жалоба отправлена руководству.",
+        reply_markup=_build_complaint_menu_keyboard(),
+    )
 
 
 
@@ -1402,15 +1498,33 @@ async def bug_report_cancel_callback(update: Update, context: ContextTypes.DEFAU
 
 async def bug_report_confirm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
-    user_id = (update.callback_query.data or "").split("_")[-1]
-    if str(update.effective_user.id) != str(user_id):
-        await update.callback_query.answer("Кнопка доступна только владельцу запроса", show_alert=True)
-        return
-
+    user_id = str(update.effective_user.id)
     pending = context.application.bot_data.setdefault("pending_bug_reports", {})
     entry = pending.get(str(user_id))
-    if not entry or str(entry.get("state")) not in {"await_proof", "await_confirm"}:
+    if not entry:
         await update.callback_query.answer("Заявка устарела", show_alert=True)
+        return
+
+    if entry.get("state") == "await_confirmation":
+        active = (context.application.bot_data.get("active_chats", {}) or {}).get(user_id)
+        if active and active.get("active"):
+            active["ticket_paused"] = True
+            active["paused"] = True
+            await context.bot.send_message(
+                chat_id=int(user_id),
+                text="⏸Ваша активная сессия временно заморожена на время тикета.",
+            )
+        entry["state"] = "await_text"
+        await update.callback_query.message.edit_text(
+            f"🎫Тикет #{entry['ticket_id']} подтверждён.\n\nОпишите проблему.",
+            reply_markup=InlineKeyboardMarkup(
+                [[InlineKeyboardButton("❌ Отмена", callback_data=f"bug_report_cancel_{user_id}")]]
+            ),
+        )
+        return
+
+    if str(entry.get("state")) not in {"await_proof", "await_confirm"}:
+        await update.callback_query.answer("Сначала отправьте описание проблемы", show_alert=True)
         return
 
     report_text = str(entry.get("draft_text") or "").strip()
@@ -1431,54 +1545,117 @@ async def bug_report_confirm_callback(update: Update, context: ContextTypes.DEFA
         f"Текст: {report_text}"
     )
 
+    ticket_id = str(entry.get("ticket_id") or _next_bug_ticket_id(context))
+    tickets = context.application.bot_data.setdefault("bug_tickets", {})
+    tickets[ticket_id] = {
+        "user_id": user_id,
+        "admin_id": str(BUG_TICKET_ADMIN_ID),
+        "status": "pending",
+        "report_text": report_text,
+        "photo_file_id": photo_file_id,
+        "user_message_id": None,
+        "admin_message_id": None,
+    }
+    admin_text = (
+        f"🎫Новый тикет #{ticket_id}\n\n{text_block}\n\n"
+        "Примите тикет, чтобы начать переписку с пользователем."
+    )
+    admin_message = await context.bot.send_message(
+        chat_id=BUG_TICKET_ADMIN_ID,
+        text=admin_text,
+        reply_markup=InlineKeyboardMarkup([[
+            InlineKeyboardButton("✅ Принять", callback_data=f"ticket_accept_{ticket_id}"),
+            InlineKeyboardButton("❌ Отказать", callback_data=f"ticket_reject_{ticket_id}"),
+        ]]),
+    )
+    tickets[ticket_id]["admin_message_id"] = admin_message.message_id
+    user_message = await update.callback_query.message.reply_text(
+        f"✅Тикет #{ticket_id} создан и отправлен администратору.",
+        reply_markup=_ticket_close_keyboard(ticket_id),
+    )
+    tickets[ticket_id]["user_message_id"] = user_message.message_id
     try:
-        if photo_file_id:
-            await context.bot.send_photo(
-                chat_id=LOG_CHAT_ID,
-                photo=photo_file_id,
-                caption=text_block,
-            )
-        else:
-            await context.bot.send_message(chat_id=LOG_CHAT_ID, text=text_block)
-        _activate_complaint_cooldown(context, str(user_id), profile, "bug_report_cooldown_until")
+        await context.bot.pin_chat_message(chat_id=int(user_id), message_id=user_message.message_id)
+        await context.bot.pin_chat_message(chat_id=BUG_TICKET_ADMIN_ID, message_id=admin_message.message_id)
     except Exception:
         pass
-
     pending.pop(str(user_id), None)
-    try:
-        await update.callback_query.message.reply_text(
-            "✅Ваше сообщение отправлено в технический раздел.",
-            reply_markup=_build_settings_menu_keyboard(profile),
-        )
-    except Exception:
-        pass
+    _activate_complaint_cooldown(context, str(user_id), profile, "bug_report_cooldown_until")
+    _save_runtime_snapshot(context)
 
 
 
 async def bug_report_reject_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer("Отмена")
-    user_id = (update.callback_query.data or "").split("_")[-1]
-    if str(update.effective_user.id) != str(user_id):
-        await update.callback_query.answer("Кнопка доступна только владельцу запроса", show_alert=True)
-        return
-
+    user_id = str(update.effective_user.id)
     pending = context.application.bot_data.setdefault("pending_bug_reports", {})
-    entry = pending.get(str(user_id))
-    if not entry:
+    pending.pop(user_id, None)
+    await update.callback_query.message.edit_text("Отмена. Тикет не создан.", reply_markup=None)
+
+
+async def ticket_accept_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if not update.effective_user or update.effective_user.id != BUG_TICKET_ADMIN_ID:
+        await query.answer("Недоступно", show_alert=True)
         return
-
-    entry["state"] = "await_text"
-    entry.pop("draft_text", None)
-
+    await query.answer()
+    ticket_id = (query.data or "").rsplit("_", 1)[-1]
+    ticket = (context.application.bot_data.get("bug_tickets", {}) or {}).get(ticket_id)
+    if not ticket or ticket.get("status") != "pending":
+        await query.answer("Тикет уже обработан", show_alert=True)
+        return
+    ticket["status"] = "accepted"
+    await query.edit_message_reply_markup(reply_markup=_ticket_close_keyboard(ticket_id))
+    accepted_message = await context.bot.send_message(
+        chat_id=int(ticket["user_id"]),
+        text=f"✅Тикет #{ticket_id} принят администратором. Теперь вы можете отправлять сообщения в этот тикет.",
+        reply_markup=_ticket_close_keyboard(ticket_id),
+    )
+    ticket["accepted_user_message_id"] = accepted_message.message_id
     try:
-        await update.callback_query.message.reply_text(
-            "Отправка отменена. Опишите текст заново или нажмите отмена.",
-            reply_markup=InlineKeyboardMarkup(
-                [[InlineKeyboardButton("отмена", callback_data=f"bug_report_cancel_{user_id}")]]
-            ),
+        await context.bot.pin_chat_message(
+            chat_id=int(ticket["user_id"]),
+            message_id=accepted_message.message_id,
         )
     except Exception:
         pass
+    _save_runtime_snapshot(context)
+
+
+async def ticket_reject_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if not update.effective_user or update.effective_user.id != BUG_TICKET_ADMIN_ID:
+        await query.answer("Недоступно", show_alert=True)
+        return
+    await query.answer()
+    ticket_id = (query.data or "").rsplit("_", 1)[-1]
+    ticket = (context.application.bot_data.get("bug_tickets", {}) or {}).get(ticket_id)
+    if not ticket or ticket.get("status") != "pending":
+        return
+    ticket["status"] = "rejected"
+    await query.edit_message_reply_markup(reply_markup=None)
+    await context.bot.send_message(chat_id=int(ticket["user_id"]), text=f"❌Тикет #{ticket_id} отклонён администратором.")
+    user_id = str(ticket["user_id"])
+    active = (context.application.bot_data.get("active_chats", {}) or {}).get(user_id)
+    if active and active.get("ticket_paused"):
+        active.pop("ticket_paused", None)
+        active["paused"] = False
+    _save_runtime_snapshot(context)
+
+
+async def ticket_close_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    ticket_id = (query.data or "").rsplit("_", 1)[-1]
+    ticket = (context.application.bot_data.get("bug_tickets", {}) or {}).get(ticket_id)
+    if not ticket:
+        return
+    allowed = {str(ticket.get("user_id")), str(BUG_TICKET_ADMIN_ID)}
+    if str(update.effective_user.id) not in allowed:
+        await query.answer("Кнопка доступна участникам тикета", show_alert=True)
+        return
+    await _close_bug_ticket(context, ticket_id, "Переписка завершена.")
+    await query.edit_message_reply_markup(reply_markup=None)
 
 
 
@@ -2582,6 +2759,9 @@ async def user_private_message_handler(update: Update, context: ContextTypes.DEF
             f"Истёкших предупреждений: {expired_warns}. "
             "Теперь учитываются только действующие предупреждения."
         )
+
+    if await _route_bug_ticket_message(update, context):
+        return
 
     if await admin_candidate_private_flow(update, context):
         return
