@@ -521,7 +521,6 @@ async def request_gender_callback(update: Update, context: ContextTypes.DEFAULT_
 
     context.user_data["admin_gender"] = gender_key
     context.user_data["profile"] = 2
-    await query.message.edit_reply_markup(reply_markup=None)
     await send_mood_menu(update, context)
 
 
@@ -653,7 +652,7 @@ async def thanks_confirm_callback(update: Update, context: ContextTypes.DEFAULT_
     user_profile = _ensure_profile(context, user_id, update.effective_user.username or f"id{user_id}")
     cooldown_until = float(user_profile.get("thanks_cooldown_until", 0) or 0)
     if cooldown_until > time.time():
-        await query.message.edit_text(
+        await update.callback_query.message.edit_text(
             f"⏳Отблагодарить администратора снова можно через {_thanks_cooldown_text(int(cooldown_until - time.time()))}."
         )
         return
@@ -1800,15 +1799,6 @@ async def track_user_message(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def send_mood_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["last_category_step"] = 2
     context.user_data["mood_selected"] = []
-    message = update.callback_query.message if update.callback_query else update.message
-    await message.reply_text(
-        "Для возврата используйте кнопку ниже.",
-        reply_markup=ReplyKeyboardMarkup(
-            [[KeyboardButton("◀️ Назад")]],
-            resize_keyboard=True,
-            one_time_keyboard=False,
-        ),
-    )
     text = (
         "›› Теперь выберите тип запроса\n\n"
         "<b>Зачем выбирать?</b> Подстройка экономит ваши силы. Если вы с самого начала поняли, что нужно от вас, "
@@ -1818,7 +1808,23 @@ async def send_mood_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🔥<b>Флирт</b> - Для тех, кто любит поролить и называть милыми словами"
     )
     user_id = str(update.effective_user.id)
-    await message.reply_text(
+    if update.callback_query:
+        await update.callback_query.message.edit_text(
+            text,
+            parse_mode=ParseMode.HTML,
+            reply_markup=_build_mood_selection_keyboard(user_id, []),
+        )
+        return
+
+    await update.message.reply_text(
+        "Для возврата используйте кнопку ниже.",
+        reply_markup=ReplyKeyboardMarkup(
+            [[KeyboardButton("◀️ Назад")]],
+            resize_keyboard=True,
+            one_time_keyboard=False,
+        ),
+    )
+    await update.message.reply_text(
         text,
         parse_mode=ParseMode.HTML,
         reply_markup=_build_mood_selection_keyboard(user_id, []),
@@ -1899,7 +1905,7 @@ async def _submit_admin_search(update: Update, context: ContextTypes.DEFAULT_TYP
         "Все свободные администраторы уведомлены, ожидайте от 10 до 120 минут❤️\n\n"
         "Если ваш запрос не был рассмотрен больше 2 часов, пожалуйста отправьте сообщение в техническую поддержку а мы разберемся с админами."
     )
-    await query.message.edit_text(
+    await update.callback_query.message.edit_text(
         confirmation_text,
         reply_markup=InlineKeyboardMarkup(
             [[InlineKeyboardButton("Отменить", callback_data=f"cancel_search_{user.id}")]]
@@ -2750,6 +2756,10 @@ async def user_private_message_handler(update: Update, context: ContextTypes.DEF
             [[InlineKeyboardButton("Возомновить общение", callback_data=f"resume_session_{user_id}")]]
         )
         await update.message.reply_text("💤Включен режим остановки. Администратору не отправится сообщение пока общение не будет возобновлено.", reply_markup=resume_kb)
+        return
+    admin_profile = (context.application.bot_data.get("profiles", {}) or {}).get(str(active.get("admin_id") or ""), {})
+    if active.get("rest_paused") or _is_admin_on_rest(admin_profile):
+        await update.message.reply_text("🛥Ваш администратор находится в ресте. Он не сможет вам ответить до конца времени")
         return
 
     if active.get("rp_disabled"):
