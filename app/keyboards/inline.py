@@ -162,6 +162,16 @@ def _build_quests_menu_keyboard() -> InlineKeyboardMarkup:
     )
 
 
+def _build_quests_section_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton("🎮Игровые квесты", callback_data="game_quests_open")],
+            [InlineKeyboardButton("📚Школьные примеры", callback_data="school_tasks_open")],
+            [InlineKeyboardButton("↩️Назад", callback_data="quests_back")],
+        ]
+    )
+
+
 def _build_active_session_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         [
