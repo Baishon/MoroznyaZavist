@@ -165,6 +165,10 @@ from app.handlers.user import (
     quests_exit_callback,
     quests_callback,
     quests_back_callback,
+    game_quests_callback,
+    brawl_stars_callback,
+    game_quests_back_callback,
+    brawl_stars_start_callback,
     quests_menu_handler,
     riddles_callback,
     return_to_dialog_menu_handler,
@@ -376,6 +380,10 @@ def build_application():
     app.add_handler(CallbackQueryHandler(thanks_cancel_callback, pattern=r"^thanks_cancel_\d+$"))
     app.add_handler(CallbackQueryHandler(quests_callback, pattern=r"^quests_open$"))
     app.add_handler(CallbackQueryHandler(quests_back_callback, pattern=r"^quests_back$"))
+    app.add_handler(CallbackQueryHandler(game_quests_callback, pattern=r"^game_quests_open$"))
+    app.add_handler(CallbackQueryHandler(brawl_stars_callback, pattern=r"^brawl_stars_open$"))
+    app.add_handler(CallbackQueryHandler(game_quests_back_callback, pattern=r"^game_quests_back$"))
+    app.add_handler(CallbackQueryHandler(brawl_stars_start_callback, pattern=r"^brawl_stars_start$"))
     app.add_handler(CallbackQueryHandler(riddles_callback, pattern=r"^riddles_open$"))
     app.add_handler(CallbackQueryHandler(quests_exit_callback, pattern=r"^quests_exit$"))
     app.add_handler(CallbackQueryHandler(setprefix_select_callback, pattern=r"^prefix_select_\d+_[a-z]+$"))

@@ -172,6 +172,25 @@ def _build_quests_section_keyboard() -> InlineKeyboardMarkup:
     )
 
 
+def _build_game_quests_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton("Brawl stars", callback_data="brawl_stars_open")],
+            [InlineKeyboardButton("📚Школьные примеры", callback_data="school_tasks_open")],
+            [InlineKeyboardButton("↩️Назад", callback_data="quests_back")],
+        ]
+    )
+
+
+def _build_brawl_stars_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [[
+            InlineKeyboardButton("▶️Начать", callback_data="brawl_stars_start"),
+            InlineKeyboardButton("↩️Назад", callback_data="game_quests_back"),
+        ]]
+    )
+
+
 def _build_active_session_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         [

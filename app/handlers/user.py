@@ -44,6 +44,8 @@ from app.keyboards.inline import (
     _build_mood_selection_keyboard,
     _build_quests_menu_keyboard,
     _build_quests_section_keyboard,
+    _build_game_quests_keyboard,
+    _build_brawl_stars_keyboard,
     _build_request_gender_keyboard,
     _build_session_settings_keyboard,
     _build_settings_menu_keyboard,
@@ -1064,6 +1066,57 @@ async def quests_back_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         parse_mode=ParseMode.MARKDOWN,
         reply_markup=_build_quests_menu_keyboard(),
     )
+
+
+async def game_quests_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if not query or not update.effective_user:
+        return
+    await query.answer()
+    profile = _ensure_profile(
+        context,
+        str(update.effective_user.id),
+        update.effective_user.username or f"id{update.effective_user.id}",
+    )
+    if not _quests_access_allowed(profile):
+        await query.answer("Раздел недоступен для вашей категории.", show_alert=True)
+        return
+    await query.message.edit_text(
+        "🎮 ИГРОВЫЕ КВЕСТЫ",
+        reply_markup=_build_game_quests_keyboard(),
+    )
+
+
+async def brawl_stars_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if not query or not update.effective_user:
+        return
+    await query.answer()
+    await query.message.edit_text(
+        "🎮 Brawl Stars\n"
+        "В этом разделе вас ждёт тест по игре Brawl Stars, который состоит из 20 вопросов.\n\n"
+        "Вопросы будут посвящены:\n\n"
+        "- 🦸 Бойцам и их способностям;\n"
+        "- 🗺️ Режимам и картам;\n"
+        "- ⭐ Гаджетам и звёздным силам;\n"
+        "- 🏆 Системам прогресса и игровым механикам;\n"
+        "- 🎯 Различным фактам и особенностям игры.\n"
+        "За каждый правильный ответ вы получаете токен.\n"
+        "Постарайтесь ответить на все вопросы внимательно — в некоторых из них могут встретиться неожиданные моменты! 🔥",
+        reply_markup=_build_brawl_stars_keyboard(),
+    )
+
+
+async def game_quests_back_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if not query:
+        return
+    await query.answer()
+    await query.message.edit_text("🎮 ИГРОВЫЕ КВЕСТЫ", reply_markup=_build_game_quests_keyboard())
+
+
+async def brawl_stars_start_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.callback_query.answer("Тест скоро будет доступен.")
 
 
 async def riddles_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
