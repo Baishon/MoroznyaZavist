@@ -176,7 +176,6 @@ def _build_game_quests_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
             [InlineKeyboardButton("Brawl stars", callback_data="brawl_stars_open")],
-            [InlineKeyboardButton("📚Школьные примеры", callback_data="school_tasks_open")],
             [InlineKeyboardButton("↩️Назад", callback_data="quests_back")],
         ]
     )
