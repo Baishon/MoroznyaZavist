@@ -136,6 +136,9 @@ from app.handlers.user import (
     bug_report_photo_input_handler,
     bug_report_reject_callback,
     bug_report_text_input_handler,
+    ticket_accept_callback,
+    ticket_reject_callback,
+    ticket_close_callback,
     cancel_nickname_change_callback,
     cancel_search_callback,
     change_nickname_callback,
@@ -400,6 +403,9 @@ def build_application():
     app.add_handler(CallbackQueryHandler(bug_report_cancel_callback, pattern=r"^bug_report_cancel_\d+$"))
     app.add_handler(CallbackQueryHandler(bug_report_confirm_callback, pattern=r"^bug_report_confirm_\d+$"))
     app.add_handler(CallbackQueryHandler(bug_report_reject_callback, pattern=r"^bug_report_reject_\d+$"))
+    app.add_handler(CallbackQueryHandler(ticket_accept_callback, pattern=r"^ticket_accept_\d+$"))
+    app.add_handler(CallbackQueryHandler(ticket_reject_callback, pattern=r"^ticket_reject_\d+$"))
+    app.add_handler(CallbackQueryHandler(ticket_close_callback, pattern=r"^ticket_close_\d+$"))
     app.add_handler(CallbackQueryHandler(admin_complaint_cancel_callback, pattern=r"^admin_complaint_cancel_\d+$"))
     app.add_handler(CallbackQueryHandler(admin_complaint_confirm_callback, pattern=r"^admin_complaint_confirm_\d+$"))
     app.add_handler(MessageHandler(filters.Regex("^👤 Найти админа$") & filters.ChatType.PRIVATE, find_admin_menu_callback))
