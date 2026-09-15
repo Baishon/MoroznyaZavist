@@ -1406,6 +1406,7 @@ async def sendpiar_command_handler(update: Update, context: ContextTypes.DEFAULT
 
     success_count = 0
     failed_count = 0
+    failed_recipient_ids = set()
     for recipient_id in recipients:
         recipient_ok = True
         for spec in message_specs:
@@ -1485,6 +1486,12 @@ async def sendpiar_command_handler(update: Update, context: ContextTypes.DEFAULT
             success_count += 1
         else:
             failed_count += 1
+            failed_recipient_ids.add(recipient_id)
+
+    for recipient_id in failed_recipient_ids:
+        profile = (context.application.bot_data.get("profiles", {}) or {}).get(str(recipient_id)) or {}
+        if not profile.get("bot_blocked_by_user", False):
+            _set_user_blocked_bot_state(context, str(recipient_id), True)
 
     report_text = f"✅Рассылка отправлена всем пользователям бота.\nУспешно: {success_count}\nОшибок: {failed_count}"
     await context.bot.send_message(chat_id=update.effective_chat.id, text=report_text)
