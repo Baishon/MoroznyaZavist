@@ -43,6 +43,7 @@ from app.keyboards.inline import (
     _build_main_menu_keyboard,
     _build_mood_selection_keyboard,
     _build_quests_menu_keyboard,
+    _build_quests_section_keyboard,
     _build_request_gender_keyboard,
     _build_session_settings_keyboard,
     _build_settings_menu_keyboard,
@@ -1034,7 +1035,35 @@ async def quests_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not _quests_access_allowed(profile):
         await query.answer("Раздел недоступен для вашей категории.", show_alert=True)
         return
-    await query.message.reply_text("🗺️Раздел квестов скоро будет доступен.")
+    await query.message.edit_text(
+        "🗝 РАЗДЕЛ: КВЕСТЫ\n\n"
+        "Сейчас вы находитесь в разделе квестов, выберите кнопки ниже и выбирайте задания на свой вкус!\n\n"
+        '🔆За выполненные задания вы будете получать специальную валюту "Токены" которые в будущем обновлении можно обменять на прикольные плюшки (подарки тг, звезды)\n\n'
+        "❗️Не используйте нейросеть для выполнения задач, это наказуемо!",
+        reply_markup=_build_quests_section_keyboard(),
+    )
+
+
+async def quests_back_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if not query or not update.effective_user:
+        return
+    await query.answer()
+    profile = _ensure_profile(
+        context,
+        str(update.effective_user.id),
+        update.effective_user.username or f"id{update.effective_user.id}",
+    )
+    if not _quests_access_allowed(profile):
+        await query.answer("Раздел недоступен для вашей категории.", show_alert=True)
+        return
+    await query.message.edit_text(
+        "🗝️ **РАЗДЕЛ: ЗАГАДКИ И КВЕСТЫ**\n\n"
+        "Добро пожаловать в раздел **«Загадки и квесты»**!\n\n"
+        "Здесь вас ждут различные загадки, головоломки и небольшие задания.",
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=_build_quests_menu_keyboard(),
+    )
 
 
 async def riddles_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
