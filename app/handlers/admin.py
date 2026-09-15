@@ -3822,9 +3822,9 @@ async def kd_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         parts = shlex.split(raw_text[cmd_len:].strip())
     except ValueError:
         parts = []
-    if len(parts) != 3 or parts[1].lower() != "bug-" or not parts[2].isdigit():
+    if len(parts) != 3 or parts[1].lower().rstrip("-") != "bug" or not parts[2].isdigit():
         await update.message.reply_text(
-            'Используйте: /kd "id_profile" bug- "time_kd", где time_kd — минуты.'
+            'Используйте: /kd "id_profile" bug "time_kd", где time_kd — минуты.'
         )
         return
 
