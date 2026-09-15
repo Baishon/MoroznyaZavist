@@ -69,6 +69,15 @@ def _build_candidate_gender_keyboard(user_id: str) -> InlineKeyboardMarkup:
     )
 
 
+def _build_request_gender_keyboard(user_id: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [[
+            InlineKeyboardButton("👨 Мальчик", callback_data=f"request_gender_{user_id}_male"),
+            InlineKeyboardButton("👩 Девочка", callback_data=f"request_gender_{user_id}_female"),
+        ]]
+    )
+
+
 def _build_candidate_profile_keyboard(
     user_id: str,
     images_saved: bool = False,

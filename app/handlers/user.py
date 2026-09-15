@@ -43,6 +43,7 @@ from app.keyboards.inline import (
     _build_main_menu_keyboard,
     _build_mood_selection_keyboard,
     _build_quests_menu_keyboard,
+    _build_request_gender_keyboard,
     _build_session_settings_keyboard,
     _build_settings_menu_keyboard,
 )
@@ -488,16 +489,40 @@ async def send_admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "—\n"
         "› Заявки, поступившие в ночное время (с 0:00 до 09:30 по МСК), будут обрабатываться с начала рабочего дня."
     )
-    menu_keyboard = ReplyKeyboardMarkup(
-        [
-            [KeyboardButton("👨 Мальчик"), KeyboardButton("👩 Девочка")],
-            [KeyboardButton("◀️ Назад")]
-        ],
-        resize_keyboard=True,
-        one_time_keyboard=False,
+    await update.message.reply_text(
+        "Для возврата используйте кнопку ниже.",
+        reply_markup=ReplyKeyboardMarkup(
+            [[KeyboardButton("◀️ Назад")]],
+            resize_keyboard=True,
+            one_time_keyboard=False,
+        ),
     )
-    await update.message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=menu_keyboard)
+    await update.message.reply_text(
+        text,
+        parse_mode=ParseMode.HTML,
+        reply_markup=_build_request_gender_keyboard(str(update.effective_user.id)),
+    )
 
+
+async def request_gender_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = query.data or ""
+    parts = data.split("_")
+    if len(parts) != 4:
+        return
+
+    user_id, gender_key = parts[2], parts[3]
+    if not update.effective_user or str(update.effective_user.id) != user_id:
+        await query.answer("Кнопка доступна только владельцу запроса", show_alert=True)
+        return
+    if gender_key not in {"male", "female"}:
+        return
+
+    context.user_data["admin_gender"] = gender_key
+    context.user_data["profile"] = 2
+    await query.message.edit_reply_markup(reply_markup=None)
+    await send_mood_menu(update, context)
 
 
 async def send_main_submenu(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1775,7 +1800,8 @@ async def track_user_message(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def send_mood_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["last_category_step"] = 2
     context.user_data["mood_selected"] = []
-    await update.message.reply_text(
+    message = update.callback_query.message if update.callback_query else update.message
+    await message.reply_text(
         "Для возврата используйте кнопку ниже.",
         reply_markup=ReplyKeyboardMarkup(
             [[KeyboardButton("◀️ Назад")]],
@@ -1792,7 +1818,7 @@ async def send_mood_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🔥<b>Флирт</b> - Для тех, кто любит поролить и называть милыми словами"
     )
     user_id = str(update.effective_user.id)
-    await update.message.reply_text(
+    await message.reply_text(
         text,
         parse_mode=ParseMode.HTML,
         reply_markup=_build_mood_selection_keyboard(user_id, []),
@@ -1867,23 +1893,20 @@ async def _submit_admin_search(update: Update, context: ContextTypes.DEFAULT_TYP
 
     context.user_data["mood"] = ", ".join(moods)
     context.user_data["profile"] = 0
-    first_confirmation = await context.bot.send_message(
-        chat_id=user_id,
-        text=(
-            "››› Запрос успешно создан 🔎\n"
-            "Все свободные администраторы уведомлены, ожидайте от 10 до 120 минут❤️\n\n"
-            "Если ваш запрос не был рассмотрен больше 2 часов, пожалуйста отправьте сообщение в техническую поддержку а мы разберемся с админами."
-        ),
-        reply_markup=ReplyKeyboardRemove(),
-    )
     user = update.effective_user
-    user_confirmation = await context.bot.send_message(
-        chat_id=user_id,
-        text="Если хотите отменить поиск администратора — нажмите кнопку ниже.",
+    confirmation_text = (
+        "››› Запрос успешно создан 🔎\n"
+        "Все свободные администраторы уведомлены, ожидайте от 10 до 120 минут❤️\n\n"
+        "Если ваш запрос не был рассмотрен больше 2 часов, пожалуйста отправьте сообщение в техническую поддержку а мы разберемся с админами."
+    )
+    await query.message.edit_text(
+        confirmation_text,
         reply_markup=InlineKeyboardMarkup(
             [[InlineKeyboardButton("Отменить", callback_data=f"cancel_search_{user.id}")]]
         ),
     )
+    first_confirmation = update.callback_query.message
+    user_confirmation = update.callback_query.message
 
     chat_id = WORK_CHAT_ID
     username = f"@{user.username}" if user.username else f"id{user.id}"

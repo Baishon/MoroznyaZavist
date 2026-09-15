@@ -164,6 +164,7 @@ from app.handlers.user import (
     riddles_callback,
     return_to_dialog_menu_handler,
     return_to_main_menu_handler,
+    request_gender_callback,
     send_admin_profile,
     send_profile,
     session_rp_disable_cancel_callback,
@@ -342,6 +343,7 @@ def build_application():
     app.add_handler(CallbackQueryHandler(candidate_tip_next_callback, pattern=r"^candidate_tip_next_\d+$"))
     app.add_handler(CallbackQueryHandler(mood_selection_callback, pattern=r"^mood_toggle_\d+_(chat|support|flirt)$"))
     app.add_handler(CallbackQueryHandler(mood_selection_next_callback, pattern=r"^mood_next_\d+$"))
+    app.add_handler(CallbackQueryHandler(request_gender_callback, pattern=r"^request_gender_\d+_(male|female)$"))
     app.add_handler(CallbackQueryHandler(candidate_gender_callback, pattern=r"^candidate_gender_\d+_(male|female)$"))
     app.add_handler(CallbackQueryHandler(candidate_application_callback, pattern=r"^candidate_application_\d+$"))
     app.add_handler(CallbackQueryHandler(candidate_character_callback, pattern=r"^candidate_character_\d+$"))
