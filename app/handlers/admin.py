@@ -81,6 +81,7 @@ from app.services.profiles import (
     _record_admin_reputation_activity,
     _admin_rest_until,
     _is_admin_on_rest,
+    get_ban_remaining_seconds,
     _set_last_admin_tag_for_user,
     _set_user_blocked_bot_state,
     is_user_banned,
@@ -2206,11 +2207,32 @@ async def _send_moderation_user_list(update: Update, context: ContextTypes.DEFAU
     profiles = context.application.bot_data.get("profiles", {}) or {}
     for telegram_id, profile in profiles.items():
         profile = profile or {}
+        reason = str(profile.get("reason") or "не указана")
+        expires_text = "бессрочно"
         if list_type == "ban":
             if not is_user_banned(context, str(telegram_id)):
                 continue
+            ban_entry = (context.application.bot_data.get("banned_users", {}) or {}).get(str(telegram_id), {})
+            if isinstance(ban_entry, dict):
+                reason = str(ban_entry.get("reason") or reason)
+            remaining = get_ban_remaining_seconds(context, str(telegram_id))
+            if remaining is not None:
+                expires_text = format_ban_remaining(remaining)
         elif refresh_timed_warnings(profile) <= 0:
             continue
+        else:
+            timed_warns = profile.get("timed_warns", [])
+            active_expirations = []
+            if isinstance(timed_warns, list):
+                for expiration in timed_warns:
+                    try:
+                        active_expirations.append(float(expiration))
+                    except (TypeError, ValueError):
+                        continue
+            if active_expirations:
+                expires_text = format_ban_remaining(
+                    max(0, int(min(active_expirations) - time.time()))
+                )
 
         username = str(profile.get("username") or "").strip()
         username_text = username if username.startswith("@") else f"@{username}" if username else "не указан"
@@ -2219,7 +2241,7 @@ async def _send_moderation_user_list(update: Update, context: ContextTypes.DEFAU
             profile_id = int(profile.get("id_profile", 0) or 0)
         except (TypeError, ValueError):
             profile_id = 0
-        rows.append((profile_id, nickname, username_text, telegram_id))
+        rows.append((profile_id, nickname, username_text, telegram_id, reason, expires_text))
 
     rows.sort(key=lambda row: (row[0] <= 0, row[0], str(row[3])))
     title = "⛔ Список пользователей с действующей блокировкой" if list_type == "ban" else "⚠️ Список пользователей с предупреждениями"
@@ -2228,12 +2250,14 @@ async def _send_moderation_user_list(update: Update, context: ContextTypes.DEFAU
         return
 
     lines = [title, ""]
-    for profile_id, nickname, username_text, telegram_id in rows:
+    for profile_id, nickname, username_text, telegram_id, reason, expires_text in rows:
         lines.append(
             f"Ник: {nickname}\n"
             f"{username_text}\n"
             f"id_profile: {profile_id}\n"
             f"id_telegram: {telegram_id}\n"
+            f"Причина: {reason}\n"
+            f"Срок действия: {expires_text}\n"
         )
     await update.message.reply_text("\n".join(lines).rstrip())
 
