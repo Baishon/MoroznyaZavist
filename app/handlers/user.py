@@ -1665,6 +1665,9 @@ async def bug_report_text_input_handler(update: Update, context: ContextTypes.DE
     if update.effective_user.is_bot:
         return
 
+    if await _route_bug_ticket_message(update, context):
+        raise ApplicationHandlerStop
+
     pending = context.application.bot_data.setdefault("pending_bug_reports", {})
     user_id = str(update.effective_user.id)
     entry = pending.get(user_id)
@@ -1679,19 +1682,39 @@ async def bug_report_text_input_handler(update: Update, context: ContextTypes.DE
         await update.message.reply_text("Текст не должен быть пустым.")
         raise ApplicationHandlerStop
 
-    entry["state"] = "await_proof"
     entry["draft_text"] = report_text
-    await update.message.reply_text(
-        "📎Пришлите изображение-доказательство (скрин/фото) или нажмите «Далее», если доказательство не нужно.\n\n"
-        "После этого жалоба будет отправлена в технический раздел.",
-        reply_markup=InlineKeyboardMarkup(
-            [[
-                InlineKeyboardButton("Далее", callback_data=f"bug_report_confirm_{user_id}"),
-            ], [
-                InlineKeyboardButton("отмена", callback_data=f"bug_report_cancel_{user_id}"),
-            ]]
+    ticket_id = str(entry.get("ticket_id") or _next_bug_ticket_id(context))
+    profile = _ensure_profile(context, user_id, update.effective_user.username or f"id{user_id}")
+    id_profile = int(profile.get("id_profile", 0) or 0)
+    admin_message = await context.bot.send_message(
+        chat_id=BUG_TICKET_ADMIN_ID,
+        text=(
+            f"🎫Новый тикет #{ticket_id}\n\n"
+            f"id_profile: #{id_profile}\nuser_id: {user_id}\n\n"
+            f"Текст: {report_text}\n\nПримите тикет, чтобы начать переписку."
         ),
+        reply_markup=InlineKeyboardMarkup([[
+            InlineKeyboardButton("✅ Принять", callback_data=f"ticket_accept_{ticket_id}"),
+            InlineKeyboardButton("❌ Отказать", callback_data=f"ticket_reject_{ticket_id}"),
+        ]]),
     )
+    tickets = context.application.bot_data.setdefault("bug_tickets", {})
+    tickets[ticket_id] = {
+        "user_id": user_id,
+        "admin_id": str(BUG_TICKET_ADMIN_ID),
+        "status": "pending",
+        "report_text": report_text,
+        "photo_file_id": None,
+        "admin_message_id": admin_message.message_id,
+    }
+    user_message = await update.message.reply_text(
+        f"✅Тикет #{ticket_id} создан и отправлен владельцу.",
+        reply_markup=_ticket_close_keyboard(ticket_id),
+    )
+    tickets[ticket_id]["user_message_id"] = user_message.message_id
+    pending.pop(user_id, None)
+    _activate_complaint_cooldown(context, user_id, profile, "bug_report_cooldown_until")
+    _save_runtime_snapshot(context)
     raise ApplicationHandlerStop
 
 
@@ -1700,6 +1723,9 @@ async def bug_report_photo_input_handler(update: Update, context: ContextTypes.D
         return
     if update.effective_user.is_bot:
         return
+
+    if await _route_bug_ticket_message(update, context):
+        raise ApplicationHandlerStop
 
     pending = context.application.bot_data.setdefault("pending_bug_reports", {})
     user_id = str(update.effective_user.id)
