@@ -5382,6 +5382,19 @@ async def admin_group_message_handler(update: Update, context: ContextTypes.DEFA
         return
     if active_target and active_target.get("rest_paused"):
         return
+    session_admin_profile = (
+        (context.application.bot_data.get("profiles", {}) or {}).get(
+            str((active_target or {}).get("admin_id") or "")
+        )
+        or {}
+    )
+    if _is_admin_on_rest(profile) or _is_admin_on_rest(session_admin_profile):
+        logging.info(
+            "Admin %s is on rest; skip forwarding message from topic %s",
+            update.effective_user.id,
+            topic_id,
+        )
+        return
 
     sender_id = str(update.effective_user.id)
     session_admin_id = str(active_target.get("admin_id") or "") if active_target else ""
