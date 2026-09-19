@@ -157,6 +157,7 @@ from app.handlers.user import (
     deny_cancel_callback,
     find_admin_menu_callback,
     handle_decline_reason_reply,
+    help_menu_handler,
     pause_session_cancel_callback,
     pause_session_confirm_callback,
     pause_session_request,
@@ -432,6 +433,7 @@ def build_application():
     app.add_handler(MessageHandler(filters.Regex("^🔕Отключить рекламу$") & filters.ChatType.PRIVATE, settings_disable_ad_handler))
     app.add_handler(MessageHandler(filters.Regex("^🔔Включить рекламу$") & filters.ChatType.PRIVATE, settings_enable_ad_handler))
     app.add_handler(MessageHandler(filters.Regex("^👨‍🏫Квесты и загадки$") & filters.ChatType.PRIVATE, quests_menu_handler))
+    app.add_handler(MessageHandler(filters.Regex("^❓Помощь$") & filters.ChatType.PRIVATE, help_menu_handler))
     app.add_handler(MessageHandler(filters.Regex("^↩️Назад$") & filters.ChatType.PRIVATE, settings_back_handler))
     app.add_handler(MessageHandler(filters.Regex("^👤 Профиль$"), send_profile))
     app.add_handler(MessageHandler(filters.Regex("^🔰Админ-профиль$") & filters.ChatType.PRIVATE, send_admin_profile))

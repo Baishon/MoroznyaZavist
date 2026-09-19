@@ -649,6 +649,16 @@ async def send_main_submenu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Выберите действие в меню ниже:", reply_markup=menu_keyboard)
 
 
+async def help_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or update.effective_chat.type != ChatType.PRIVATE:
+        return
+    if await block_if_banned(update, context):
+        return
+    await update.message.reply_text(
+        "🔈Уважаемый пользователь, помощь по использованию нашего бота вы можете увидеть нажав на ссылку ниже. https://t.me/berlogaAskly/58"
+    )
+
+
 async def send_active_session_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or update.effective_chat.type != ChatType.PRIVATE:
         return
