@@ -142,6 +142,7 @@ def _build_main_menu_keyboard(context: ContextTypes.DEFAULT_TYPE, user_id: int |
     active = (context.application.bot_data.get("active_chats", {}) or {}).get(str(user_id))
     if active and active.get("active"):
         rows.append([KeyboardButton("↩️Вернуться к кнопкам диалога")])
+    rows.append([KeyboardButton("❓Помощь")])
     rows.append([KeyboardButton("⚙️Настройки")])
     return ReplyKeyboardMarkup(
         rows,
