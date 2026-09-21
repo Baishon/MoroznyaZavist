@@ -44,6 +44,7 @@ from app.keyboards.inline import (
     _build_astats_tip_editor_keyboard,
     _build_info_topic_keyboard,
     _build_info_topic_text,
+    _build_chat_menu_keyboard,
     _build_log_chat_menu_keyboard,
     _build_main_menu_keyboard,
     _build_setprefix_keyboard,
@@ -983,6 +984,76 @@ async def log_ping_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await response.edit_text(
         f"💬Пинг: {elapsed_ms} мс\n"
         f"🕒 Киевское время: {kyiv_now}"
+    )
+
+
+async def restart_chat_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or not update.effective_chat or update.effective_chat.id != OFFICIAL_CHANNEL_ID:
+        return
+    await update.message.reply_text(
+        "✅Подменю чата общения обновлено.",
+        reply_markup=_build_chat_menu_keyboard(),
+    )
+
+
+async def my_admin_norm_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or not update.effective_chat or update.effective_chat.id != OFFICIAL_CHANNEL_ID:
+        return
+    if not update.effective_user or update.effective_user.is_bot:
+        return
+
+    user_id = str(update.effective_user.id)
+    profile = _ensure_profile(
+        context,
+        user_id,
+        update.effective_user.username or f"id{user_id}",
+    )
+    level = _effective_admin_level(profile)
+    if level < 1:
+        await update.message.reply_text("Кнопка доступна только администраторам.")
+        return
+
+    now = time.time()
+    cutoff = now - 7 * 86400
+    messages = 0
+    rp_commands = 0
+    history = profile.get("admin_activity_history", [])
+    if isinstance(history, list):
+        for entry in history:
+            if not isinstance(entry, dict):
+                continue
+            try:
+                timestamp = float(entry.get("timestamp", 0) or 0)
+            except (TypeError, ValueError):
+                continue
+            if timestamp < cutoff:
+                continue
+            if entry.get("type") == "message":
+                messages += 1
+            elif entry.get("type") == "rp":
+                rp_commands += 1
+
+    reputation = messages // 20 + rp_commands // 5
+    norm_status = "✅ Норма выполнена" if messages >= 110 else "❌ Норма не выполнена"
+    rest_until = _admin_rest_until(profile)
+    rest_status = (
+        f"🛥 Администратор в ресте до {_format_kyiv_datetime(rest_until)}"
+        if rest_until > now
+        else "✅ Администратор не в ресте"
+    )
+    tag = str(profile.get("tag_admin") or profile.get("user_nickname") or "не указан")
+    profile_id = profile.get("id_profile", "не указан")
+    role = ADMIN_LEVEL_TITLES.get(level, "Не назначена")
+    await update.message.reply_text(
+        "📊 Моя норма за неделю\n\n"
+        f"Тег: {tag}\n"
+        f"🆔 id_profile: {profile_id}\n"
+        f"💼 Должность: {role}\n"
+        f"💬 Рабочих сообщений: {messages}/110\n"
+        f"{norm_status}\n"
+        f"⭐ Репутация за неделю: {reputation}\n"
+        f"🎭 RP-команд за неделю: {rp_commands}\n"
+        f"{rest_status}"
     )
 
 
