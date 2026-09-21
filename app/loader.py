@@ -25,6 +25,8 @@ from app.handlers.admin import (
     admin_group_message_handler,
     admin_candidate_command_guard,
     admin_mute_guard_handler,
+    admin_period_callback,
+    admin_period_menu_handler,
     admin_take_callback,
     amute_command_handler,
     anpiar_command_handler,
@@ -307,6 +309,13 @@ def build_application():
         ),
         group=-1,
     )
+    app.add_handler(
+        MessageHandler(
+            filters.Regex("^📊Статистика администрации$") & filters.Chat(LOG_CHAT_ID),
+            admin_period_menu_handler,
+        ),
+        group=-1,
+    )
     app.add_handler(MessageHandler(filters.TEXT & filters.Chat(LOG_CHAT_ID), log_command_router), group=-1)
     app.add_handler(
         MessageHandler(
@@ -351,6 +360,7 @@ def build_application():
     app.add_handler(CommandHandler("thanks", thanks_command_handler, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("restart", restart_command_handler, filters=filters.ChatType.PRIVATE))
     app.add_handler(CallbackQueryHandler(cancel_search_callback, pattern=r"^cancel_search_\d+$"))
+    app.add_handler(CallbackQueryHandler(admin_period_callback, pattern=r"^admin_period_(day|week|month)$"))
     app.add_handler(CallbackQueryHandler(confirm_cancel_callback, pattern=r"^confirm_cancel_\d+$"))
     app.add_handler(CallbackQueryHandler(deny_cancel_callback, pattern=r"^deny_cancel_\d+$"))
     app.add_handler(CallbackQueryHandler(admin_take_callback, pattern=r"^take_user_\d+$"))

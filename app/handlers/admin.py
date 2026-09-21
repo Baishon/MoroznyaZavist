@@ -986,6 +986,89 @@ async def log_ping_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+def _admin_period_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [[
+            InlineKeyboardButton("📅 Дневная", callback_data="admin_period_day"),
+            InlineKeyboardButton("📅 Недельная", callback_data="admin_period_week"),
+            InlineKeyboardButton("📅 Месяц", callback_data="admin_period_month"),
+        ]]
+    )
+
+
+async def admin_period_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or update.effective_chat.id != LOG_CHAT_ID:
+        return
+    await update.message.reply_text(
+        "Выберите сколько должно подсчитать норму администрации",
+        reply_markup=_admin_period_keyboard(),
+    )
+
+
+async def admin_period_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    if not query.message or query.message.chat_id != LOG_CHAT_ID:
+        return
+
+    period_key = (query.data or "").rsplit("_", 1)[-1]
+    period_days = {"day": 1, "week": 7, "month": 30}.get(period_key)
+    period_title = {"day": "за день", "week": "за неделю", "month": "за месяц"}.get(period_key)
+    if period_days is None or period_title is None:
+        return
+
+    now = time.time()
+    cutoff = now - period_days * 86400
+    profiles = context.application.bot_data.get("profiles", {}) or {}
+    rows = []
+    for telegram_id, profile in profiles.items():
+        profile = profile or {}
+        level = _effective_admin_level(profile)
+        if level < 1:
+            continue
+        history = profile.get("admin_activity_history", [])
+        if not isinstance(history, list):
+            history = []
+        messages = 0
+        rp_commands = 0
+        for entry in history:
+            if not isinstance(entry, dict):
+                continue
+            try:
+                timestamp = float(entry.get("timestamp", 0) or 0)
+            except (TypeError, ValueError):
+                continue
+            if timestamp < cutoff:
+                continue
+            if entry.get("type") == "message":
+                messages += 1
+            elif entry.get("type") == "rp":
+                rp_commands += 1
+        reputation = messages // 20 + rp_commands // 5
+        rest_until = _admin_rest_until(profile)
+        rest_text = (
+            f"🛥 в ресте до {_format_kyiv_datetime(rest_until)}"
+            if rest_until > now
+            else "✅ не в ресте"
+        )
+        tag = str(profile.get("tag_admin") or profile.get("user_nickname") or "не указан")
+        profile_id = profile.get("id_profile", "не указан")
+        role = ADMIN_LEVEL_TITLES.get(level, "Не назначена")
+        norm = "✅" if messages >= 110 else "❌"
+        rows.append(
+            f"{norm} {tag} | id_profile: {profile_id}\n"
+            f"Должность: {role}\n"
+            f"Рабочих сообщений: {messages}/110\n"
+            f"Репутация {period_title}: ⭐ {reputation}\n"
+            f"{rest_text}"
+        )
+
+    rows.sort()
+    text = f"📊Статистика администрации {period_title}\n\n"
+    text += "\n\n".join(rows) if rows else "Администраторы не найдены."
+    await query.edit_message_text(text)
+
+
 async def givetopic_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if (
         not update.message
