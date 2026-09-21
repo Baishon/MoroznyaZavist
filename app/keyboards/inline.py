@@ -153,7 +153,10 @@ def _build_main_menu_keyboard(context: ContextTypes.DEFAULT_TYPE, user_id: int |
 
 def _build_log_chat_menu_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
-        [[KeyboardButton("💬Пинг")]],
+        [
+            [KeyboardButton("💬Пинг")],
+            [KeyboardButton("👥Список администрации")],
+        ],
         resize_keyboard=True,
         one_time_keyboard=False,
     )
