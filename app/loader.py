@@ -14,7 +14,7 @@ from telegram import BotCommand
 from telegram.ext import ApplicationBuilder, CallbackQueryHandler, CommandHandler, MessageHandler, MessageReactionHandler, filters
 
 from app import logging_setup  # noqa: F401  (side effect: attaches Telegram log handler)
-from app.config import COOPERATION_CHAT_ID, LOG_CHAT_ID, TOKEN, WORK_CHAT_ID
+from app.config import COOPERATION_CHAT_ID, LOG_CHAT_ID, OFFICIAL_CHANNEL_ID, TOKEN, WORK_CHAT_ID
 from app.database.requests import (
     _init_persistent_storage,
     _save_incoming_message,
@@ -27,6 +27,7 @@ from app.handlers.admin import (
     admin_mute_guard_handler,
     admin_period_callback,
     admin_period_menu_handler,
+    my_admin_norm_handler,
     admin_take_callback,
     amute_command_handler,
     anpiar_command_handler,
@@ -84,6 +85,7 @@ from app.handlers.admin import (
     makeadmin_command_handler,
     pm_command_handler,
     prava_command_handler,
+    restart_chat_menu_handler,
     restart_log_chat_menu_handler,
     reject_candidate_callback,
     reject_decline_callback,
@@ -319,6 +321,13 @@ def build_application():
     app.add_handler(MessageHandler(filters.TEXT & filters.Chat(LOG_CHAT_ID), log_command_router), group=-1)
     app.add_handler(
         MessageHandler(
+            filters.Regex("^📊Моя норма$") & filters.Chat(OFFICIAL_CHANNEL_ID),
+            my_admin_norm_handler,
+        ),
+        group=-1,
+    )
+    app.add_handler(
+        MessageHandler(
             filters.COMMAND & (filters.ChatType.GROUP | filters.ChatType.SUPERGROUP | filters.ChatType.CHANNEL),
             admin_candidate_command_guard,
         ),
@@ -359,6 +368,7 @@ def build_application():
     app.add_handler(CommandHandler("start", start, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("thanks", thanks_command_handler, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("restart", restart_command_handler, filters=filters.ChatType.PRIVATE))
+    app.add_handler(CommandHandler("restartchat", restart_chat_menu_handler, filters=filters.Chat(OFFICIAL_CHANNEL_ID)), group=-1)
     app.add_handler(CallbackQueryHandler(cancel_search_callback, pattern=r"^cancel_search_\d+$"))
     app.add_handler(CallbackQueryHandler(admin_period_callback, pattern=r"^admin_period_(day|week|month)$"))
     app.add_handler(CallbackQueryHandler(confirm_cancel_callback, pattern=r"^confirm_cancel_\d+$"))

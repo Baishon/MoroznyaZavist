@@ -164,6 +164,14 @@ def _build_log_chat_menu_keyboard() -> ReplyKeyboardMarkup:
     )
 
 
+def _build_chat_menu_keyboard() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        [[KeyboardButton("📊Моя норма")]],
+        resize_keyboard=True,
+        one_time_keyboard=False,
+    )
+
+
 def _build_quests_menu_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
