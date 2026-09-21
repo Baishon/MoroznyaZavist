@@ -5690,6 +5690,13 @@ async def admin_group_message_handler(update: Update, context: ContextTypes.DEFA
             )
         return
 
+    _record_admin_reputation_activity(
+        context,
+        update.effective_user.id,
+        messages=1,
+        rp_commands=int(_is_rp_action_text(update.message.text or update.message.caption)),
+    )
+
     senior_signature = (
         _senior_admin_forward_signature(profile)
         if sender_id != session_admin_id
@@ -5784,7 +5791,6 @@ async def admin_group_message_handler(update: Update, context: ContextTypes.DEFA
             active_target["rp_topic"] = int(active_target.get("rp_topic", 0) or 0) + 1
             active_target["last_rp_action"] = getattr(message, "text", None) or getattr(message, "caption", None) or "RP"
             context.application.bot_data["total_admin_replies"] = int(context.application.bot_data.get("total_admin_replies", 0) or 0) + 1
-            _record_admin_reputation_activity(context, update.effective_user.id, messages=1, rp_commands=1)
         return
 
     # Forward the message to the user's private chat.
@@ -5802,12 +5808,6 @@ async def admin_group_message_handler(update: Update, context: ContextTypes.DEFA
                 if _is_rp_action_text(update.message.text or update.message.caption):
                     active_target["rp_topic"] = int(active_target.get("rp_topic", 0) or 0) + 1
                     active_target["last_rp_action"] = getattr(message, "text", None) or getattr(message, "caption", None) or "RP"
-                _record_admin_reputation_activity(
-                    context,
-                    update.effective_user.id,
-                    messages=1,
-                    rp_commands=int(_is_rp_action_text(update.message.text or update.message.caption)),
-                )
             logging.info("Forwarded text from group topic %s msg=%s to user %s via send_message", topic_id, update.message.message_id, target_user)
             return
 
@@ -5822,12 +5822,6 @@ async def admin_group_message_handler(update: Update, context: ContextTypes.DEFA
             if _is_rp_action_text(update.message.text or update.message.caption):
                 active_target["rp_topic"] = int(active_target.get("rp_topic", 0) or 0) + 1
                 active_target["last_rp_action"] = getattr(message, "text", None) or getattr(message, "caption", None) or "RP"
-            _record_admin_reputation_activity(
-                context,
-                update.effective_user.id,
-                messages=1,
-                rp_commands=int(_is_rp_action_text(update.message.text or update.message.caption)),
-            )
         logging.info("Forwarded non-text message from group topic %s msg=%s to user %s (copied id=%s)", topic_id, update.message.message_id, target_user, getattr(res, 'message_id', None))
         return
     except BadRequest as e:
@@ -5866,12 +5860,6 @@ async def admin_group_message_handler(update: Update, context: ContextTypes.DEFA
             if _is_rp_action_text(update.message.text or update.message.caption):
                 active_target["rp_topic"] = int(active_target.get("rp_topic", 0) or 0) + 1
                 active_target["last_rp_action"] = getattr(message, "text", None) or getattr(message, "caption", None) or "RP"
-            _record_admin_reputation_activity(
-                context,
-                update.effective_user.id,
-                messages=1,
-                rp_commands=int(_is_rp_action_text(update.message.text or update.message.caption)),
-            )
         logging.info("Fallback delivered message %s to user %s", update.message.message_id, target_user)
     except Forbidden as e:
         err = str(e).lower()

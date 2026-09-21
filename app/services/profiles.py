@@ -225,10 +225,17 @@ def _record_admin_reputation_activity(
         activity_history.append({"timestamp": now, "type": "message"})
     for _ in range(max(0, int(rp_commands or 0))):
         activity_history.append({"timestamp": now, "type": "rp"})
-    profile["admin_activity_history"] = [
-        entry for entry in activity_history
-        if isinstance(entry, dict) and now - float(entry.get("timestamp", 0) or 0) <= 366 * 86400
-    ]
+    cleaned_history = []
+    for entry in activity_history:
+        if not isinstance(entry, dict):
+            continue
+        try:
+            timestamp = float(entry.get("timestamp", 0) or 0)
+        except (TypeError, ValueError):
+            continue
+        if now - timestamp <= 366 * 86400:
+            cleaned_history.append(entry)
+    profile["admin_activity_history"] = cleaned_history
     message_awards = _counter("admin_reputation_message_awards")
     rp_awards = _counter("admin_reputation_rp_awards")
     new_message_awards = max(0, message_count // 20 - message_awards)
