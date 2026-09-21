@@ -293,6 +293,13 @@ def build_application():
         group=-1,
     )
     app.add_handler(MessageHandler(filters.Regex("^💬Пинг$") & filters.Chat(LOG_CHAT_ID), log_ping_handler), group=-1)
+    app.add_handler(
+        MessageHandler(
+            filters.Regex("^👥Список администрации$") & filters.Chat(LOG_CHAT_ID),
+            admins_command_handler,
+        ),
+        group=-1,
+    )
     app.add_handler(MessageHandler(filters.TEXT & filters.Chat(LOG_CHAT_ID), log_command_router), group=-1)
     app.add_handler(
         MessageHandler(
