@@ -157,6 +157,7 @@ def _build_log_chat_menu_keyboard() -> ReplyKeyboardMarkup:
             [KeyboardButton("💬Пинг")],
             [KeyboardButton("👥Список администрации")],
             [KeyboardButton("🛥Список администраторов в ресте")],
+            [KeyboardButton("📊Статистика администрации")],
         ],
         resize_keyboard=True,
         one_time_keyboard=False,

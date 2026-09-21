@@ -216,6 +216,19 @@ def _record_admin_reputation_activity(
 
     message_count = _counter("admin_reputation_messages") + max(0, int(messages or 0))
     rp_count = _counter("admin_reputation_rp_commands") + max(0, int(rp_commands or 0))
+    activity_history = profile.setdefault("admin_activity_history", [])
+    if not isinstance(activity_history, list):
+        activity_history = []
+        profile["admin_activity_history"] = activity_history
+    now = time.time()
+    for _ in range(max(0, int(messages or 0))):
+        activity_history.append({"timestamp": now, "type": "message"})
+    for _ in range(max(0, int(rp_commands or 0))):
+        activity_history.append({"timestamp": now, "type": "rp"})
+    profile["admin_activity_history"] = [
+        entry for entry in activity_history
+        if isinstance(entry, dict) and now - float(entry.get("timestamp", 0) or 0) <= 366 * 86400
+    ]
     message_awards = _counter("admin_reputation_message_awards")
     rp_awards = _counter("admin_reputation_rp_awards")
     new_message_awards = max(0, message_count // 20 - message_awards)
