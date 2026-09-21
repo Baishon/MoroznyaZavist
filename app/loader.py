@@ -78,9 +78,11 @@ from app.handlers.admin import (
     info_topic_stop_confirm_callback,
     kus_command_handler,
     log_command_router,
+    log_ping_handler,
     makeadmin_command_handler,
     pm_command_handler,
     prava_command_handler,
+    restart_log_chat_menu_handler,
     reject_candidate_callback,
     reject_decline_callback,
     sendpiar_command_handler,
@@ -291,6 +293,7 @@ def build_application():
         group=-1,
     )
     app.add_handler(MessageHandler(filters.TEXT & filters.Chat(LOG_CHAT_ID), log_command_router), group=-1)
+    app.add_handler(MessageHandler(filters.Regex("^💬Пинг$") & filters.Chat(LOG_CHAT_ID), log_ping_handler), group=-1)
     app.add_handler(
         MessageHandler(
             filters.COMMAND & (filters.ChatType.GROUP | filters.ChatType.SUPERGROUP | filters.ChatType.CHANNEL),

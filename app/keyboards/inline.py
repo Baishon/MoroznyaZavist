@@ -151,6 +151,14 @@ def _build_main_menu_keyboard(context: ContextTypes.DEFAULT_TYPE, user_id: int |
     )
 
 
+def _build_log_chat_menu_keyboard() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        [[KeyboardButton("💬Пинг")]],
+        resize_keyboard=True,
+        one_time_keyboard=False,
+    )
+
+
 def _build_quests_menu_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [

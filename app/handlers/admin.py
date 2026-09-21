@@ -44,6 +44,7 @@ from app.keyboards.inline import (
     _build_astats_tip_editor_keyboard,
     _build_info_topic_keyboard,
     _build_info_topic_text,
+    _build_log_chat_menu_keyboard,
     _build_main_menu_keyboard,
     _build_setprefix_keyboard,
     _next_info_topic_panel_id,
@@ -950,6 +951,7 @@ async def log_command_router(update: Update, context: ContextTypes.DEFAULT_TYPE)
         "/givetopic": givetopic_command_handler,
         "/taketopic": taketopic_command_handler,
         "/dump_maps": dump_maps_handler,
+        "/restartcom": restart_log_chat_menu_handler,
     }
 
     handler = command_handlers.get(command)
@@ -958,6 +960,30 @@ async def log_command_router(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     await handler(update, context)
     raise ApplicationHandlerStop
+
+
+async def restart_log_chat_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or not update.effective_chat or update.effective_chat.id != LOG_CHAT_ID:
+        return
+
+    await update.message.reply_text(
+        "✅Подменю технического чата обновлено.",
+        reply_markup=_build_log_chat_menu_keyboard(),
+    )
+
+
+async def log_ping_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or not update.effective_chat or update.effective_chat.id != LOG_CHAT_ID:
+        return
+
+    started_at = time.perf_counter()
+    response = await update.message.reply_text("⏱ Проверяю задержку...")
+    elapsed_ms = round((time.perf_counter() - started_at) * 1000, 2)
+    kyiv_now = datetime.now(ZoneInfo("Europe/Kyiv")).strftime("%d.%m.%Y %H:%M:%S")
+    await response.edit_text(
+        f"💬Пинг: {elapsed_ms} мс\n"
+        f"🕒 Киевское время: {kyiv_now}"
+    )
 
 
 async def givetopic_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
