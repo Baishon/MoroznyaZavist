@@ -2086,25 +2086,50 @@ async def addrest_command_handler(update: Update, context: ContextTypes.DEFAULT_
         active["rest_paused"] = True
         frozen += 1
         date_rest = profile["rest_admin_date"]
+        topic_chat_id = active.get("chat_id")
+        topic_id = active.get("topic_id")
+        topic_url = _topic_url(topic_chat_id, topic_id) or "URL темы не определён"
+        topic_available = True
         try:
-            if active.get("chat_id") is not None and active.get("topic_id") is not None:
+            if topic_chat_id is not None and topic_id is not None:
                 await context.bot.edit_forum_topic(
-                    chat_id=int(active["chat_id"]),
-                    message_thread_id=int(active["topic_id"]),
+                    chat_id=int(topic_chat_id),
+                    message_thread_id=int(topic_id),
                     name=_rest_topic_name(active, on_rest=True),
                 )
+        except BadRequest as exc:
+            error_text = str(exc).lower()
+            if "topic_not_modified" in error_text:
+                pass
+            else:
+                topic_available = False
+                await context.bot.send_message(
+                    chat_id=int(user_id),
+                    text=f"⚠️Тема диалога не найдена или недоступна.\nURL темы: {topic_url}",
+                )
+                logging.warning(
+                    "Rest topic is unavailable for user %s (%s): %s",
+                    user_id,
+                    topic_url,
+                    exc,
+                )
+        except Exception:
+            topic_available = False
+            logging.exception("Failed to freeze rest topic for user %s (%s)", user_id, topic_url)
+
+        try:
             await context.bot.send_message(
                 chat_id=int(user_id),
                 text=f"🛥Ваш администратор находится в ресте до {date_rest}. Он не сможет вам ответить до конца времени",
             )
-            if active.get("chat_id") is not None and active.get("topic_id") is not None:
+            if topic_available and topic_chat_id is not None and topic_id is not None:
                 await context.bot.send_message(
-                    chat_id=int(active["chat_id"]),
-                    message_thread_id=int(active["topic_id"]),
+                    chat_id=int(topic_chat_id),
+                    message_thread_id=int(topic_id),
                     text=f"🛥Тема заморожена: администратор находится в ресте до {date_rest}.",
                 )
         except Exception:
-            logging.exception("Failed to freeze rest session for user %s", user_id)
+            logging.exception("Failed to notify rest session for user %s", user_id)
 
     if context.job_queue:
         for job in context.job_queue.get_jobs_by_name(f"admin_rest:{target_user_id}"):
