@@ -2223,11 +2223,13 @@ async def _submit_admin_search(update: Update, context: ContextTypes.DEFAULT_TYP
         topic = None
         topic_id = None
 
-    topic_message = (
-        "❗️Новый пользователь\n"
-        f"Пол: {admin_gender}\n"
-        f"Тип общения: {mood}\n"
-        f"Юзернейм пользователя: {username}"
+    topic_message = _build_new_user_topic_message(
+        context,
+        chat_id=chat_id,
+        topic_id=topic_id,
+        admin_gender=admin_gender,
+        mood=mood,
+        username=username,
     )
     buttons = InlineKeyboardMarkup(
         [[
@@ -2258,6 +2260,40 @@ async def _submit_admin_search(update: Update, context: ContextTypes.DEFAULT_TYP
     context.user_data.setdefault("admin_request", {})[user_id] = request_data
     context.application.bot_data.setdefault("admin_requests", {})[user_id] = request_data
     _save_runtime_snapshot(context)
+
+
+def _build_new_user_topic_message(
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    chat_id: int,
+    topic_id: int | None,
+    admin_gender: str,
+    mood: str,
+    username: str,
+) -> str:
+    topic_link = _topic_url(chat_id, topic_id) if topic_id is not None else "тема не создана"
+    usernames = []
+    for profile in (context.application.bot_data.get("profiles", {}) or {}).values():
+        profile = profile or {}
+        if not _has_admin_rights_level_1_5(profile):
+            continue
+        admin_username = str(profile.get("username") or "").strip()
+        if not admin_username or admin_username.startswith("id"):
+            continue
+        if not admin_username.startswith("@"):
+            admin_username = f"@{admin_username}"
+        usernames.append(admin_username)
+    usernames = sorted(set(usernames), key=str.casefold)
+    admin_list = "\n".join(usernames) if usernames else "нет username"
+    return (
+        "❗️Новый пользователь\n"
+        f"🔗Рабочая тема: {topic_link}\n"
+        f"Пол: {admin_gender}\n"
+        f"Тип общения: {mood}\n"
+        f"Юзернейм пользователя: {username}\n\n"
+        "👥 Администраторы:\n"
+        f"{admin_list}"
+    )
 
 
 async def choose_mood_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2319,11 +2355,13 @@ async def choose_mood_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             topic = None
             topic_id = None
 
-        topic_message = (
-            "❗️Новый пользователь\n"
-            f"Пол: {admin_gender}\n"
-            f"Тип общения: {mood}\n"
-            f"Юзернейм пользователя: {username}"
+        topic_message = _build_new_user_topic_message(
+            context,
+            chat_id=chat_id,
+            topic_id=topic_id,
+            admin_gender=admin_gender,
+            mood=mood,
+            username=username,
         )
         buttons = InlineKeyboardMarkup(
             [
