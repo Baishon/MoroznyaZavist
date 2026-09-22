@@ -659,6 +659,127 @@ async def help_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+def _admin_shop_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [[InlineKeyboardButton("🛒Купить: снять выговор — 100 репутации", callback_data="admin_shop_buy_reprimand")]]
+    )
+
+
+def _admin_shop_confirmation_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [[
+            InlineKeyboardButton("✅Подтвердить покупку", callback_data="admin_shop_confirm_reprimand"),
+            InlineKeyboardButton("❌Отмена", callback_data="admin_shop_cancel"),
+        ]]
+    )
+
+
+async def admin_shop_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or update.effective_chat.type != ChatType.PRIVATE or not update.effective_user:
+        return
+    if await block_if_banned(update, context):
+        return
+    profile = _ensure_profile(
+        context,
+        str(update.effective_user.id),
+        update.effective_user.username or f"id{update.effective_user.id}",
+    )
+    if not _has_admin_rights_level_1_5(profile):
+        await update.message.reply_text("Админ-магазин доступен только действующим администраторам.")
+        return
+    await update.message.reply_text(
+        "🛒Админ-магазин\n\n"
+        "🧾 Снять выговор — 100 админ-репутации\n"
+        "Снимает один активный админский выговор. Перед покупкой бот проверит наличие "
+        "выговора и достаточное количество репутации.",
+        reply_markup=_admin_shop_keyboard(),
+    )
+
+
+async def admin_shop_buy_reprimand_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    if not update.effective_user:
+        return
+    profile = _ensure_profile(
+        context,
+        str(update.effective_user.id),
+        update.effective_user.username or f"id{update.effective_user.id}",
+    )
+    warns = profile.get("admin_warns", [])
+    try:
+        reputation = int(profile.get("admin_reputation", 0) or 0)
+    except (TypeError, ValueError):
+        reputation = 0
+    if not _has_admin_rights_level_1_5(profile):
+        await query.answer("Покупка доступна только действующим администраторам.", show_alert=True)
+        return
+    if not isinstance(warns, list) or not warns:
+        await query.answer("У вас нет активных выговоров.", show_alert=True)
+        return
+    if reputation < 100:
+        await query.answer(f"Недостаточно репутации: нужно 100, у вас {reputation}.", show_alert=True)
+        return
+    await query.message.edit_text(
+        "⚠️Подтвердите покупку:\n\n"
+        "Снять один админский выговор за 100 админ-репутации?\n"
+        f"После покупки останется репутации: {reputation - 100}.",
+        reply_markup=_admin_shop_confirmation_keyboard(),
+    )
+
+
+async def admin_shop_confirm_reprimand_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    if not update.effective_user:
+        return
+    user_id = str(update.effective_user.id)
+    profile = _ensure_profile(
+        context,
+        user_id,
+        update.effective_user.username or f"id{update.effective_user.id}",
+    )
+    warns = profile.get("admin_warns", [])
+    try:
+        reputation = int(profile.get("admin_reputation", 0) or 0)
+    except (TypeError, ValueError):
+        reputation = 0
+    if not _has_admin_rights_level_1_5(profile) or not isinstance(warns, list) or not warns:
+        await query.message.edit_text("Покупка отменена: активный админский выговор не найден.")
+        return
+    if reputation < 100:
+        await query.message.edit_text("Покупка отменена: недостаточно админ-репутации.")
+        return
+
+    removed_warn = warns.pop()
+    profile["admin_warns"] = warns
+    profile["admin_reputation"] = reputation - 100
+    _save_profile_record(context, user_id)
+    tag_admin = str(profile.get("tag_admin") or profile.get("username") or f"id{user_id}")
+    id_profile = profile.get("id_profile")
+    try:
+        await context.bot.send_message(
+            chat_id=LOG_CHAT_ID,
+            text=(
+                f"🛒Администратор {tag_admin} (id_profile: {id_profile}) "
+                "снял себе один выговор за 100 админ-репутации."
+            ),
+        )
+    except Exception:
+        logging.exception("Failed to notify log chat about admin shop purchase by %s", user_id)
+    await query.message.edit_text(
+        "✅Покупка успешно выполнена.\n"
+        "Один админский выговор снят, списано 100 админ-репутации.\n"
+        f"Осталось выговоров: {len(warns)}, репутации: {profile['admin_reputation']}."
+    )
+
+
+async def admin_shop_cancel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer("Покупка отменена")
+    await query.message.edit_text("Покупка отменена.")
+
+
 async def send_active_session_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or update.effective_chat.type != ChatType.PRIVATE:
         return

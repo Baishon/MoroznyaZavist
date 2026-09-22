@@ -137,6 +137,8 @@ def _build_main_menu_keyboard(context: ContextTypes.DEFAULT_TYPE, user_id: int |
         [KeyboardButton("👤 Найти админа")],
         [KeyboardButton(profile_button)],
     ]
+    if _has_admin_rights_level_1_5(profile):
+        rows.append([KeyboardButton("🛒Админ-магазин")])
     if not _has_admin_rights_level_1_5(profile) or _effective_admin_level(profile) <= 3:
         rows.append([KeyboardButton("👨‍🏫Квесты и загадки")])
     active = (context.application.bot_data.get("active_chats", {}) or {}).get(str(user_id))

@@ -169,6 +169,10 @@ from app.handlers.user import (
     find_admin_menu_callback,
     handle_decline_reason_reply,
     help_menu_handler,
+    admin_shop_menu_handler,
+    admin_shop_buy_reprimand_callback,
+    admin_shop_confirm_reprimand_callback,
+    admin_shop_cancel_callback,
     pause_session_cancel_callback,
     pause_session_confirm_callback,
     pause_session_request,
@@ -476,6 +480,9 @@ def build_application():
     app.add_handler(CallbackQueryHandler(ticket_accept_callback, pattern=r"^ticket_accept_\d+$"))
     app.add_handler(CallbackQueryHandler(ticket_reject_callback, pattern=r"^ticket_reject_\d+$"))
     app.add_handler(CallbackQueryHandler(ticket_close_callback, pattern=r"^ticket_close_\d+$"))
+    app.add_handler(CallbackQueryHandler(admin_shop_buy_reprimand_callback, pattern=r"^admin_shop_buy_reprimand$"))
+    app.add_handler(CallbackQueryHandler(admin_shop_confirm_reprimand_callback, pattern=r"^admin_shop_confirm_reprimand$"))
+    app.add_handler(CallbackQueryHandler(admin_shop_cancel_callback, pattern=r"^admin_shop_cancel$"))
     app.add_handler(CallbackQueryHandler(admin_complaint_cancel_callback, pattern=r"^admin_complaint_cancel_\d+$"))
     app.add_handler(CallbackQueryHandler(admin_complaint_confirm_callback, pattern=r"^admin_complaint_confirm_\d+$"))
     app.add_handler(MessageHandler(filters.Regex("^👤 Найти админа$") & filters.ChatType.PRIVATE, find_admin_menu_callback))
@@ -491,6 +498,7 @@ def build_application():
     app.add_handler(MessageHandler(filters.Regex("^🔔Включить рекламу$") & filters.ChatType.PRIVATE, settings_enable_ad_handler))
     app.add_handler(MessageHandler(filters.Regex("^👨‍🏫Квесты и загадки$") & filters.ChatType.PRIVATE, quests_menu_handler))
     app.add_handler(MessageHandler(filters.Regex("^❓Помощь$") & filters.ChatType.PRIVATE, help_menu_handler))
+    app.add_handler(MessageHandler(filters.Regex("^🛒Админ-магазин$") & filters.ChatType.PRIVATE, admin_shop_menu_handler))
     app.add_handler(MessageHandler(filters.Regex("^↩️Назад$") & filters.ChatType.PRIVATE, settings_back_handler))
     app.add_handler(MessageHandler(filters.Regex("^👤 Профиль$"), send_profile))
     app.add_handler(MessageHandler(filters.Regex("^🔰Админ-профиль$") & filters.ChatType.PRIVATE, send_admin_profile))
