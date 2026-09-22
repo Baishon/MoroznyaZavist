@@ -953,6 +953,8 @@ async def log_command_router(update: Update, context: ContextTypes.DEFAULT_TYPE)
         "/taketopic": taketopic_command_handler,
         "/dump_maps": dump_maps_handler,
         "/restartcom": restart_log_chat_menu_handler,
+        "/awarn": awarn_command_handler,
+        "/aunwarn": aunwarn_command_handler,
     }
 
     handler = command_handlers.get(command)
@@ -1883,6 +1885,139 @@ async def warn_command_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     except Exception:
         pass
     _save_profile_record(context, str(target_user_id))
+
+
+async def awarn_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or update.effective_chat.id not in {LOG_CHAT_ID, WORK_CHAT_ID}:
+        return
+    if not _can_use_moderation_commands(context, str(update.effective_user.id)):
+        await update.message.reply_text("Команда доступна только администраторам 2 категории и выше.")
+        return
+
+    raw_text = update.message.text or ""
+    cmd_entity = update.message.entities[0] if update.message.entities else None
+    cmd_len = cmd_entity.length if cmd_entity and cmd_entity.type == "bot_command" else len("/awarn")
+    args = raw_text[cmd_len:].strip().split(maxsplit=1)
+    if len(args) < 2 or not args[1].strip():
+        await update.message.reply_text('Используйте: /awarn "id_profile" reason')
+        return
+
+    target_user_id, profile = _resolve_warn_target(context, args[0])
+    if not profile or not _has_admin_rights_level_1_5(profile):
+        await update.message.reply_text(f'Администратор с id_profile "{args[0]}" не найден.')
+        return
+    if str(target_user_id) == str(update.effective_user.id):
+        await update.message.reply_text("Нельзя выдать выговор самому себе.")
+        return
+
+    issuer_profile = _ensure_profile(
+        context,
+        str(update.effective_user.id),
+        update.effective_user.username or f"id{update.effective_user.id}",
+    )
+    issuer_tag = str(issuer_profile.get("tag_admin") or issuer_profile.get("username") or "администратор")
+    reason = args[1].strip()
+    admin_warns = profile.setdefault("admin_warns", [])
+    if not isinstance(admin_warns, list):
+        admin_warns = []
+        profile["admin_warns"] = admin_warns
+    admin_warns.append({"reason": reason, "issued_by": issuer_tag, "issued_at": time.time()})
+    warn_count = len(admin_warns)
+    _save_profile_record(context, str(target_user_id))
+
+    await update.message.reply_text(
+        f'⚠️Администратору id_profile #{profile.get("id_profile")} выдан выговор. '
+        f"Всего выговоров: {warn_count}/3. Причина: \"{reason}\""
+    )
+    try:
+        await context.bot.send_message(
+            chat_id=int(target_user_id),
+            text=f'⚠️Вы получили выговор от администратора {issuer_tag}. Причина: "{reason}". '
+            f"Всего выговоров: {warn_count}/3.",
+        )
+    except Exception:
+        logging.exception("Failed to notify admin %s about awarn", target_user_id)
+
+    if warn_count < 3:
+        return
+
+    profile["admin_level"] = 0
+    profile["admin_rank"] = ""
+    profile["admin_candidate"] = False
+    profile["admin_candidate_status"] = "none"
+    profile.pop("prefix", None)
+    profile.pop("prefixes", None)
+    profile["admin_warns"] = []
+    _save_profile_record(context, str(target_user_id))
+
+    for special_chat_id in _special_admin_chat_ids():
+        try:
+            await context.bot.ban_chat_member(
+                chat_id=special_chat_id,
+                user_id=int(target_user_id),
+            )
+            await context.bot.unban_chat_member(
+                chat_id=special_chat_id,
+                user_id=int(target_user_id),
+                only_if_banned=True,
+            )
+        except Exception:
+            logging.exception(
+                "Failed to remove admin %s from special chat %s",
+                target_user_id,
+                special_chat_id,
+            )
+
+    await _apply_ban(
+        context,
+        str(target_user_id),
+        profile.get("username"),
+        "снят админ",
+        "ADMIN DISMISSED",
+        duration_seconds=14 * 86400,
+        force=True,
+    )
+    await update.message.reply_text(
+        f"🚫Администратор id_profile #{profile.get('id_profile')} снят с должности после 3 выговоров, "
+        "исключён из спецчатов и заблокирован в боте на 14 дней."
+    )
+
+
+async def aunwarn_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or update.effective_chat.id not in {LOG_CHAT_ID, WORK_CHAT_ID}:
+        return
+    if not _can_use_moderation_commands(context, str(update.effective_user.id)):
+        await update.message.reply_text("Команда доступна только администраторам 2 категории и выше.")
+        return
+
+    raw_text = update.message.text or ""
+    cmd_entity = update.message.entities[0] if update.message.entities else None
+    cmd_len = cmd_entity.length if cmd_entity and cmd_entity.type == "bot_command" else len("/aunwarn")
+    target_identifier = raw_text[cmd_len:].strip().split(maxsplit=1)[0] if raw_text[cmd_len:].strip() else ""
+    if not target_identifier:
+        await update.message.reply_text('Используйте: /aunwarn "id_profile"')
+        return
+
+    target_user_id, profile = _resolve_warn_target(context, target_identifier)
+    admin_warns = profile.get("admin_warns", []) if profile else []
+    if not profile or not _has_admin_rights_level_1_5(profile) or not isinstance(admin_warns, list) or not admin_warns:
+        await update.message.reply_text(f'У администратора id_profile "{target_identifier}" нет активных выговоров.')
+        return
+
+    removed = admin_warns.pop()
+    profile["admin_warns"] = admin_warns
+    _save_profile_record(context, str(target_user_id))
+    await update.message.reply_text(
+        f'✅С администратора id_profile #{profile.get("id_profile")} снят последний выговор. '
+        f"Осталось: {len(admin_warns)}/3."
+    )
+    try:
+        await context.bot.send_message(
+            chat_id=int(target_user_id),
+            text=f"✅С вас снят выговор. Осталось активных выговоров: {len(admin_warns)}/3.",
+        )
+    except Exception:
+        logging.exception("Failed to notify admin %s about aunwarn", target_user_id)
 
 
 async def _expire_timed_warning_job(context: ContextTypes.DEFAULT_TYPE):

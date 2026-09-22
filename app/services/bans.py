@@ -30,13 +30,14 @@ async def _apply_ban(
     reason: str,
     log_title: str,
     duration_seconds: int | None = None,
+    force: bool = False,
 ) -> bool:
     profiles = context.application.bot_data.setdefault("profiles", {})
     profile = profiles.get(str(user_id))
     if not profile:
         return False
 
-    if _has_admin_ban_immunity(profile):
+    if _has_admin_ban_immunity(profile) and not force:
         return False
 
     banned_users = context.application.bot_data.setdefault("banned_users", {})
