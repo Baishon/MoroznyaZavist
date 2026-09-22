@@ -7,8 +7,10 @@ import asyncio
 import logging
 import os
 import threading
+from datetime import time as datetime_time
 from types import SimpleNamespace
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from zoneinfo import ZoneInfo
 
 from telegram import BotCommand
 from telegram.ext import ApplicationBuilder, CallbackQueryHandler, CommandHandler, MessageHandler, MessageReactionHandler, filters
@@ -28,6 +30,7 @@ from app.handlers.admin import (
     admin_period_callback,
     admin_period_menu_handler,
     my_admin_norm_handler,
+    weekly_admin_norm_report_job,
     admin_take_callback,
     amute_command_handler,
     anpiar_command_handler,
@@ -233,6 +236,13 @@ async def _post_init(app) -> None:
         )
     except Exception:
         logging.exception("Failed to set bot commands")
+    if app.job_queue:
+        app.job_queue.run_daily(
+            weekly_admin_norm_report_job,
+            time=datetime_time(18, 0, tzinfo=ZoneInfo("Europe/Kyiv")),
+            days=(6,),
+            name="weekly_admin_norm_report",
+        )
     app.create_task(_runtime_snapshot_loop(app))
 
 
