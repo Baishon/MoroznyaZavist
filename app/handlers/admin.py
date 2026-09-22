@@ -1014,25 +1014,8 @@ async def my_admin_norm_handler(update: Update, context: ContextTypes.DEFAULT_TY
         await update.message.reply_text("Кнопка доступна только администраторам.")
         return
 
-    now = time.time()
-    cutoff = now - 7 * 86400
-    messages = 0
-    rp_commands = 0
-    history = profile.get("admin_activity_history", [])
-    if isinstance(history, list):
-        for entry in history:
-            if not isinstance(entry, dict):
-                continue
-            try:
-                timestamp = float(entry.get("timestamp", 0) or 0)
-            except (TypeError, ValueError):
-                continue
-            if timestamp < cutoff:
-                continue
-            if entry.get("type") == "message":
-                messages += 1
-            elif entry.get("type") == "rp":
-                rp_commands += 1
+    messages = max(0, int(profile.get("admin_weekly_messages", 0) or 0))
+    rp_commands = max(0, int(profile.get("admin_weekly_rp_commands", 0) or 0))
 
     reputation = messages // 20 + rp_commands // 5
     norm_status = "✅ Норма выполнена" if messages >= 110 else "❌ Норма не выполнена"
@@ -1098,24 +1081,28 @@ async def admin_period_callback(update: Update, context: ContextTypes.DEFAULT_TY
         level = _effective_admin_level(profile)
         if level < 1:
             continue
-        history = profile.get("admin_activity_history", [])
-        if not isinstance(history, list):
-            history = []
-        messages = 0
-        rp_commands = 0
-        for entry in history:
-            if not isinstance(entry, dict):
-                continue
-            try:
-                timestamp = float(entry.get("timestamp", 0) or 0)
-            except (TypeError, ValueError):
-                continue
-            if timestamp < cutoff:
-                continue
-            if entry.get("type") == "message":
-                messages += 1
-            elif entry.get("type") == "rp":
-                rp_commands += 1
+        if period_key == "week":
+            messages = max(0, int(profile.get("admin_weekly_messages", 0) or 0))
+            rp_commands = max(0, int(profile.get("admin_weekly_rp_commands", 0) or 0))
+        else:
+            history = profile.get("admin_activity_history", [])
+            if not isinstance(history, list):
+                history = []
+            messages = 0
+            rp_commands = 0
+            for entry in history:
+                if not isinstance(entry, dict):
+                    continue
+                try:
+                    timestamp = float(entry.get("timestamp", 0) or 0)
+                except (TypeError, ValueError):
+                    continue
+                if timestamp < cutoff:
+                    continue
+                if entry.get("type") == "message":
+                    messages += 1
+                elif entry.get("type") == "rp":
+                    rp_commands += 1
         reputation = messages // 20 + rp_commands // 5
         rest_until = _admin_rest_until(profile)
         rest_text = (
@@ -1126,11 +1113,12 @@ async def admin_period_callback(update: Update, context: ContextTypes.DEFAULT_TY
         tag = str(profile.get("tag_admin") or profile.get("user_nickname") or "не указан")
         profile_id = profile.get("id_profile", "не указан")
         role = ADMIN_LEVEL_TITLES.get(level, "Не назначена")
-        norm = "✅" if messages >= 110 else "❌"
+        minimum_messages = {"day": 16, "week": 110, "month": 440}[period_key]
+        norm = "✅" if messages >= minimum_messages else "❌"
         rows.append(
             f"{norm} {tag} | id_profile: {profile_id}\n"
             f"Должность: {role}\n"
-            f"Рабочих сообщений: {messages}/110\n"
+            f"Рабочих сообщений: {messages}/{minimum_messages}\n"
             f"Репутация {period_title}: ⭐ {reputation}\n"
             f"{rest_text}"
         )
@@ -1139,6 +1127,32 @@ async def admin_period_callback(update: Update, context: ContextTypes.DEFAULT_TY
     text = f"📊Статистика администрации {period_title}\n\n"
     text += "\n\n".join(rows) if rows else "Администраторы не найдены."
     await query.edit_message_text(text)
+
+
+async def weekly_admin_norm_report_job(context: ContextTypes.DEFAULT_TYPE) -> None:
+    profiles = context.application.bot_data.get("profiles", {}) or {}
+    rows = []
+    for telegram_id, profile in profiles.items():
+        profile = profile or {}
+        if _effective_admin_level(profile) < 1:
+            continue
+        messages = max(0, int(profile.get("admin_weekly_messages", 0) or 0))
+        tag = str(profile.get("tag_admin") or profile.get("user_nickname") or "не указан")
+        username = str(profile.get("username") or f"id{telegram_id}")
+        rows.append((messages, f"{tag} ({username}) — {messages}/110"))
+
+    rows.sort(key=lambda item: (-item[0], item[1].casefold()))
+    report = "📊 Недельная норма администрации\n\n"
+    report += "\n".join(item[1] for item in rows) if rows else "Администраторы не найдены."
+    sent = await context.bot.send_message(chat_id=LOG_CHAT_ID, text=report)
+    if sent:
+        for profile in profiles.values():
+            if isinstance(profile, dict) and _effective_admin_level(profile) >= 1:
+                profile["admin_weekly_messages"] = 0
+                profile["admin_weekly_rp_commands"] = 0
+        for telegram_id, profile in profiles.items():
+            if isinstance(profile, dict) and _effective_admin_level(profile) >= 1:
+                _save_profile_record(context, str(telegram_id))
 
 
 async def givetopic_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):

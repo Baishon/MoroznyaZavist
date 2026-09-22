@@ -157,6 +157,8 @@ def _ensure_profile(context: ContextTypes.DEFAULT_TYPE, user_id: str, username_h
             "admin_reputation_rp_commands": 0,
             "admin_reputation_message_awards": 0,
             "admin_reputation_rp_awards": 0,
+            "admin_weekly_messages": 0,
+            "admin_weekly_rp_commands": 0,
             "last_admin_tag": "не указан",
             "warn": 0,
             "reason": "нет причин",
@@ -188,6 +190,12 @@ def _ensure_profile(context: ContextTypes.DEFAULT_TYPE, user_id: str, username_h
     if "count_tokens" not in profile:
         profile["count_tokens"] = 0
         changed = True
+    if "admin_weekly_messages" not in profile:
+        profile["admin_weekly_messages"] = 0
+        changed = True
+    if "admin_weekly_rp_commands" not in profile:
+        profile["admin_weekly_rp_commands"] = 0
+        changed = True
 
     if changed:
         _save_profile_record(context, str(user_id))
@@ -216,6 +224,8 @@ def _record_admin_reputation_activity(
 
     message_count = _counter("admin_reputation_messages") + max(0, int(messages or 0))
     rp_count = _counter("admin_reputation_rp_commands") + max(0, int(rp_commands or 0))
+    profile["admin_weekly_messages"] = _counter("admin_weekly_messages") + max(0, int(messages or 0))
+    profile["admin_weekly_rp_commands"] = _counter("admin_weekly_rp_commands") + max(0, int(rp_commands or 0))
     activity_history = profile.setdefault("admin_activity_history", [])
     if not isinstance(activity_history, list):
         activity_history = []
