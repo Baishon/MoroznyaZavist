@@ -159,6 +159,7 @@ def _ensure_profile(context: ContextTypes.DEFAULT_TYPE, user_id: str, username_h
             "admin_reputation_rp_awards": 0,
             "admin_weekly_messages": 0,
             "admin_weekly_rp_commands": 0,
+            "admin_warns": [],
             "last_admin_tag": "не указан",
             "warn": 0,
             "reason": "нет причин",
@@ -195,6 +196,9 @@ def _ensure_profile(context: ContextTypes.DEFAULT_TYPE, user_id: str, username_h
         changed = True
     if "admin_weekly_rp_commands" not in profile:
         profile["admin_weekly_rp_commands"] = 0
+        changed = True
+    if not isinstance(profile.get("admin_warns"), list):
+        profile["admin_warns"] = []
         changed = True
 
     if changed:
