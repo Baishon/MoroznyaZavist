@@ -989,7 +989,7 @@ async def log_ping_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def restart_chat_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.effective_message
-    if not message or not update.effective_chat or update.effective_chat.id != OFFICIAL_CHANNEL_ID:
+    if not message or not update.effective_chat or update.effective_chat.id != TRUSTED_ADMIN_CHAT_ID:
         return
     await message.reply_text(
         "✅Подменю чата общения обновлено.",
@@ -998,7 +998,7 @@ async def restart_chat_menu_handler(update: Update, context: ContextTypes.DEFAUL
 
 
 async def my_admin_norm_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message or not update.effective_chat or update.effective_chat.id != OFFICIAL_CHANNEL_ID:
+    if not update.message or not update.effective_chat or update.effective_chat.id != TRUSTED_ADMIN_CHAT_ID:
         return
     if not update.effective_user or update.effective_user.is_bot:
         return
