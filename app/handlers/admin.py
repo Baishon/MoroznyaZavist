@@ -988,9 +988,10 @@ async def log_ping_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def restart_chat_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message or not update.effective_chat or update.effective_chat.id != OFFICIAL_CHANNEL_ID:
+    message = update.effective_message
+    if not message or not update.effective_chat or update.effective_chat.id != OFFICIAL_CHANNEL_ID:
         return
-    await update.message.reply_text(
+    await message.reply_text(
         "✅Подменю чата общения обновлено.",
         reply_markup=_build_chat_menu_keyboard(),
     )
