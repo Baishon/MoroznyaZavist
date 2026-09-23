@@ -1022,6 +1022,7 @@ async def my_admin_norm_handler(update: Update, context: ContextTypes.DEFAULT_TY
     reputation = messages // 20 + rp_commands // 5
     norm_status = "✅ Норма выполнена" if messages >= 110 else "❌ Норма не выполнена"
     rest_until = _admin_rest_until(profile)
+    now = time.time()
     rest_status = (
         f"🛥 Администратор в ресте до {_format_kyiv_datetime(rest_until)}"
         if rest_until > now
