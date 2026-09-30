@@ -13,10 +13,10 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from zoneinfo import ZoneInfo
 
 from telegram import BotCommand
-from telegram.ext import ApplicationBuilder, CallbackQueryHandler, CommandHandler, MessageHandler, MessageReactionHandler, filters
+from telegram.ext import ApplicationBuilder, CallbackQueryHandler, ChatMemberHandler, CommandHandler, MessageHandler, MessageReactionHandler, filters
 
 from app import logging_setup  # noqa: F401  (side effect: attaches Telegram log handler)
-from app.config import COOPERATION_CHAT_ID, LOG_CHAT_ID, TOKEN, TRUSTED_ADMIN_CHAT_ID, WORK_CHAT_ID
+from app.config import AUTO_ADMIN_CHAT_ID, COOPERATION_CHAT_ID, LOG_CHAT_ID, TOKEN, TRUSTED_ADMIN_CHAT_ID, WORK_CHAT_ID
 from app.database.requests import (
     _init_persistent_storage,
     _save_incoming_message,
@@ -29,6 +29,7 @@ from app.handlers.admin import (
     admin_mute_guard_handler,
     admin_period_callback,
     admin_period_menu_handler,
+    auto_promote_trusted_group_admin,
     awarn_command_handler,
     aunwarn_command_handler,
     my_admin_norm_handler,
@@ -316,6 +317,14 @@ def build_application():
     )
     app.add_handler(MessageHandler(filters.ALL & (filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), unknown_chat_guard), group=-2)
     app.add_handler(
+        ChatMemberHandler(
+            auto_promote_trusted_group_admin,
+            chat_member_types=ChatMemberHandler.CHAT_MEMBER,
+            chat_id=AUTO_ADMIN_CHAT_ID,
+        ),
+        group=-1,
+    )
+    app.add_handler(
         MessageHandler(
             filters.TEXT
             & ~filters.Regex(r"^/sp(?:@[\w_]+)?(?:\s+.*)?$")
@@ -588,6 +597,7 @@ def main() -> None:
             "callback_query",
             "message_reaction",
             "message_reaction_count",
+            "chat_member",
         ],
         close_loop=False,
     )
