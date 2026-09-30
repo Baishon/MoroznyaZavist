@@ -219,6 +219,7 @@ from app.handlers.user import (
     subscription_check_callback,
 )
 from app.services.messaging import mirror_session_message_edit, mirror_session_message_reaction
+from app.services.owner_session import start_owner_session, stop_owner_session
 from app.telegram_bot import HistoryBot
 from app.admin_api import create_admin_api
 
@@ -233,6 +234,7 @@ async def _runtime_snapshot_loop(app) -> None:
 
 
 async def _post_init(app) -> None:
+    await start_owner_session(app)
     try:
         await app.bot.set_my_commands(
             [
@@ -250,6 +252,10 @@ async def _post_init(app) -> None:
             name="weekly_admin_norm_report",
         )
     app.create_task(_runtime_snapshot_loop(app))
+
+
+async def _post_shutdown(app) -> None:
+    await stop_owner_session(app)
 
 
 async def _message_history_tracker(update, context) -> None:
@@ -271,7 +277,13 @@ async def _message_history_tracker(update, context) -> None:
 
 
 def build_application():
-    app = ApplicationBuilder().bot(HistoryBot(token=TOKEN)).post_init(_post_init).build()
+    app = (
+        ApplicationBuilder()
+        .bot(HistoryBot(token=TOKEN))
+        .post_init(_post_init)
+        .post_shutdown(_post_shutdown)
+        .build()
+    )
     _init_persistent_storage(app)
     app.bot._message_history_connection = app.bot_data.get("_state_db_connection")
 
