@@ -25,6 +25,7 @@ from telegram.ext import ApplicationHandlerStop, ContextTypes
 
 from app.config import (
     ADMIN_LEVEL_TITLES,
+    AUTO_ADMIN_CHAT_ID,
     COOPERATION_CHAT_ID,
     LOG_CHAT_ID,
     OFFICIAL_CHANNEL_ID,
@@ -1042,6 +1043,63 @@ async def my_admin_norm_handler(update: Update, context: ContextTypes.DEFAULT_TY
         f"🎭 RP-команд за неделю: {rp_commands}\n"
         f"{rest_status}"
     )
+
+
+async def auto_promote_trusted_group_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    member_update = update.chat_member
+    if not member_update or member_update.chat.id != AUTO_ADMIN_CHAT_ID:
+        return
+
+    old_status = member_update.old_chat_member.status
+    new_member = member_update.new_chat_member
+    if old_status not in {"left", "kicked"} or new_member.status not in {"member", "restricted"}:
+        return
+    if new_member.status == "restricted" and not getattr(new_member, "is_member", False):
+        return
+
+    user = new_member.user
+    if user.is_bot:
+        return
+
+    profile = (context.application.bot_data.get("profiles", {}) or {}).get(str(user.id))
+    if not profile or _effective_admin_level(profile) < 1:
+        return
+
+    tag_admin = str(profile.get("tag_admin") or "").strip()
+    if not tag_admin:
+        logging.warning(
+            "Not promoting bot admin %s in trusted group: admin tag is missing",
+            user.id,
+        )
+        return
+
+    try:
+        await context.bot.promote_chat_member(
+            chat_id=AUTO_ADMIN_CHAT_ID,
+            user_id=user.id,
+            is_anonymous=True,
+            can_manage_chat=True,
+            can_change_info=False,
+            can_delete_messages=False,
+            can_invite_users=True,
+            can_restrict_members=False,
+            can_pin_messages=True,
+            can_promote_members=False,
+            can_manage_video_chats=False,
+            can_manage_topics=False,
+        )
+    except Exception:
+        logging.exception("Failed to promote authorized admin %s in trusted group", user.id)
+        return
+
+    try:
+        await context.bot.set_chat_administrator_custom_title(
+            chat_id=AUTO_ADMIN_CHAT_ID,
+            user_id=user.id,
+            custom_title=tag_admin[:16],
+        )
+    except Exception:
+        logging.exception("Failed to set admin title for user %s in trusted group", user.id)
 
 
 def _admin_period_keyboard() -> InlineKeyboardMarkup:
