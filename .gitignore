@@ -5,6 +5,9 @@ venv/
 .env
 .idea/
 bot_storage/
+*.session
+*.session-journal
+local_sessions/
 admin-android/.gradle/
 admin-android/build/
 admin-android/app/build/
