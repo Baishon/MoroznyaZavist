@@ -2323,11 +2323,24 @@ async def _finish_admin_rest(
                     message_thread_id=int(topic_id),
                     text="✅Администратор вышел с реста. Тема разморожена.",
                 )
-                await context.bot.edit_forum_topic(
-                    chat_id=int(chat_id),
-                    message_thread_id=int(topic_id),
-                    name=_rest_topic_name(active, on_rest=False),
-                )
+                for attempt in range(3):
+                    try:
+                        await context.bot.edit_forum_topic(
+                            chat_id=int(chat_id),
+                            message_thread_id=int(topic_id),
+                            name=_rest_topic_name(active, on_rest=False),
+                        )
+                        break
+                    except RetryAfter as exc:
+                        if attempt == 2:
+                            raise
+                        retry_after = float(exc.retry_after)
+                        logging.warning(
+                            "Rate limited while resuming rest topic for user %s; retrying in %.1f seconds",
+                            user_id,
+                            retry_after,
+                        )
+                        await asyncio.sleep(retry_after + 1)
         except Exception:
             logging.exception("Failed to resume rest session for user %s", user_id)
 
