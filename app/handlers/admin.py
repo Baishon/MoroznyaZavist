@@ -2177,7 +2177,7 @@ async def stats_command_handler(update: Update, context: ContextTypes.DEFAULT_TY
 
 
 async def recinfo_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message or not update.effective_user:
+    if not update.message or not update.effective_user or not update.effective_chat:
         return
 
     if update.effective_chat.id != WORK_CHAT_ID or update.message.message_thread_id is None:
@@ -2193,22 +2193,33 @@ async def recinfo_command_handler(update: Update, context: ContextTypes.DEFAULT_
         return
 
     topic_id = update.message.message_thread_id
-    topic_map = context.application.bot_data.get("topic_user_map", {}) or {}
-    target_user_id = topic_map.get(topic_id) or topic_map.get(str(topic_id))
-    if not target_user_id:
+    active_chats = context.application.bot_data.get("active_chats", {}) or {}
+    active_session = next(
+        (
+            (str(user_id), session)
+            for user_id, session in active_chats.items()
+            if session
+            and session.get("active")
+            and str(session.get("chat_id")) == str(update.effective_chat.id)
+            and str(session.get("topic_id")) == str(topic_id)
+        ),
+        None,
+    )
+    if not active_session:
         await update.message.reply_text("Команда работает только внутри активной темы переписки.")
         return
 
-    profile = _ensure_profile(context, str(target_user_id), f"id{target_user_id}")
-    active = (context.application.bot_data.get("active_chats", {}) or {}).get(str(target_user_id)) or {}
-    app_requests = context.application.bot_data.setdefault("admin_requests", {}) or {}
-    req_info = app_requests.get(str(target_user_id)) or {}
+    target_user_id, active = active_session
+    profile = _ensure_profile(context, target_user_id, f"id{target_user_id}")
 
-    mood = str((active.get("mood") or req_info.get("mood") or "не указана")).strip() or "не указана"
-    admin_username = str((active.get("admin_username") or active.get("admin_tag") or req_info.get("admin_username") or "не назначен")).strip() or "не назначен"
+    mood = str(active.get("mood") or "не указана").strip() or "не указана"
+    admin_username = str(active.get("admin_username") or active.get("admin_tag") or "не назначен").strip() or "не назначен"
     user_nickname = str(profile.get("user_nickname") or profile.get("username") or f"id{target_user_id}")
     requester_id_profile = profile.get("id_profile")
-    topic_message_id = int(req_info.get("topic_message_id", 0) or 0)
+    topic_message_id = active.get("topic_message_id")
+    if not topic_message_id:
+        await update.message.reply_text("Не удалось найти исходное сообщение информации в этой сессии.")
+        return
 
     recinfo_text = (
         "📊 **Информация о переписке**\n"
@@ -2224,29 +2235,25 @@ async def recinfo_command_handler(update: Update, context: ContextTypes.DEFAULT_
     )
 
     try:
-        await update.message.delete()
-    except Exception:
-        pass
-
-    if topic_message_id:
-        try:
-            await context.bot.edit_message_text(
-                chat_id=update.effective_chat.id,
-                message_id=topic_message_id,
-                text=recinfo_text,
-            )
-            return
-        except Exception:
-            pass
-
-    try:
-        await context.bot.send_message(
+        await context.bot.edit_message_text(
             chat_id=update.effective_chat.id,
+            message_id=topic_message_id,
             text=recinfo_text,
-            message_thread_id=topic_id,
         )
     except Exception:
-        pass
+        logging.exception(
+            "Failed to edit recinfo message %s for active session user %s in topic %s",
+            topic_message_id,
+            target_user_id,
+            topic_id,
+        )
+        await update.message.reply_text("Не удалось обновить исходное сообщение информации в теме.")
+        return
+
+    try:
+        await update.message.delete()
+    except Exception:
+        logging.exception("Failed to delete /recinfo command message %s", update.message.message_id)
 
 
 async def fullstats_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -4902,6 +4909,8 @@ async def admin_take_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         "user_id": request_user_id,
         "chat_id": chat_id,
         "topic_id": topic_id,
+        "topic_message_id": accepted_msg.message_id if accepted_msg else None,
+        "mood": mood,
         "admin_id": str(update.effective_user.id),
         "admin_username": admin_username,
         "admin_tag": admin_tag,
