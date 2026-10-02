@@ -77,6 +77,8 @@ async def mirror_session_message_reaction(update, context: ContextTypes.DEFAULT_
     chat_id = int(getattr(update.effective_chat, "id", 0) or 0)
     if not chat_id:
         return
+    if getattr(update.effective_chat, "type", None) == "channel":
+        return
 
     actor = getattr(reaction, "user", None) or getattr(reaction, "actor_chat", None)
     if actor is not None and getattr(actor, "is_bot", False):
