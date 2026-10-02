@@ -4833,7 +4833,7 @@ async def admin_take_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     mood_text = escape(str(mood or "не указана"))
     admin_username_text = escape(admin_username)
-    user_nickname = escape(str(requester_profile.get("user_nickname") or username or "не указан"))
+    user_nickname = escape(str(requester_profile.get("user_nickname") or "не указан"))
     requester_id_profile_text = escape(str(requester_id_profile or "не указан"))
     accept_text = (
         "<b>📊 Информация о переписке</b>\n"
