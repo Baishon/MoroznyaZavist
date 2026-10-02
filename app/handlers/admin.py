@@ -4843,6 +4843,7 @@ async def admin_take_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         f"🔐 Управление и контроль осуществляет администратор: {admin_username}"
     )
 
+    accepted_msg = None
     try:
         buttons = _build_active_dialog_admin_keyboard(request_user_id)
         if topic_id:
@@ -4854,9 +4855,18 @@ async def admin_take_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
             )
         else:
             accepted_msg = await context.bot.send_message(chat_id=chat_id, text=accept_text, reply_markup=buttons)
-        await context.bot.pin_chat_message(chat_id=chat_id, message_id=accepted_msg.message_id, disable_notification=True)
     except Exception:
-        accepted_msg = None
+        logging.exception("Failed to send session info message for user %s", request_user_id)
+
+    if accepted_msg is not None:
+        try:
+            await context.bot.pin_chat_message(
+                chat_id=chat_id,
+                message_id=accepted_msg.message_id,
+                disable_notification=True,
+            )
+        except Exception:
+            logging.exception("Failed to pin session info message %s", accepted_msg.message_id)
 
     # Ensure replies to the acceptance/pinned message route to the user
     try:
