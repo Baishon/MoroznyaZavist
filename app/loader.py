@@ -71,6 +71,7 @@ from app.handlers.admin import (
     banlist_command_handler,
     dump_maps_handler,
     fullstats_command_handler,
+    recinfo_command_handler,
     givetopic_command_handler,
     handle_astats_bio_input_message,
     handle_astats_tag_input_message,
@@ -379,6 +380,7 @@ def build_application():
     app.add_handler(CommandHandler("searchuser", searchuser_command_handler, filters=filters.ChatType.PRIVATE | filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), group=-1)
     app.add_handler(CommandHandler("anpiar", anpiar_command_handler, filters=filters.ChatType.PRIVATE | filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), group=-1)
     app.add_handler(CommandHandler("fullstats", fullstats_command_handler, filters=filters.ChatType.PRIVATE | filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), group=-1)
+    app.add_handler(CommandHandler("recinfo", recinfo_command_handler, filters=filters.Chat(WORK_CHAT_ID)), group=-1)
     app.add_handler(CommandHandler("admins", admins_command_handler, filters=filters.ChatType.PRIVATE | filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), group=-1)
     app.add_handler(CommandHandler("addrest", addrest_command_handler, filters=filters.ChatType.PRIVATE | filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), group=-1)
     app.add_handler(CommandHandler("kd", kd_command_handler, filters=filters.ChatType.PRIVATE | filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), group=-1)
