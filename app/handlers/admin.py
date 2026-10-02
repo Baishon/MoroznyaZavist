@@ -5904,6 +5904,16 @@ async def admin_group_message_handler(update: Update, context: ContextTypes.DEFA
     if message is None:
         return
 
+    sender_chat = getattr(message, "sender_chat", None)
+    forward_origin = getattr(message, "forward_origin", None)
+    if (
+        getattr(sender_chat, "type", None) == ChatType.CHANNEL
+        or getattr(message, "is_automatic_forward", False)
+        or getattr(forward_origin, "type", None) == "channel"
+    ):
+        logging.info("Ignoring channel-originated post %s in chat %s", message.message_id, message.chat_id)
+        return
+
     logging.info(
         "MESSAGE TYPE: text=%r caption=%r photo=%s video=%s sticker=%s thread=%s msg_id=%s",
         message.text,
