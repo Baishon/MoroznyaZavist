@@ -942,6 +942,7 @@ async def log_command_router(update: Update, context: ContextTypes.DEFAULT_TYPE)
         "/fullstats": fullstats_command_handler,
         "/recinfo": recinfo_command_handler,
         "/sp": sendpiar_command_handler,
+        "/asp": sendpiar_command_handler,
         "/pm": pm_command_handler,
         "/prava": prava_command_handler,
         "/ban": ban_command_handler,
@@ -1510,51 +1511,72 @@ async def _send_telegram_message_with_retry(context, recipient_id: int, *, text:
 
 
 async def sendpiar_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message or not update.effective_chat:
+    if not update.message or not update.effective_chat or not update.effective_user:
         return
 
     source_text = update.message.text or update.message.caption or ""
     source_text_stripped = source_text.strip()
-    if not re.match(r"^/sp(?:@[\w_]+)?(?:\s|$)", source_text_stripped):
+    command_match = re.match(r"^/(sp|asp)(?:@[\w_]+)?(?:\s|$)", source_text_stripped, re.IGNORECASE)
+    if not command_match:
         return
+    command_name = command_match.group(1).lower()
+    is_admin_broadcast = command_name == "asp"
 
-    if int(update.effective_chat.id) != COOPERATION_CHAT_ID:
+    if is_admin_broadcast:
+        if (
+            update.effective_chat.type != ChatType.PRIVATE
+            and int(update.effective_chat.id) not in _special_admin_chat_ids()
+        ):
+            await update.message.reply_text("Команда /asp доступна только в личке и специальных админ-чатах.")
+            return
+        issuer_profile = _ensure_profile(
+            context,
+            str(update.effective_user.id),
+            update.effective_user.username or f"id{update.effective_user.id}",
+        )
+        if _effective_admin_level(issuer_profile) < 4:
+            await update.message.reply_text("Команда доступна только администраторам 4-5 категории.")
+            return
+    elif int(update.effective_chat.id) != COOPERATION_CHAT_ID:
         await update.message.reply_text("Команда /sp доступна только в чате сотрудничества.")
         return
 
     bot_data = context.application.bot_data
+    command_label = f"/{command_name}"
+    cooldown_key = "sendasp" if is_admin_broadcast else "sendpiar"
     now_ts = time.time()
-    cooldown_until = float(bot_data.get("sendpiar_cooldown_until", 0) or 0)
-    cooldown_was_active = bool(bot_data.get("sendpiar_cooldown_was_active", False))
+    cooldown_until = float(bot_data.get(f"{cooldown_key}_cooldown_until", 0) or 0)
+    cooldown_was_active = bool(bot_data.get(f"{cooldown_key}_cooldown_was_active", False))
 
     if cooldown_until > now_ts:
         remaining_seconds = int(cooldown_until - now_ts)
         remaining_minutes = max(1, (remaining_seconds + 59) // 60)
         await update.message.reply_text(
-            f"⏳Команда /sp на кулдауне. Подождите {remaining_minutes} мин."
+            f"⏳Команда {command_label} на кулдауне. Подождите {remaining_minutes} мин."
         )
         return
 
     if cooldown_until and cooldown_was_active and now_ts >= cooldown_until:
-        await update.message.reply_text("✅Кулдаун завершен. Команда /sp снова доступна.")
-        bot_data["sendpiar_cooldown_was_active"] = False
+        await update.message.reply_text(f"✅Кулдаун завершен. Команда {command_label} снова доступна.")
+        bot_data[f"{cooldown_key}_cooldown_was_active"] = False
 
-    issuer_profile = _ensure_profile(
-        context,
-        str(update.effective_user.id),
-        update.effective_user.username or f"id{update.effective_user.id}",
-    )
-    if not _has_prefix(issuer_profile, "💎Сотрудничество"):
+    if not is_admin_broadcast:
+        issuer_profile = _ensure_profile(
+            context,
+            str(update.effective_user.id),
+            update.effective_user.username or f"id{update.effective_user.id}",
+        )
+    if not is_admin_broadcast and not _has_prefix(issuer_profile, "💎Сотрудничество"):
         await update.message.reply_text("Нельзя выполнить команду: нужен префикс 💎Сотрудничество.")
         return
 
     cmd_entities = update.message.entities if update.message.text else (update.message.caption_entities or [])
     cmd_entity = cmd_entities[0] if cmd_entities else None
-    cmd_len = cmd_entity.length if cmd_entity and cmd_entity.type == "bot_command" else len("/sp")
+    cmd_len = cmd_entity.length if cmd_entity and cmd_entity.type == "bot_command" else len(command_label)
     args_text = source_text[cmd_len:]
 
     if not str(args_text).strip():
-        await update.message.reply_text('Используйте: /sp "текст" (можно с фото или видео).')
+        await update.message.reply_text(f'Используйте: {command_label} "текст" (можно с фото или видео).')
         return
 
     quoted = re.match(r'^\s*"([\s\S]*)"\s*$', args_text)
@@ -1564,7 +1586,7 @@ async def sendpiar_command_handler(update: Update, context: ContextTypes.DEFAULT
         return
 
     payload_text = broadcast_text
-    if not payload_text.lower().startswith("#реклама"):
+    if not is_admin_broadcast and not payload_text.lower().startswith("#реклама"):
         payload_text = f"#реклама\n\n{payload_text}"
 
     payload_entities = _strip_command_entities(cmd_entities, cmd_len, source_text)
@@ -1706,7 +1728,7 @@ async def sendpiar_command_handler(update: Update, context: ContextTypes.DEFAULT
                         entities=spec.get("entities") or None,
                     )
             except RetryAfter as exc:
-                logging.warning("sp rate limit hit for recipient %s; retrying after %s seconds", recipient_id, exc.retry_after)
+                logging.warning("%s rate limit hit for recipient %s; retrying after %s seconds", command_label, recipient_id, exc.retry_after)
                 await asyncio.sleep(float(exc.retry_after) + 1.0)
                 try:
                     if spec["kind"] == "media":
@@ -1726,22 +1748,22 @@ async def sendpiar_command_handler(update: Update, context: ContextTypes.DEFAULT
                             entities=spec.get("entities") or None,
                         )
                 except Forbidden:
-                    logging.info("sp retry recipient %s cannot receive bot messages", recipient_id)
+                    logging.info("%s retry recipient %s cannot receive bot messages", command_label, recipient_id)
                     recipient_ok = False
                     break
                 except BadRequest as exc:
                     if "chat not found" in str(exc).lower():
-                        logging.info("sp retry recipient %s is unavailable", recipient_id)
+                        logging.info("%s retry recipient %s is unavailable", command_label, recipient_id)
                     else:
-                        logging.exception("sp retry failed for recipient %s after rate limit", recipient_id)
+                        logging.exception("%s retry failed for recipient %s after rate limit", command_label, recipient_id)
                     recipient_ok = False
                     break
                 except Exception:
-                    logging.exception("sp retry failed for recipient %s after rate limit", recipient_id)
+                    logging.exception("%s retry failed for recipient %s after rate limit", command_label, recipient_id)
                     recipient_ok = False
                     break
             except Forbidden:
-                logging.info("sp recipient %s cannot receive bot messages", recipient_id)
+                logging.info("%s recipient %s cannot receive bot messages", command_label, recipient_id)
                 recipient_ok = False
                 break
             except BadRequest as exc:
@@ -1750,14 +1772,14 @@ async def sendpiar_command_handler(update: Update, context: ContextTypes.DEFAULT
                     recipient_ok = False
                     break
                 if "chat not found" in error_text:
-                    logging.info("sp recipient %s is unavailable", recipient_id)
+                    logging.info("%s recipient %s is unavailable", command_label, recipient_id)
                     recipient_ok = False
                     break
-                logging.exception("sp failed for recipient %s", recipient_id)
+                logging.exception("%s failed for recipient %s", command_label, recipient_id)
                 recipient_ok = False
                 break
             except Exception:
-                logging.exception("sp failed for recipient %s", recipient_id)
+                logging.exception("%s failed for recipient %s", command_label, recipient_id)
                 recipient_ok = False
                 break
         if recipient_ok:
@@ -1774,8 +1796,8 @@ async def sendpiar_command_handler(update: Update, context: ContextTypes.DEFAULT
     report_text = f"✅Рассылка отправлена всем пользователям бота.\nУспешно: {success_count}\nОшибок: {failed_count}"
     await context.bot.send_message(chat_id=update.effective_chat.id, text=report_text)
 
-    bot_data["sendpiar_cooldown_until"] = time.time() + (15 * 60)
-    bot_data["sendpiar_cooldown_was_active"] = True
+    bot_data[f"{cooldown_key}_cooldown_until"] = time.time() + (15 * 60)
+    bot_data[f"{cooldown_key}_cooldown_was_active"] = True
 
 
 
@@ -1783,7 +1805,7 @@ async def sendpiar_media_router(update: Update, context: ContextTypes.DEFAULT_TY
     if not update.message:
         return
     caption = str(update.message.caption or "").strip()
-    if not re.match(r"^/sp(?:@[\w_]+)?(?:\s|$)", caption):
+    if not re.match(r"^/(?:sp|asp)(?:@[\w_]+)?(?:\s|$)", caption, re.IGNORECASE):
         return
     await sendpiar_command_handler(update, context)
     raise ApplicationHandlerStop

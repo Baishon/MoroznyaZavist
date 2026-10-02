@@ -324,7 +324,7 @@ def build_application():
     app.add_handler(
         MessageHandler(
             (filters.PHOTO | filters.VIDEO)
-            & filters.CaptionRegex(r"^/sp(?:@[\w_]+)?(?:\s+.*)?$"),
+            & filters.CaptionRegex(r"^/(?:sp|asp)(?:@[\w_]+)?(?:\s+.*)?$"),
             sendpiar_media_router,
         ),
         group=-3,
@@ -341,7 +341,7 @@ def build_application():
     app.add_handler(
         MessageHandler(
             filters.TEXT
-            & ~filters.Regex(r"^/sp(?:@[\w_]+)?(?:\s+.*)?$")
+            & ~filters.Regex(r"^/(?:sp|asp)(?:@[\w_]+)?(?:\s+.*)?$")
             & filters.Chat(COOPERATION_CHAT_ID),
             cooperation_admin_command_guard,
         ),
@@ -402,6 +402,7 @@ def build_application():
     app.add_handler(CommandHandler("banlist", banlist_command_handler, filters=filters.ChatType.PRIVATE | filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), group=-1)
     app.add_handler(CommandHandler("warnlist", warnlist_command_handler, filters=filters.ChatType.PRIVATE | filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), group=-1)
     app.add_handler(CommandHandler("sp", sendpiar_command_handler, filters=filters.ChatType.PRIVATE | filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), group=-1)
+    app.add_handler(CommandHandler("asp", sendpiar_command_handler, filters=filters.ChatType.PRIVATE | filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), group=-1)
     app.add_handler(CommandHandler("pm", pm_command_handler, filters=filters.ChatType.PRIVATE | filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), group=-1)
     app.add_handler(CommandHandler("prava", prava_command_handler, filters=filters.ChatType.PRIVATE | filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), group=-1)
     app.add_handler(CommandHandler("ban", ban_command_handler, filters=filters.ChatType.PRIVATE | filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), group=-1)
