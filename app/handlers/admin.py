@@ -939,6 +939,7 @@ async def log_command_router(update: Update, context: ContextTypes.DEFAULT_TYPE)
         "/restlist": restlist_command_handler,
         "/anpiar": anpiar_command_handler,
         "/fullstats": fullstats_command_handler,
+        "/recinfo": recinfo_command_handler,
         "/sp": sendpiar_command_handler,
         "/pm": pm_command_handler,
         "/prava": prava_command_handler,
@@ -2173,6 +2174,79 @@ async def stats_command_handler(update: Update, context: ContextTypes.DEFAULT_TY
 
     await update.message.reply_text(_build_user_stats_text(context, str(target_user_id), profile))
 
+
+
+async def recinfo_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or not update.effective_user:
+        return
+
+    if update.effective_chat.id != WORK_CHAT_ID or update.message.message_thread_id is None:
+        return
+
+    issuer_profile = _ensure_profile(
+        context,
+        str(update.effective_user.id),
+        update.effective_user.username or f"id{update.effective_user.id}",
+    )
+    if _effective_admin_level(issuer_profile) < 4:
+        await update.message.reply_text("Команда доступна только администраторам 4-5 категории.")
+        return
+
+    topic_id = update.message.message_thread_id
+    topic_map = context.application.bot_data.get("topic_user_map", {}) or {}
+    target_user_id = topic_map.get(topic_id) or topic_map.get(str(topic_id))
+    if not target_user_id:
+        await update.message.reply_text("Команда работает только внутри активной темы переписки.")
+        return
+
+    profile = _ensure_profile(context, str(target_user_id), f"id{target_user_id}")
+    active = (context.application.bot_data.get("active_chats", {}) or {}).get(str(target_user_id)) or {}
+    app_requests = context.application.bot_data.setdefault("admin_requests", {}) or {}
+    req_info = app_requests.get(str(target_user_id)) or {}
+
+    mood = str((active.get("mood") or req_info.get("mood") or "не указана")).strip() or "не указана"
+    admin_username = str((active.get("admin_username") or active.get("admin_tag") or req_info.get("admin_username") or "не назначен")).strip() or "не назначен"
+    user_nickname = str(profile.get("user_nickname") or profile.get("username") or f"id{target_user_id}")
+    requester_id_profile = profile.get("id_profile")
+    topic_message_id = int(req_info.get("topic_message_id", 0) or 0)
+
+    recinfo_text = (
+        "📊 **Информация о переписке**\n"
+        f"Вы находитесь в переписке на тему **«{mood}»**.\n"
+        "Здесь отображается информация о текущем диалоге и его участниках.\n"
+        f"👤 **Пользователь:** {user_nickname}\n"
+        f"🆔 **ID профиля:** {requester_id_profile}\n"
+        f"💬 **Тема переписки:** {mood}\n"
+        f"🛡 **Администратор переписки:** {admin_username}\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        f"🛡 **Доступ к публикации в данной теме имеют**: {admin_username}\n"
+        f"🔐 Управление и контроль осуществляет администратор: {admin_username}"
+    )
+
+    try:
+        await update.message.delete()
+    except Exception:
+        pass
+
+    if topic_message_id:
+        try:
+            await context.bot.edit_message_text(
+                chat_id=update.effective_chat.id,
+                message_id=topic_message_id,
+                text=recinfo_text,
+            )
+            return
+        except Exception:
+            pass
+
+    try:
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=recinfo_text,
+            message_thread_id=topic_id,
+        )
+    except Exception:
+        pass
 
 
 async def fullstats_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -4748,11 +4822,18 @@ async def admin_take_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     requester_profile = _ensure_profile(context, str(request_user_id), username)
     requester_id_profile = requester_profile.get("id_profile")
 
+    user_nickname = str(requester_profile.get("user_nickname") or username or "не указан")
     accept_text = (
-        f"📊Вы находитесь в переписке на тему {mood}\n"
-        f"Имя пользователя: {username}\n"
-        f"Айди профиля: {requester_id_profile}\n"
-        f"Администратор {admin_username}"
+        "📊 **Информация о переписке**\n"
+        f"Вы находитесь в переписке на тему **«{mood}»**.\n"
+        "Здесь отображается информация о текущем диалоге и его участниках.\n"
+        f"👤 **Пользователь:** {user_nickname}\n"
+        f"🆔 **ID профиля:** {requester_id_profile}\n"
+        f"💬 **Тема переписки:** {mood}\n"
+        f"🛡 **Администратор переписки:** {admin_username}\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        f"🛡 **Доступ к публикации в данной теме имеют**: {admin_username}\n"
+        f"🔐 Управление и контроль осуществляет администратор: {admin_username}"
     )
 
     try:
