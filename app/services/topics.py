@@ -33,6 +33,7 @@ def _is_admin_command_text(text: str | None) -> bool:
         "/makeadmin",
         "/setprefix",
         "/anpiar",
+        "/asp",
         "/fullstats",
         "/recinfo",
         "/pm",
