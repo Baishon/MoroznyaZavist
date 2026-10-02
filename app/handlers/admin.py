@@ -1,6 +1,7 @@
 """Admin-facing command/callback/message handlers (staff group + log chat)."""
 import asyncio
 import difflib
+from html import escape
 import json
 import logging
 import re
@@ -2212,25 +2213,25 @@ async def recinfo_command_handler(update: Update, context: ContextTypes.DEFAULT_
     target_user_id, active = active_session
     profile = _ensure_profile(context, target_user_id, f"id{target_user_id}")
 
-    mood = str(active.get("mood") or "не указана").strip() or "не указана"
-    admin_username = str(active.get("admin_username") or active.get("admin_tag") or "не назначен").strip() or "не назначен"
-    user_nickname = str(profile.get("user_nickname") or profile.get("username") or f"id{target_user_id}")
-    requester_id_profile = profile.get("id_profile")
+    mood = escape(str(active.get("mood") or "не указана").strip() or "не указана")
+    admin_username = escape(str(active.get("admin_username") or active.get("admin_tag") or "не назначен").strip() or "не назначен")
+    user_nickname = escape(str(profile.get("user_nickname") or profile.get("username") or f"id{target_user_id}"))
+    requester_id_profile = escape(str(profile.get("id_profile") or "не указан"))
     topic_message_id = active.get("topic_message_id")
     if not topic_message_id:
         await update.message.reply_text("Не удалось найти исходное сообщение информации в этой сессии.")
         return
 
     recinfo_text = (
-        "📊 **Информация о переписке**\n"
-        f"Вы находитесь в переписке на тему **«{mood}»**.\n"
+        "<b>📊 Информация о переписке</b>\n"
+        f"Вы находитесь в переписке на тему <b>«{mood}»</b>.\n"
         "Здесь отображается информация о текущем диалоге и его участниках.\n"
-        f"👤 **Пользователь:** {user_nickname}\n"
-        f"🆔 **ID профиля:** {requester_id_profile}\n"
-        f"💬 **Тема переписки:** {mood}\n"
-        f"🛡 **Администратор переписки:** {admin_username}\n"
+        f"👤 <b>Пользователь:</b> {user_nickname}\n"
+        f"🆔 <b>ID профиля:</b> {requester_id_profile}\n"
+        f"💬 <b>Тема переписки:</b> {mood}\n"
+        f"🛡 <b>Администратор переписки:</b> {admin_username}\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
-        f"🛡 **Доступ к публикации в данной теме имеют**: {admin_username}\n"
+        f"🛡 <b>Доступ к публикации в данной теме имеют:</b> {admin_username}\n"
         f"🔐 Управление и контроль осуществляет администратор: {admin_username}"
     )
 
@@ -2239,6 +2240,7 @@ async def recinfo_command_handler(update: Update, context: ContextTypes.DEFAULT_
             chat_id=update.effective_chat.id,
             message_id=topic_message_id,
             text=recinfo_text,
+            parse_mode=ParseMode.HTML,
         )
     except Exception:
         logging.exception(
@@ -4829,18 +4831,21 @@ async def admin_take_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     requester_profile = _ensure_profile(context, str(request_user_id), username)
     requester_id_profile = requester_profile.get("id_profile")
 
-    user_nickname = str(requester_profile.get("user_nickname") or username or "не указан")
+    mood_text = escape(str(mood or "не указана"))
+    admin_username_text = escape(admin_username)
+    user_nickname = escape(str(requester_profile.get("user_nickname") or username or "не указан"))
+    requester_id_profile_text = escape(str(requester_id_profile or "не указан"))
     accept_text = (
-        "📊 **Информация о переписке**\n"
-        f"Вы находитесь в переписке на тему **«{mood}»**.\n"
+        "<b>📊 Информация о переписке</b>\n"
+        f"Вы находитесь в переписке на тему <b>«{mood_text}»</b>.\n"
         "Здесь отображается информация о текущем диалоге и его участниках.\n"
-        f"👤 **Пользователь:** {user_nickname}\n"
-        f"🆔 **ID профиля:** {requester_id_profile}\n"
-        f"💬 **Тема переписки:** {mood}\n"
-        f"🛡 **Администратор переписки:** {admin_username}\n"
+        f"👤 <b>Пользователь:</b> {user_nickname}\n"
+        f"🆔 <b>ID профиля:</b> {requester_id_profile_text}\n"
+        f"💬 <b>Тема переписки:</b> {mood_text}\n"
+        f"🛡 <b>Администратор переписки:</b> {admin_username_text}\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
-        f"🛡 **Доступ к публикации в данной теме имеют**: {admin_username}\n"
-        f"🔐 Управление и контроль осуществляет администратор: {admin_username}"
+        f"🛡 <b>Доступ к публикации в данной теме имеют:</b> {admin_username_text}\n"
+        f"🔐 Управление и контроль осуществляет администратор: {admin_username_text}"
     )
 
     accepted_msg = None
@@ -4852,9 +4857,15 @@ async def admin_take_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
                 text=accept_text,
                 message_thread_id=topic_id,
                 reply_markup=buttons,
+                parse_mode=ParseMode.HTML,
             )
         else:
-            accepted_msg = await context.bot.send_message(chat_id=chat_id, text=accept_text, reply_markup=buttons)
+            accepted_msg = await context.bot.send_message(
+                chat_id=chat_id,
+                text=accept_text,
+                reply_markup=buttons,
+                parse_mode=ParseMode.HTML,
+            )
     except Exception:
         logging.exception("Failed to send session info message for user %s", request_user_id)
 
