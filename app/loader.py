@@ -13,6 +13,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from zoneinfo import ZoneInfo
 
 from telegram import BotCommand
+from telegram.error import TimedOut
 from telegram.ext import ApplicationBuilder, CallbackQueryHandler, ChatMemberHandler, CommandHandler, MessageHandler, MessageReactionHandler, filters
 
 from app import logging_setup  # noqa: F401  (side effect: attaches Telegram log handler)
@@ -278,6 +279,17 @@ async def _message_history_tracker(update, context) -> None:
     )
 
 
+async def _application_error_handler(update, context) -> None:
+    error = context.error
+    if error is None or isinstance(error, TimedOut):
+        return
+
+    logging.error(
+        "Unhandled exception while processing update",
+        exc_info=(type(error), error, error.__traceback__),
+    )
+
+
 def build_application():
     app = (
         ApplicationBuilder()
@@ -288,6 +300,7 @@ def build_application():
     )
     _init_persistent_storage(app)
     app.bot._message_history_connection = app.bot_data.get("_state_db_connection")
+    app.add_error_handler(_application_error_handler)
 
     # Agreement enforcement: block users who haven't accepted terms (default: 0)
     # Runs early to prevent other handlers from executing when user hasn't agreed.
