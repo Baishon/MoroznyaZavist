@@ -241,7 +241,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [
             [
                 InlineKeyboardButton("⭐ Канал бота", url="https://t.me/berlogaAskly"),
-                InlineKeyboardButton("❓ Помощь", url="https://t.me/berlogaAskly/58")
+                InlineKeyboardButton("❓ Помощь", url="https://t.me/asklyhelp")
             ]
         ]
     )
@@ -514,7 +514,7 @@ async def agreement_accept_callback(update: Update, context: ContextTypes.DEFAUL
             [
                 [
                     InlineKeyboardButton("⭐ Канал бота", url="https://t.me/berlogaAskly"),
-                    InlineKeyboardButton("❓ Помощь", url="https://t.me/berlogaAskly/58")
+                    InlineKeyboardButton("❓ Помощь", url="https://t.me/asklyhelp")
                 ]
             ]
         )
@@ -655,7 +655,7 @@ async def help_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await block_if_banned(update, context):
         return
     await update.message.reply_text(
-        "🔈Уважаемый пользователь, помощь по использованию нашего бота вы можете увидеть нажав на ссылку ниже. https://t.me/berlogaAskly/58"
+        "🔈Уважаемый пользователь, помощь по использованию нашего бота вы можете увидеть нажав на ссылку ниже. https://t.me/asklyhelp"
     )
 
 
