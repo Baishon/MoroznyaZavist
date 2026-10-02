@@ -34,6 +34,7 @@ def _is_admin_command_text(text: str | None) -> bool:
         "/setprefix",
         "/anpiar",
         "/fullstats",
+        "/recinfo",
         "/pm",
         "/prava",
         "/ban",
