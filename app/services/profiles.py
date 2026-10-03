@@ -406,6 +406,7 @@ def _candidate_tip_choices() -> list[tuple[str, str]]:
         ("chat", "🗣️Общение"),
         ("support", "❤️Поддержка"),
         ("flirt", "🔥Флирт"),
+        ("aggressive", "👹Агрессив"),
     ]
 
 
@@ -451,7 +452,7 @@ def _admin_supports_mood(profile: dict | None, mood: str | None) -> bool:
     return bool(requested_moods.intersection(
         {
             mood_name
-            for mood_name in ("общение", "поддержка", "флирт")
+            for mood_name in ("общение", "поддержка", "флирт", "агрессив")
             if mood_name in tip_admin
         }
     ))

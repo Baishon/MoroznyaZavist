@@ -162,6 +162,8 @@ from app.handlers.user import (
     choose_mood_callback,
     mood_selection_callback,
     mood_selection_next_callback,
+    mood_aggressive_confirm_callback,
+    mood_aggressive_cancel_callback,
     check_session_admin_online_handler,
     complaint_admin_back_handler,
     complaint_admin_last_admin_handler,
@@ -455,10 +457,12 @@ def build_application():
     app.add_handler(CallbackQueryHandler(warn_user_cancel_callback, pattern=r"^warn_user_cancel_\d+$"))
     app.add_handler(CallbackQueryHandler(approve_candidate_callback, pattern=r"^approve_candidate_\d+$"))
     app.add_handler(CallbackQueryHandler(reject_candidate_callback, pattern=r"^reject_candidate_\d+$"))
-    app.add_handler(CallbackQueryHandler(candidate_tip_toggle_callback, pattern=r"^candidate_tip_toggle_\d+_(chat|support|flirt)$"))
+    app.add_handler(CallbackQueryHandler(candidate_tip_toggle_callback, pattern=r"^candidate_tip_toggle_\d+_(chat|support|flirt|aggressive)$"))
     app.add_handler(CallbackQueryHandler(candidate_tip_next_callback, pattern=r"^candidate_tip_next_\d+$"))
-    app.add_handler(CallbackQueryHandler(mood_selection_callback, pattern=r"^mood_toggle_\d+_(chat|support|flirt)$"))
+    app.add_handler(CallbackQueryHandler(mood_selection_callback, pattern=r"^mood_toggle_\d+_(chat|support|flirt|aggressive)$"))
     app.add_handler(CallbackQueryHandler(mood_selection_next_callback, pattern=r"^mood_next_\d+$"))
+    app.add_handler(CallbackQueryHandler(mood_aggressive_confirm_callback, pattern=r"^mood_aggressive_confirm_\d+$"))
+    app.add_handler(CallbackQueryHandler(mood_aggressive_cancel_callback, pattern=r"^mood_aggressive_cancel_\d+$"))
     app.add_handler(CallbackQueryHandler(request_gender_callback, pattern=r"^request_gender_\d+_(male|female)$"))
     app.add_handler(CallbackQueryHandler(candidate_gender_callback, pattern=r"^candidate_gender_\d+_(male|female)$"))
     app.add_handler(CallbackQueryHandler(candidate_application_callback, pattern=r"^candidate_application_\d+$"))
@@ -501,7 +505,7 @@ def build_application():
     app.add_handler(CallbackQueryHandler(astats_bio_view_callback, pattern=r"^astats_bio_view_\d+$"))
     app.add_handler(CallbackQueryHandler(astats_active_pz_callback, pattern=r"^astats_active_pz_\d+$"))
     app.add_handler(CallbackQueryHandler(astats_tip_menu_callback, pattern=r"^astats_tip_menu_\d+$"))
-    app.add_handler(CallbackQueryHandler(astats_tip_toggle_callback, pattern=r"^astats_tip_toggle_\d+_(chat|support|flirt)$"))
+    app.add_handler(CallbackQueryHandler(astats_tip_toggle_callback, pattern=r"^astats_tip_toggle_\d+_(chat|support|flirt|aggressive)$"))
     app.add_handler(CallbackQueryHandler(astats_tip_apply_callback, pattern=r"^astats_tip_apply_\d+$"))
     app.add_handler(CallbackQueryHandler(astats_gender_menu_callback, pattern=r"^astats_gender_menu_\d+$"))
     app.add_handler(CallbackQueryHandler(astats_gender_set_callback, pattern=r"^astats_gender_set_\d+_(male|female)$"))

@@ -80,7 +80,7 @@ async def admin_candidate_private_flow(update: Update, context: ContextTypes.DEF
         state["tip_admin_selected"] = []
 
         await update.message.reply_text(
-            "💬Теперь укажите тип общения которые вы больше всего можете обсуждать с будущими пользователями (можно выбрать все три)",
+            "💬Теперь укажите тип общения которые вы больше всего можете обсуждать с будущими пользователями (можно выбрать все четыре)",
             reply_markup=_build_candidate_tip_keyboard(user_id, []),
         )
         return True
@@ -129,7 +129,7 @@ async def candidate_tip_toggle_callback(update: Update, context: ContextTypes.DE
         await update.callback_query.answer("Кнопка доступна только владельцу анкеты", show_alert=True)
         return
 
-    if tip_key not in {"chat", "support", "flirt"}:
+    if tip_key not in {"chat", "support", "flirt", "aggressive"}:
         return
 
     state_map = context.application.bot_data.setdefault("admin_candidate_state", {})

@@ -43,6 +43,7 @@ def _build_mood_selection_keyboard(user_id: str, selected_keys: list[str]) -> In
         "chat": "🗣️ Общение",
         "support": "❤️ Поддержка",
         "flirt": "🔥 Флирт",
+        "aggressive": "👹Агрессив",
     }
     buttons = [
         InlineKeyboardButton(
@@ -54,7 +55,7 @@ def _build_mood_selection_keyboard(user_id: str, selected_keys: list[str]) -> In
     return InlineKeyboardMarkup(
         [
             [buttons[0], buttons[1]],
-            [buttons[2]],
+            [buttons[2], buttons[3]],
             [InlineKeyboardButton("▶️ Далее", callback_data=f"mood_next_{user_id}")],
         ]
     )
@@ -377,6 +378,7 @@ def _build_astats_tip_editor_keyboard(session_id: str, selected_keys: list[str] 
         ("chat", "🗣️**Общение**"),
         ("support", "❤️**Поддержка**"),
         ("flirt", "🔥**Флирт**"),
+        ("aggressive", "👹Агрессив"),
     ]
     rows = []
     for key, label in choices:
