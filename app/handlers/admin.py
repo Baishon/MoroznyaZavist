@@ -2203,6 +2203,61 @@ async def stats_command_handler(update: Update, context: ContextTypes.DEFAULT_TY
 
 
 
+def _topic_access_display_names(context: ContextTypes.DEFAULT_TYPE, active: dict) -> str:
+    profiles = context.application.bot_data.get("profiles", {}) or {}
+    admin_ids = [str(active.get("admin_id") or "")]
+    admin_ids.extend(str(value) for value in (active.get("allowed_admin_ids") or []))
+
+    names = []
+    seen_admin_ids = set()
+    for admin_id in admin_ids:
+        if not admin_id or admin_id in seen_admin_ids:
+            continue
+        seen_admin_ids.add(admin_id)
+        profile = profiles.get(admin_id) or {}
+        username = str(profile.get("username") or "").strip()
+        if username and not username.lower().startswith("id"):
+            display_name = username if username.startswith("@") else f"@{username}"
+        else:
+            display_name = str(profile.get("tag_admin") or "").strip()
+        if not display_name and admin_id == str(active.get("admin_id") or ""):
+            display_name = str(active.get("admin_username") or active.get("admin_tag") or "").strip()
+        if display_name:
+            names.append((admin_id, display_name))
+
+    if names:
+        return ", ".join(name for _, name in names)
+    return str(active.get("admin_username") or active.get("admin_tag") or "не назначен")
+
+
+def _build_session_info_text(
+    context: ContextTypes.DEFAULT_TYPE,
+    target_user_id: str,
+    active: dict,
+    profile: dict | None = None,
+) -> str:
+    profile = profile or _ensure_profile(context, target_user_id, f"id{target_user_id}")
+    mood = escape(str(active.get("mood") or "не указана").strip() or "не указана")
+    admin_username = escape(
+        str(active.get("admin_username") or active.get("admin_tag") or "не назначен").strip() or "не назначен"
+    )
+    user_nickname = escape(str(profile.get("user_nickname") or "не указан"))
+    requester_id_profile = escape(str(profile.get("id_profile") or "не указан"))
+    access_names = escape(_topic_access_display_names(context, active))
+    return (
+        "<b>📊 Информация о переписке</b>\n"
+        f"Вы находитесь в переписке на тему <b>«{mood}»</b>.\n"
+        "Здесь отображается информация о текущем диалоге и его участниках.\n"
+        f"👤 <b>Пользователь:</b> {user_nickname}\n"
+        f"🆔 <b>ID профиля:</b> {requester_id_profile}\n"
+        f"💬 <b>Тема переписки:</b> {mood}\n"
+        f"🛡 <b>Администратор переписки:</b> {admin_username}\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        f"🛡 <b>Доступ к публикации в данной теме имеют:</b> {access_names}\n"
+        f"🔐 Управление и контроль осуществляет администратор: {admin_username}"
+    )
+
+
 async def recinfo_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.effective_user or not update.effective_chat:
         return
@@ -2239,27 +2294,12 @@ async def recinfo_command_handler(update: Update, context: ContextTypes.DEFAULT_
     target_user_id, active = active_session
     profile = _ensure_profile(context, target_user_id, f"id{target_user_id}")
 
-    mood = escape(str(active.get("mood") or "не указана").strip() or "не указана")
-    admin_username = escape(str(active.get("admin_username") or active.get("admin_tag") or "не назначен").strip() or "не назначен")
-    user_nickname = escape(str(profile.get("user_nickname") or profile.get("username") or f"id{target_user_id}"))
-    requester_id_profile = escape(str(profile.get("id_profile") or "не указан"))
     topic_message_id = active.get("topic_message_id")
     if not topic_message_id:
         await update.message.reply_text("Не удалось найти исходное сообщение информации в этой сессии.")
         return
 
-    recinfo_text = (
-        "<b>📊 Информация о переписке</b>\n"
-        f"Вы находитесь в переписке на тему <b>«{mood}»</b>.\n"
-        "Здесь отображается информация о текущем диалоге и его участниках.\n"
-        f"👤 <b>Пользователь:</b> {user_nickname}\n"
-        f"🆔 <b>ID профиля:</b> {requester_id_profile}\n"
-        f"💬 <b>Тема переписки:</b> {mood}\n"
-        f"🛡 <b>Администратор переписки:</b> {admin_username}\n"
-        "━━━━━━━━━━━━━━━━━━━━\n"
-        f"🛡 <b>Доступ к публикации в данной теме имеют:</b> {admin_username}\n"
-        f"🔐 Управление и контроль осуществляет администратор: {admin_username}"
-    )
+    recinfo_text = _build_session_info_text(context, target_user_id, active, profile)
 
     try:
         await context.bot.edit_message_text(
@@ -2267,6 +2307,7 @@ async def recinfo_command_handler(update: Update, context: ContextTypes.DEFAULT_
             message_id=topic_message_id,
             text=recinfo_text,
             parse_mode=ParseMode.HTML,
+            reply_markup=_build_active_dialog_admin_keyboard(target_user_id),
         )
     except Exception:
         logging.exception(
@@ -4857,21 +4898,18 @@ async def admin_take_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     requester_profile = _ensure_profile(context, str(request_user_id), username)
     requester_id_profile = requester_profile.get("id_profile")
 
-    mood_text = escape(str(mood or "не указана"))
-    admin_username_text = escape(admin_username)
-    user_nickname = escape(str(requester_profile.get("user_nickname") or "не указан"))
-    requester_id_profile_text = escape(str(requester_id_profile or "не указан"))
-    accept_text = (
-        "<b>📊 Информация о переписке</b>\n"
-        f"Вы находитесь в переписке на тему <b>«{mood_text}»</b>.\n"
-        "Здесь отображается информация о текущем диалоге и его участниках.\n"
-        f"👤 <b>Пользователь:</b> {user_nickname}\n"
-        f"🆔 <b>ID профиля:</b> {requester_id_profile_text}\n"
-        f"💬 <b>Тема переписки:</b> {mood_text}\n"
-        f"🛡 <b>Администратор переписки:</b> {admin_username_text}\n"
-        "━━━━━━━━━━━━━━━━━━━━\n"
-        f"🛡 <b>Доступ к публикации в данной теме имеют:</b> {admin_username_text}\n"
-        f"🔐 Управление и контроль осуществляет администратор: {admin_username_text}"
+    info_session = {
+        "mood": mood,
+        "admin_id": str(update.effective_user.id),
+        "admin_username": admin_username,
+        "admin_tag": admin_tag,
+        "allowed_admin_ids": [],
+    }
+    accept_text = _build_session_info_text(
+        context,
+        str(request_user_id),
+        info_session,
+        requester_profile,
     )
 
     accepted_msg = None
@@ -5196,9 +5234,18 @@ async def topic_access_menu_callback_handler(update: Update, context: ContextTyp
             notification_sent = False
             logging.exception("Failed to notify admin %s about topic access %s", target_admin_id, mode)
 
-        await query.edit_message_reply_markup(
-            reply_markup=_build_topic_access_actions_keyboard(session_user_id)
-        )
+        try:
+            updated_info_text = _build_session_info_text(context, session_user_id, active)
+            await query.edit_message_text(
+                text=updated_info_text,
+                parse_mode=ParseMode.HTML,
+                reply_markup=_build_topic_access_actions_keyboard(session_user_id),
+            )
+        except Exception:
+            logging.exception("Failed to update session info text after topic access %s", mode)
+            await query.edit_message_reply_markup(
+                reply_markup=_build_topic_access_actions_keyboard(session_user_id)
+            )
         if notification_sent:
             result = "Право выдано и администратор уведомлён." if mode == "grant" else "Доступ отозван и администратор уведомлён."
             await query.answer(result)
