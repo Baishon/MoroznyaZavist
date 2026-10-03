@@ -486,43 +486,49 @@ def _admin_default_prefix(level: int) -> str | None:
 
 
 def _build_user_stats_text(context: ContextTypes.DEFAULT_TYPE, target_user_id: str, profile: dict) -> str:
-    username = str(profile.get("username") or f"id{target_user_id}")
-    user_nickname = str(profile.get("user_nickname") or "не указан")
+    username = html.escape(str(profile.get("username") or f"id{target_user_id}"))
+    user_nickname = html.escape(str(profile.get("user_nickname") or "не указан"))
     message_user = int(profile.get("message_user", 0) or 0)
     warn_value = refresh_timed_warnings(profile)
-    profile_reason = str(profile.get("reason") or "нет причин")
+    profile_reason = html.escape(str(profile.get("reason") or "нет причин"))
     admin_level = int(profile.get("admin_level", 0) or 0)
-    rank_title = ADMIN_LEVEL_TITLES.get(admin_level, "Нет админ-прав")
-    date_value = str(profile.get("date_registration") or "не указана")
+    rank_title = html.escape(ADMIN_LEVEL_TITLES.get(admin_level, "Нет админ-прав"))
+    date_value = html.escape(str(profile.get("date_registration") or "не указана"))
 
     active_session = (context.application.bot_data.get("active_chats", {}) or {}).get(str(target_user_id)) or {}
     session = "активна" if active_session.get("active") else "не активна"
-    admin_tag = str(active_session.get("admin_tag") or active_session.get("admin_username") or profile.get("last_admin_tag") or "не указан")
+    admin_tag = html.escape(str(active_session.get("admin_tag") or active_session.get("admin_username") or profile.get("last_admin_tag") or "не указан"))
 
     extra_status_lines = []
     if bool(profile.get("bot_blocked_by_user", False)):
-        extra_status_lines.append("🚫Пользователь заблокировал у себя бота")
+        extra_status_lines.append("🚫 Пользователь заблокировал бота")
 
     banned_info = (context.application.bot_data.get("banned_users", {}) or {}).get(str(target_user_id))
     if banned_info:
-        ban_reason = str(banned_info.get("reason") or "не указана")
-        extra_status_lines.append(f"📛Пользователь находится в списке заблокированных / Причина: {ban_reason}")
+        ban_reason = html.escape(str(banned_info.get("reason") or "не указана"))
+        extra_status_lines.append(f"📛 Пользователь заблокирован. Причина: {ban_reason}")
 
-    extra_status_text = ""
-    if extra_status_lines:
-        extra_status_text = "\n\n" + "\n".join(extra_status_lines)
+    extra_status_text = "\n".join(extra_status_lines)
+    if extra_status_text:
+        extra_status_text = f"\n\n{extra_status_text}"
 
     return (
-        f"📈Профиль пользователя {username}\n\n"
-        f"🆔Telegram ID: {target_user_id}\n"
-        f"📩Сообщений: {message_user}\n"
-        f"🤹‍♀️Юзернейм: {username}\n"
-        f"🍓Никнейм: {user_nickname}\n"
-        f"⚠️Предупреждений: {warn_value} // Последняя причина: {profile_reason}\n"
-        f"🔰Уровень админ-прав: {rank_title}\n"
-        f"📲Активная сессия: {session} // Последний админ: {admin_tag}\n\n"
-        f"🪙Токенов: {int(profile.get('count_tokens', 0) or 0)}\n"
-        f"💿Регистрация в базе данных: {date_value}"
+        "👤 <b>ПРОФИЛЬ ПОЛЬЗОВАТЕЛЯ</b>\n\n"
+        f"🆔 <b>ID профиля:</b> {html.escape(str(profile.get('id_profile') or 'не указан'))}\n"
+        f"🔗 <b>Telegram ID:</b> <code>{html.escape(str(target_user_id))}</code>\n"
+        f"🍓 <b>Никнейм:</b> {user_nickname}\n"
+        f"👤 <b>Username:</b> {username}\n"
+        f"📨 <b>Сообщений:</b> {message_user}\n\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        f"⚠️ <b>Предупреждения:</b> {warn_value}\n"
+        f"📝 <b>Последняя причина:</b> {profile_reason}\n"
+        f"🔰 <b>Права:</b> {rank_title}\n"
+        f"💬 <b>Сессия:</b> {session}\n"
+        f"🛡 <b>Последний админ:</b> {admin_tag}\n\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        f"🪙 <b>Токены:</b> {int(profile.get('count_tokens', 0) or 0)} | "
+        f"💰 <b>Коины:</b> {int(profile.get('coin', 0) or 0)}\n"
+        f"📅 <b>В боте с:</b> {date_value}"
         f"{extra_status_text}"
     )
 
@@ -548,16 +554,18 @@ def _build_admin_stats_text(target_user_id: str, profile: dict) -> str:
         online_text = "🔴Не в сети (данные об активности отсутствуют)"
 
     return (
-        "🔰 <b>АДМИН-ПРОФИЛЬ</b>\n\n"
-        f"🆔 <b>ID профиля:</b> {profile.get('id_profile')}\n"
+        "🔰 <b>ПРОФИЛЬ АДМИНИСТРАТОРА</b>\n\n"
+        f"🆔 <b>ID профиля:</b> {html.escape(str(profile.get('id_profile') or 'не указан'))}\n"
+        f"🔗 <b>Telegram ID:</b> <code>{html.escape(str(target_user_id))}</code>\n"
         f"👤 <b>Username:</b> {profile_username}\n"
+        f"🏷 <b>Тег:</b> {admin_tag}\n\n"
+        "━━━━━━━━━━━━━━━━━━\n"
         f"🎀 <b>Префикс:</b> {prefix_text}\n"
-        f"🎖 <b>Уровень:</b> {admin_level} ({rank_title})\n"
+        f"🎖 <b>Уровень:</b> {admin_level} · {html.escape(str(rank_title))}\n"
         f"⭐ <b>Репутация:</b> {reputation}\n"
-        f"🏷 <b>Тег:</b> {admin_tag}\n"
-        f"💕Тип диалогов: {tip_admin}\n"
-        f"👨‍👩‍👦 Пол: {admin_gender}\n"
-        f"👁‍🗨Был(-а) в сети: {online_text}\n"
-        f"📖 <b>Биография:</b> {admin_bio}"
-        f"{rest_text}"
+        f"💬 <b>Типы общения:</b> {tip_admin}\n"
+        f"👥 <b>Пол:</b> {admin_gender}\n"
+        f"🟢 <b>Статус:</b> {html.escape(online_text)}{rest_text}\n\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        f"📖 <b>О себе:</b> {admin_bio}"
     )
