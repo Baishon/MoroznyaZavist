@@ -112,6 +112,7 @@ from app.handlers.admin import (
     suspicious_user_allow_callback,
     suspicious_user_deny_callback,
     suspicious_user_warn_callback,
+    topic_mood_settings_callback_handler,
     topic_access_menu_callback_handler,
     session_mood_review_callback,
     topic_command_handler,
@@ -447,6 +448,12 @@ def build_application():
         CallbackQueryHandler(
             topic_access_menu_callback_handler,
             pattern=r"^topic_(?:settings(?:_back)?|accesses|access_(?:back|list(?:_back)?|pick|confirm|cancel)):"
+        )
+    )
+    app.add_handler(
+        CallbackQueryHandler(
+            topic_mood_settings_callback_handler,
+            pattern=r"^topic_mood_(?:open|submit|back):\d+$|^topic_mood_toggle:\d+:(?:chat|support|flirt|aggressive)$",
         )
     )
     app.add_handler(CallbackQueryHandler(session_mood_open_callback, pattern=r"^session_mood_open_\d+$"))

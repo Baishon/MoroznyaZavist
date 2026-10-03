@@ -350,7 +350,32 @@ def _build_topic_settings_keyboard(session_user_id: str) -> InlineKeyboardMarkup
     return InlineKeyboardMarkup(
         [
             [InlineKeyboardButton("🛡Доступы", callback_data=f"topic_accesses:{session_user_id}")],
+            [InlineKeyboardButton("🎭Тип общения", callback_data=f"topic_mood_open:{session_user_id}")],
             [InlineKeyboardButton("↩️Назад", callback_data=f"topic_settings_back:{session_user_id}")],
+        ]
+    )
+
+
+def _build_topic_mood_selection_keyboard(session_user_id: str, selected_keys: list[str]) -> InlineKeyboardMarkup:
+    choices = [
+        ("chat", "🗣 Общение"),
+        ("support", "❤️ Поддержка"),
+        ("flirt", "🔥 Флирт"),
+        ("aggressive", "👹 Агрессив"),
+    ]
+    buttons = [
+        InlineKeyboardButton(
+            f"{'✅ ' if key in selected_keys else ''}{label}",
+            callback_data=f"topic_mood_toggle:{session_user_id}:{key}",
+        )
+        for key, label in choices
+    ]
+    return InlineKeyboardMarkup(
+        [
+            buttons[:2],
+            buttons[2:],
+            [InlineKeyboardButton("Изменить", callback_data=f"topic_mood_submit:{session_user_id}")],
+            [InlineKeyboardButton("↩️ Назад", callback_data=f"topic_mood_back:{session_user_id}")],
         ]
     )
 
