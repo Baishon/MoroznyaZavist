@@ -2399,9 +2399,9 @@ async def _submit_admin_search(update: Update, context: ContextTypes.DEFAULT_TYP
         context,
         chat_id=chat_id,
         topic_id=topic_id,
+        user_id=user.id,
         admin_gender=admin_gender,
         mood=mood,
-        username=username,
     )
     buttons = InlineKeyboardMarkup(
         [[
@@ -2439,11 +2439,13 @@ def _build_new_user_topic_message(
     *,
     chat_id: int,
     topic_id: int | None,
+    user_id: int | str,
     admin_gender: str,
     mood: str,
-    username: str,
 ) -> str:
     topic_link = _topic_url(chat_id, topic_id) if topic_id is not None else "тема не создана"
+    user_profile = (context.application.bot_data.get("profiles", {}) or {}).get(str(user_id)) or {}
+    user_nickname = str(user_profile.get("user_nickname") or "не указан")
     usernames = []
     for profile in (context.application.bot_data.get("profiles", {}) or {}).values():
         profile = profile or {}
@@ -2462,7 +2464,7 @@ def _build_new_user_topic_message(
         f"🔗Рабочая тема: {topic_link}\n"
         f"Пол: {admin_gender}\n"
         f"Тип общения: {mood}\n"
-        f"Юзернейм пользователя: {username}\n\n"
+        f"Ник пользователя: {user_nickname}\n\n"
         "👥 Администраторы:\n"
         f"{admin_list}"
     )
@@ -2531,9 +2533,9 @@ async def choose_mood_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             context,
             chat_id=chat_id,
             topic_id=topic_id,
+            user_id=user.id,
             admin_gender=admin_gender,
             mood=mood,
-            username=username,
         )
         buttons = InlineKeyboardMarkup(
             [
