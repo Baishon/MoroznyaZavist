@@ -4959,13 +4959,8 @@ async def admin_take_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     # send user DM messages
     requester_chat_id = int(request_user_id)
     user_text_1 = (
-        "╭─ ❀ 𝓢𝔂𝓼𝓽𝓮𝓶 ─╮\n\n"
-        f'✅ "{admin_tag}" принял ваш запрос.\n\n'
-        "💭 Администратор уже подключается к чату и совсем скоро начнёт диалог с вами.\n\n"
-        "📨 Вся указанная вами информация уже передана ему, поэтому он немного знаком с вашей ситуацией.\n\n"
-        "⏳ Пожалуйста, оставайтесь в чате.\n\n"
-        "💌 Если ожидание немного затянется — просто отправьте любое сообщение. Администратор обязательно ответит.\n\n"
-        "╰────────────────╯"
+        f"Ваш запрос принят администратором {admin_tag}.\n\n"
+        "Администратор скоро подключится к диалогу. Пожалуйста, оставайтесь на связи."
     )
     bio_button = InlineKeyboardMarkup(
         [[InlineKeyboardButton("🔭Биография админа", callback_data=f"show_admin_bio_{request_user_id}")]]
