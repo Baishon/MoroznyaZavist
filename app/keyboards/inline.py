@@ -293,6 +293,54 @@ def _build_active_dialog_admin_keyboard(request_user_id: str) -> InlineKeyboardM
             [
                 InlineKeyboardButton("📄Профиль пользователя", callback_data=f"show_user_profile_{request_user_id}"),
             ],
+            [InlineKeyboardButton("➕Настройки", callback_data=f"topic_settings:{request_user_id}")],
+        ]
+    )
+
+
+def _build_topic_settings_keyboard(session_user_id: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton("🛡Доступы", callback_data=f"topic_accesses:{session_user_id}")],
+            [InlineKeyboardButton("↩️Назад", callback_data=f"topic_settings_back:{session_user_id}")],
+        ]
+    )
+
+
+def _build_topic_access_actions_keyboard(session_user_id: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton("✅Выдать доступ администратору", callback_data=f"topic_access_list:grant:{session_user_id}")],
+            [InlineKeyboardButton("❌Забрать доступ администратору", callback_data=f"topic_access_list:revoke:{session_user_id}")],
+            [InlineKeyboardButton("↩️Назад", callback_data=f"topic_access_back:{session_user_id}")],
+        ]
+    )
+
+
+def _build_topic_access_admins_keyboard(
+    session_user_id: str,
+    mode: str,
+    admins: list[tuple[str, str]],
+) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(tag_admin, callback_data=f"topic_access_pick:{mode}:{session_user_id}:{admin_id}")]
+        for admin_id, tag_admin in admins
+    ]
+    rows.append([InlineKeyboardButton("↩️Назад", callback_data=f"topic_access_list_back:{session_user_id}")])
+    return InlineKeyboardMarkup(rows)
+
+
+def _build_topic_access_confirmation_keyboard(
+    session_user_id: str,
+    mode: str,
+    admin_id: str,
+    tag_admin: str,
+) -> InlineKeyboardMarkup:
+    action_text = "✅Подтвердить выдачу" if mode == "grant" else "✅Подтвердить отзыв"
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton(f"{action_text}: {tag_admin}", callback_data=f"topic_access_confirm:{mode}:{session_user_id}:{admin_id}")],
+            [InlineKeyboardButton("↩️Назад", callback_data=f"topic_access_cancel:{mode}:{session_user_id}")],
         ]
     )
 

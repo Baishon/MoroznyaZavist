@@ -112,6 +112,7 @@ from app.handlers.admin import (
     suspicious_user_allow_callback,
     suspicious_user_deny_callback,
     suspicious_user_warn_callback,
+    topic_access_menu_callback_handler,
     topic_command_handler,
     unban_command_handler,
     unknown_chat_guard,
@@ -435,6 +436,12 @@ def build_application():
     app.add_handler(CallbackQueryHandler(confirm_cancel_callback, pattern=r"^confirm_cancel_\d+$"))
     app.add_handler(CallbackQueryHandler(deny_cancel_callback, pattern=r"^deny_cancel_\d+$"))
     app.add_handler(CallbackQueryHandler(admin_take_callback, pattern=r"^take_user_\d+$"))
+    app.add_handler(
+        CallbackQueryHandler(
+            topic_access_menu_callback_handler,
+            pattern=r"^topic_(?:settings(?:_back)?|accesses|access_(?:back|list(?:_back)?|pick|confirm|cancel)):"
+        )
+    )
     app.add_handler(CallbackQueryHandler(warn_user_callback, pattern=r"^warn_user_\d+$"))
     app.add_handler(CallbackQueryHandler(cancel_warn_callback, pattern=r"^cancel_warn_\d+$"))
     app.add_handler(CallbackQueryHandler(confirm_warn_callback, pattern=r"^confirm_warn_\d+$"))

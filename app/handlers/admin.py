@@ -41,6 +41,10 @@ from app.handlers.candidates import _send_candidate_stage_1
 from app.keyboards.inline import (
     _build_active_dialog_admin_keyboard,
     _build_active_session_keyboard,
+    _build_topic_access_actions_keyboard,
+    _build_topic_access_admins_keyboard,
+    _build_topic_access_confirmation_keyboard,
+    _build_topic_settings_keyboard,
     _build_astats_gender_editor_keyboard,
     _build_astats_profile_keyboard,
     _build_astats_tip_editor_keyboard,
@@ -4996,6 +5000,213 @@ async def admin_take_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     _save_runtime_snapshot(context)
 
+
+
+async def topic_access_menu_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    message = query.message if query else None
+    if not query or not message or not update.effective_user:
+        return
+
+    parts = (query.data or "").split(":")
+    action = parts[0] if parts else ""
+    if action in {"topic_settings", "topic_settings_back", "topic_accesses", "topic_access_back", "topic_access_list_back"} and len(parts) == 2:
+        session_user_id = parts[1]
+    elif action in {"topic_access_list", "topic_access_cancel"} and len(parts) == 3:
+        session_user_id = parts[2]
+    elif action in {"topic_access_pick", "topic_access_confirm"} and len(parts) == 4:
+        session_user_id = parts[2]
+    else:
+        await query.answer("Некорректная кнопка.", show_alert=True)
+        return
+
+    active = (context.application.bot_data.get("active_chats", {}) or {}).get(session_user_id)
+    topic_id = getattr(message, "message_thread_id", None)
+    if (
+        not active
+        or not active.get("active")
+        or str(active.get("chat_id")) != str(message.chat_id)
+        or str(active.get("topic_id")) != str(topic_id)
+        or str(active.get("topic_message_id")) != str(message.message_id)
+    ):
+        await query.answer("Эта сессия уже закрыта или сообщение устарело.", show_alert=True)
+        return
+
+    issuer_id = str(update.effective_user.id)
+    issuer_profile = _ensure_profile(
+        context,
+        issuer_id,
+        update.effective_user.username or f"id{issuer_id}",
+    )
+    if (
+        str(active.get("admin_id") or "") != issuer_id
+        and not _has_full_access_prefix(issuer_profile)
+    ):
+        await query.answer(
+            "Управлять доступом может только администратор этой сессии или администратор с полным доступом.",
+            show_alert=True,
+        )
+        return
+
+    async def _show_admin_list(mode: str):
+        allowed_admin_ids = {str(value) for value in (active.get("allowed_admin_ids") or [])}
+        session_admin_id = str(active.get("admin_id") or "")
+        profiles = context.application.bot_data.get("profiles", {}) or {}
+        admin_rows = []
+        for admin_id, profile in profiles.items():
+            admin_id = str(admin_id)
+            profile = profile or {}
+            if admin_id == session_admin_id:
+                continue
+            tag_admin = str(profile.get("tag_admin") or "").strip()
+            if not tag_admin:
+                continue
+            is_allowed = admin_id in allowed_admin_ids
+            if mode == "grant" and (
+                _effective_admin_level(profile) < 1
+                or _is_active_admin_candidate(context, admin_id)
+            ):
+                continue
+            if (mode == "grant" and is_allowed) or (mode == "revoke" and not is_allowed):
+                continue
+            admin_rows.append((admin_id, tag_admin))
+
+        admin_rows.sort(key=lambda row: row[1].casefold())
+        await query.edit_message_reply_markup(
+            reply_markup=_build_topic_access_admins_keyboard(session_user_id, mode, admin_rows)
+        )
+        if admin_rows:
+            await query.answer()
+        else:
+            await query.answer("Нет администраторов для этого действия.", show_alert=True)
+
+    if action == "topic_settings":
+        await query.edit_message_reply_markup(reply_markup=_build_topic_settings_keyboard(session_user_id))
+        await query.answer()
+        return
+    if action == "topic_settings_back":
+        await query.edit_message_reply_markup(reply_markup=_build_active_dialog_admin_keyboard(session_user_id))
+        await query.answer()
+        return
+    if action == "topic_accesses":
+        await query.edit_message_reply_markup(reply_markup=_build_topic_access_actions_keyboard(session_user_id))
+        await query.answer()
+        return
+    if action == "topic_access_back":
+        await query.edit_message_reply_markup(reply_markup=_build_topic_settings_keyboard(session_user_id))
+        await query.answer()
+        return
+    if action == "topic_access_list_back":
+        await query.edit_message_reply_markup(reply_markup=_build_topic_access_actions_keyboard(session_user_id))
+        await query.answer()
+        return
+
+    if action in {"topic_access_list", "topic_access_cancel"}:
+        mode = parts[1]
+        if mode in {"grant", "revoke"}:
+            await _show_admin_list(mode)
+            return
+
+    if action == "topic_access_pick":
+        mode, target_admin_id = parts[1], parts[3]
+        if mode not in {"grant", "revoke"}:
+            await query.answer("Неизвестное действие.", show_alert=True)
+            return
+        target_profile = (context.application.bot_data.get("profiles", {}) or {}).get(target_admin_id) or {}
+        tag_admin = str(target_profile.get("tag_admin") or "").strip()
+        allowed_admin_ids = {str(value) for value in (active.get("allowed_admin_ids") or [])}
+        is_allowed = target_admin_id in allowed_admin_ids
+        if (
+            not tag_admin
+            or target_admin_id == str(active.get("admin_id") or "")
+            or (
+                mode == "grant"
+                and (
+                    _effective_admin_level(target_profile) < 1
+                    or _is_active_admin_candidate(context, target_admin_id)
+                )
+            )
+            or (mode == "grant" and is_allowed)
+            or (mode == "revoke" and not is_allowed)
+        ):
+            await query.answer("Доступ этого администратора уже изменился.", show_alert=True)
+            return
+        await query.edit_message_reply_markup(
+            reply_markup=_build_topic_access_confirmation_keyboard(
+                session_user_id,
+                mode,
+                target_admin_id,
+                tag_admin,
+            )
+        )
+        await query.answer("Подтвердите действие кнопкой на сообщении.")
+        return
+
+    if action == "topic_access_confirm":
+        mode, target_admin_id = parts[1], parts[3]
+        if mode not in {"grant", "revoke"}:
+            await query.answer("Неизвестное действие.", show_alert=True)
+            return
+
+        profiles = context.application.bot_data.get("profiles", {}) or {}
+        target_profile = profiles.get(target_admin_id) or {}
+        target_tag = str(target_profile.get("tag_admin") or "").strip()
+        allowed_admin_ids = [str(value) for value in (active.get("allowed_admin_ids") or [])]
+        is_allowed = target_admin_id in allowed_admin_ids
+        if (
+            not target_tag
+            or target_admin_id == str(active.get("admin_id") or "")
+            or (
+                mode == "grant"
+                and (
+                    _effective_admin_level(target_profile) < 1
+                    or _is_active_admin_candidate(context, target_admin_id)
+                )
+            )
+            or (mode == "grant" and is_allowed)
+            or (mode == "revoke" and not is_allowed)
+        ):
+            await query.answer("Доступ этого администратора уже изменился.", show_alert=True)
+            return
+
+        if mode == "grant":
+            allowed_admin_ids.append(target_admin_id)
+            active["allowed_admin_ids"] = allowed_admin_ids
+        else:
+            active["allowed_admin_ids"] = [
+                admin_id for admin_id in allowed_admin_ids if admin_id != target_admin_id
+            ]
+        _save_runtime_snapshot(context)
+
+        topic_link = _topic_url(active.get("chat_id"), active.get("topic_id"))
+        if mode == "grant":
+            notification_text = (
+                f"✅ Вам выдано право писать в теме сессии по ссылке:\n{topic_link}\n"
+                "Право действует, пока сессия активна или пока его не отберут."
+            )
+        else:
+            notification_text = (
+                f"⚠️ У вас отозвано право писать в теме сессии по ссылке:\n{topic_link}\n"
+                "Теперь сообщения в этой теме отправлять нельзя."
+            )
+        try:
+            await context.bot.send_message(chat_id=int(target_admin_id), text=notification_text)
+            notification_sent = True
+        except Exception:
+            notification_sent = False
+            logging.exception("Failed to notify admin %s about topic access %s", target_admin_id, mode)
+
+        await query.edit_message_reply_markup(
+            reply_markup=_build_topic_access_actions_keyboard(session_user_id)
+        )
+        if notification_sent:
+            result = "Право выдано и администратор уведомлён." if mode == "grant" else "Доступ отозван и администратор уведомлён."
+            await query.answer(result)
+        else:
+            await query.answer("Право изменено, но отправить уведомление в личку не удалось.", show_alert=True)
+        return
+
+    await query.answer("Неизвестное действие.", show_alert=True)
 
 
 async def show_user_profile_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
