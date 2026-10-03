@@ -32,7 +32,8 @@ def _build_candidate_tip_keyboard(user_id: str, selected_keys: list[str]) -> Inl
 
     return InlineKeyboardMarkup(
         [
-            tip_buttons,
+            tip_buttons[:2],
+            tip_buttons[2:],
             [InlineKeyboardButton("▶️Далее", callback_data=f"candidate_tip_next_{user_id}")],
         ]
     )
@@ -88,8 +89,10 @@ def _build_candidate_profile_keyboard(
     character_label = "✅💬Характер" if character_saved else "💬Характер"
     return InlineKeyboardMarkup(
         [
-            [InlineKeyboardButton(image_label, callback_data=f"candidate_images_{user_id}")],
-            [InlineKeyboardButton(character_label, callback_data=f"candidate_character_{user_id}")],
+            [
+                InlineKeyboardButton(image_label, callback_data=f"candidate_images_{user_id}"),
+                InlineKeyboardButton(character_label, callback_data=f"candidate_character_{user_id}"),
+            ],
             [InlineKeyboardButton("↗️отправить заявку", callback_data=f"candidate_submit_{user_id}")],
         ]
     )
@@ -133,20 +136,27 @@ def _build_candidate_images_preview_keyboard(user_id: str) -> InlineKeyboardMark
 
 def _build_main_menu_keyboard(context: ContextTypes.DEFAULT_TYPE, user_id: int | str, username_hint: str | None = None) -> ReplyKeyboardMarkup:
     profile = _ensure_profile(context, str(user_id), username_hint or f"id{user_id}")
-    profile_button = "🔰Админ-профиль" if _has_admin_rights_level_1_5(profile) else "👤 Профиль"
-    rows = [
-        [KeyboardButton("👤 Найти админа")],
-        [KeyboardButton(profile_button)],
-    ]
-    if _has_admin_rights_level_1_5(profile):
-        rows.append([KeyboardButton("🛒Админ-магазин")])
-    if not _has_admin_rights_level_1_5(profile) or _effective_admin_level(profile) <= 3:
-        rows.append([KeyboardButton("👨‍🏫Квесты и загадки")])
+    is_admin = _has_admin_rights_level_1_5(profile)
+    admin_level = _effective_admin_level(profile)
+    profile_button = "🔰Админ-профиль" if is_admin else "👤 Профиль"
+    rows = [[KeyboardButton("👤 Найти админа")]]
+
+    profile_row = [KeyboardButton(profile_button)]
+    if is_admin:
+        profile_row.append(KeyboardButton("🛒Админ-магазин"))
+        rows.append(profile_row)
+        if admin_level <= 3:
+            rows.append([KeyboardButton("👨‍🏫Квесты и загадки"), KeyboardButton("❓Помощь")])
+            rows.append([KeyboardButton("⚙️Настройки")])
+        else:
+            rows.append([KeyboardButton("❓Помощь"), KeyboardButton("⚙️Настройки")])
+    else:
+        rows.append([KeyboardButton("👤 Профиль"), KeyboardButton("👨‍🏫Квесты и загадки")])
+        rows.append([KeyboardButton("❓Помощь"), KeyboardButton("⚙️Настройки")])
+
     active = (context.application.bot_data.get("active_chats", {}) or {}).get(str(user_id))
     if active and active.get("active"):
         rows.append([KeyboardButton("↩️Вернуться к кнопкам диалога")])
-    rows.append([KeyboardButton("❓Помощь")])
-    rows.append([KeyboardButton("⚙️Настройки")])
     return ReplyKeyboardMarkup(
         rows,
         resize_keyboard=True,
@@ -157,10 +167,9 @@ def _build_main_menu_keyboard(context: ContextTypes.DEFAULT_TYPE, user_id: int |
 def _build_log_chat_menu_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         [
-            [KeyboardButton("💬Пинг")],
+            [KeyboardButton("💬Пинг"), KeyboardButton("📊Статистика администрации")],
             [KeyboardButton("👥Список администрации")],
             [KeyboardButton("🛥Список администраторов в ресте")],
-            [KeyboardButton("📊Статистика администрации")],
         ],
         resize_keyboard=True,
         one_time_keyboard=False,
@@ -219,8 +228,7 @@ def _build_active_session_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         [
             [KeyboardButton("🤧Отказаться от админа")],
-            [KeyboardButton("➕Настройки сессии")],
-            [KeyboardButton("🕘Проверить онлайн админа")],
+            [KeyboardButton("➕Настройки сессии"), KeyboardButton("🕘Проверить онлайн админа")],
             [KeyboardButton("↪️Вернуться в главное меню")],
         ],
         resize_keyboard=True,
@@ -232,8 +240,10 @@ def _build_session_settings_keyboard(active: dict | None = None) -> ReplyKeyboar
     session_data = active or {}
     rp_disabled = bool(session_data.get("rp_disabled", False))
     label = "💞Включить RP" if rp_disabled else "💔Отключить RP"
-    rows = [[KeyboardButton(label), KeyboardButton("💤Приостановить общение")]]
-    rows.append([KeyboardButton("💛Отблагодарить админа")])
+    rows = [
+        [KeyboardButton("💤Приостановить общение")],
+        [KeyboardButton(label), KeyboardButton("💛Отблагодарить админа")],
+    ]
     rows.append([KeyboardButton("↩️Вернуться к кнопкам диалога")])
     return ReplyKeyboardMarkup(
         rows,
@@ -263,8 +273,7 @@ def _build_settings_menu_keyboard(profile: dict | None = None) -> ReplyKeyboardM
 def _build_complaint_menu_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         [
-            [KeyboardButton("👨‍🔧Сообщить о баге")],
-            [KeyboardButton("👮‍♀️Пожаловаться на админа")],
+            [KeyboardButton("👨‍🔧Сообщить о баге"), KeyboardButton("👮‍♀️Пожаловаться на админа")],
             [KeyboardButton("↩️В настройки")],
         ],
         resize_keyboard=True,
@@ -275,8 +284,7 @@ def _build_complaint_menu_keyboard() -> ReplyKeyboardMarkup:
 def _build_complaint_admin_menu_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         [
-            [KeyboardButton("✏️Написать тег админа")],
-            [KeyboardButton("🕓Выбрать последнего админа")],
+            [KeyboardButton("✏️Написать тег админа"), KeyboardButton("🕓Выбрать последнего админа")],
             [KeyboardButton("↩️В раздел жалоб")],
         ],
         resize_keyboard=True,
@@ -349,8 +357,10 @@ def _build_topic_access_confirmation_keyboard(
 def _build_astats_profile_keyboard(session_id: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
-            [InlineKeyboardButton("🎖Сменить тег", callback_data=f"astats_tag_change_{session_id}")],
-            [InlineKeyboardButton("🔁Сменить пол", callback_data=f"astats_gender_menu_{session_id}")],
+            [
+                InlineKeyboardButton("🎖Сменить тег", callback_data=f"astats_tag_change_{session_id}"),
+                InlineKeyboardButton("🔁Сменить пол", callback_data=f"astats_gender_menu_{session_id}"),
+            ],
             [InlineKeyboardButton("📖Изменить биографию", callback_data=f"astats_bio_change_{session_id}")],
             [
                 InlineKeyboardButton("💕Тип диалога", callback_data=f"astats_tip_menu_{session_id}"),
@@ -380,10 +390,11 @@ def _build_astats_tip_editor_keyboard(session_id: str, selected_keys: list[str] 
         ("flirt", "🔥**Флирт**"),
         ("aggressive", "👹Агрессив"),
     ]
-    rows = []
+    buttons = []
     for key, label in choices:
         prefix = "✅" if key in selected else ""
-        rows.append([InlineKeyboardButton(f"{prefix}{label}", callback_data=f"astats_tip_toggle_{session_id}_{key}")])
+        buttons.append(InlineKeyboardButton(f"{prefix}{label}", callback_data=f"astats_tip_toggle_{session_id}_{key}"))
+    rows = [buttons[index:index + 2] for index in range(0, len(buttons), 2)]
     rows.append([InlineKeyboardButton("🔰Применить", callback_data=f"astats_tip_apply_{session_id}")])
     return InlineKeyboardMarkup(rows)
 
