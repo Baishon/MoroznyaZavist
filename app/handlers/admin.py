@@ -41,6 +41,7 @@ from app.handlers.candidates import _send_candidate_stage_1
 from app.keyboards.inline import (
     _build_active_dialog_admin_keyboard,
     _build_active_session_keyboard,
+    _build_session_mood_review_keyboard,
     _build_topic_access_actions_keyboard,
     _build_topic_access_admins_keyboard,
     _build_topic_access_confirmation_keyboard,
@@ -5254,6 +5255,122 @@ async def topic_access_menu_callback_handler(update: Update, context: ContextTyp
         return
 
     await query.answer("Неизвестное действие.", show_alert=True)
+
+
+async def session_mood_review_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if not query or not update.effective_user or not update.effective_chat:
+        return
+
+    parts = (query.data or "").split("_")
+    if len(parts) != 5 or parts[3] not in {"approve", "reject"}:
+        await query.answer("Некорректное действие.", show_alert=True)
+        return
+    if update.effective_chat.id != LOG_CHAT_ID:
+        await query.answer("Запросы можно рассматривать только в чате старшей администрации.", show_alert=True)
+        return
+
+    reviewer_id = str(update.effective_user.id)
+    reviewer_profile = _ensure_profile(
+        context,
+        reviewer_id,
+        update.effective_user.username or f"id{reviewer_id}",
+    )
+    if _effective_admin_level(reviewer_profile) < 4:
+        await query.answer("Решение доступно только старшей администрации.", show_alert=True)
+        return
+
+    decision, review_id = parts[3], parts[4]
+    pending_requests = context.application.bot_data.setdefault("pending_session_mood_changes", {})
+    request = pending_requests.get(review_id)
+    if not request or str(request.get("review_message_id")) != str(query.message.message_id):
+        await query.answer("Запрос уже обработан или устарел.", show_alert=True)
+        return
+
+    user_id = str(request.get("user_id") or "")
+    if decision == "reject":
+        pending_requests.pop(review_id, None)
+        _save_runtime_snapshot(context)
+        try:
+            await context.bot.send_message(
+                chat_id=int(user_id),
+                text="Старшая администрация отклонила запрос на изменение темы общения.",
+            )
+        except Exception:
+            logging.exception("Failed to notify user %s about rejected mood change", user_id)
+        await query.edit_message_text(
+            f"{query.message.text or 'Запрос на изменение темы общения'}\n\n❌ Отклонено старшей администрацией.",
+            reply_markup=None,
+        )
+        await query.answer("Запрос отклонён.")
+        return
+
+    active = (context.application.bot_data.get("active_chats", {}) or {}).get(user_id)
+    if (
+        not active
+        or not active.get("active")
+        or active.get("topic_id") is None
+        or not active.get("topic_message_id")
+        or str(active.get("chat_id")) != str(request.get("chat_id"))
+        or str(active.get("topic_id")) != str(request.get("topic_id"))
+        or str(active.get("topic_message_id")) != str(request.get("topic_message_id"))
+    ):
+        pending_requests.pop(review_id, None)
+        _save_runtime_snapshot(context)
+        await query.edit_message_text(
+            f"{query.message.text or 'Запрос на изменение темы общения'}\n\n⚠️ Сессия уже завершена или исходное сообщение недоступно.",
+            reply_markup=None,
+        )
+        await query.answer("Активная сессия не найдена.", show_alert=True)
+        return
+
+    new_mood = str(request.get("requested_mood") or "").strip()
+    if not new_mood:
+        await query.answer("В запросе отсутствует новая тема.", show_alert=True)
+        return
+
+    updated_active = dict(active)
+    updated_active["mood"] = new_mood
+    requester_profile = (context.application.bot_data.get("profiles", {}) or {}).get(user_id) or {}
+    try:
+        await context.bot.edit_message_text(
+            chat_id=int(active.get("chat_id")),
+            message_id=int(active.get("topic_message_id")),
+            text=_build_session_info_text(context, user_id, updated_active, requester_profile),
+            parse_mode=ParseMode.HTML,
+            reply_markup=_build_active_dialog_admin_keyboard(user_id),
+        )
+    except Exception:
+        logging.exception("Failed to update session info message for mood change request %s", review_id)
+        await query.answer("Не удалось обновить исходное сообщение сессии. Запрос оставлен ожидающим.", show_alert=True)
+        return
+
+    active["mood"] = new_mood
+    _save_runtime_snapshot(context)
+    topic_id = int(active.get("topic_id"))
+    try:
+        await context.bot.send_message(
+            chat_id=int(active.get("chat_id")),
+            message_thread_id=topic_id,
+            text=f"✅ Тема общения изменена на: {new_mood}",
+        )
+    except Exception:
+        logging.exception("Failed to announce mood change in topic %s", topic_id)
+    try:
+        await context.bot.send_message(
+            chat_id=int(user_id),
+            text=f"Тема общения в вашей сессии изменена на: {new_mood}.",
+        )
+    except Exception:
+        logging.exception("Failed to notify user %s about approved mood change", user_id)
+
+    pending_requests.pop(review_id, None)
+    _save_runtime_snapshot(context)
+    await query.edit_message_text(
+        f"{query.message.text or 'Запрос на изменение темы общения'}\n\n✅ Одобрено администратором {reviewer_profile.get('tag_admin') or reviewer_id}.",
+        reply_markup=None,
+    )
+    await query.answer("Тема общения изменена.")
 
 
 async def show_user_profile_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):

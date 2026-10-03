@@ -113,6 +113,7 @@ from app.handlers.admin import (
     suspicious_user_deny_callback,
     suspicious_user_warn_callback,
     topic_access_menu_callback_handler,
+    session_mood_review_callback,
     topic_command_handler,
     unban_command_handler,
     unknown_chat_guard,
@@ -203,6 +204,10 @@ from app.handlers.user import (
     session_rp_disable_prompt,
     session_rp_enable_handler,
     session_settings_menu_handler,
+    session_mood_back_callback,
+    session_mood_open_callback,
+    session_mood_submit_callback,
+    session_mood_toggle_callback,
     settings_back_handler,
     settings_complaint_menu_handler,
     settings_disable_ad_handler,
@@ -444,6 +449,11 @@ def build_application():
             pattern=r"^topic_(?:settings(?:_back)?|accesses|access_(?:back|list(?:_back)?|pick|confirm|cancel)):"
         )
     )
+    app.add_handler(CallbackQueryHandler(session_mood_open_callback, pattern=r"^session_mood_open_\d+$"))
+    app.add_handler(CallbackQueryHandler(session_mood_toggle_callback, pattern=r"^session_mood_toggle_\d+_(chat|support|flirt|aggressive)$"))
+    app.add_handler(CallbackQueryHandler(session_mood_submit_callback, pattern=r"^session_mood_submit_\d+$"))
+    app.add_handler(CallbackQueryHandler(session_mood_back_callback, pattern=r"^session_mood_back_\d+$"))
+    app.add_handler(CallbackQueryHandler(session_mood_review_callback, pattern=r"^session_mood_review_(approve|reject)_\d+$"))
     app.add_handler(CallbackQueryHandler(warn_user_callback, pattern=r"^warn_user_\d+$"))
     app.add_handler(CallbackQueryHandler(cancel_warn_callback, pattern=r"^cancel_warn_\d+$"))
     app.add_handler(CallbackQueryHandler(confirm_warn_callback, pattern=r"^confirm_warn_\d+$"))

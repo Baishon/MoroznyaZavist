@@ -48,6 +48,8 @@ from app.keyboards.inline import (
     _build_brawl_stars_keyboard,
     _build_request_gender_keyboard,
     _build_session_settings_keyboard,
+    _build_session_mood_selection_keyboard,
+    _build_session_mood_settings_keyboard,
     _build_settings_menu_keyboard,
 )
 from app.services.bans import block_if_banned, check_active_chat_block, enforce_autoban_if_needed
@@ -800,6 +802,167 @@ async def session_settings_menu_handler(update: Update, context: ContextTypes.DE
         f"⚙️Настройки сессии\n\n{status_text}",
         reply_markup=_build_session_settings_keyboard(active),
     )
+    await update.message.reply_text(
+        f"🎭 Тема общения: {active.get('mood') or 'не указана'}",
+        reply_markup=_build_session_mood_settings_keyboard(user_id),
+    )
+
+
+SESSION_MOOD_LABELS = {
+    "chat": "общение",
+    "support": "поддержка",
+    "flirt": "флирт",
+    "aggressive": "агрессив",
+}
+
+
+def _session_mood_keys(mood: str | None) -> list[str]:
+    mood_text = str(mood or "").casefold()
+    return [key for key, label in SESSION_MOOD_LABELS.items() if label in mood_text]
+
+
+def _active_session_for_mood_change(context: ContextTypes.DEFAULT_TYPE, user_id: str):
+    active = (context.application.bot_data.get("active_chats", {}) or {}).get(user_id)
+    if active and active.get("active"):
+        return active
+    return None
+
+
+async def session_mood_open_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    user_id = str(update.effective_user.id) if update.effective_user else ""
+    parts = (query.data or "").split("_")
+    if len(parts) != 4 or parts[3] != user_id:
+        await query.answer("Кнопка доступна только владельцу сессии.", show_alert=True)
+        return
+    active = _active_session_for_mood_change(context, user_id)
+    if not active:
+        await query.answer("Активная сессия не найдена.", show_alert=True)
+        return
+
+    selected = _session_mood_keys(active.get("mood"))
+    context.user_data["session_mood_selection"] = selected
+    await query.edit_message_text(
+        f"🎭 Выберите тему общения.\nСейчас: {active.get('mood') or 'не указана'}",
+        reply_markup=_build_session_mood_selection_keyboard(user_id, selected),
+    )
+    await query.answer()
+
+
+async def session_mood_toggle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    user_id = str(update.effective_user.id) if update.effective_user else ""
+    parts = (query.data or "").split("_")
+    if len(parts) != 5 or parts[3] != user_id or parts[4] not in SESSION_MOOD_LABELS:
+        await query.answer("Некорректный выбор.", show_alert=True)
+        return
+    active = _active_session_for_mood_change(context, user_id)
+    if not active:
+        await query.answer("Активная сессия не найдена.", show_alert=True)
+        return
+
+    selected = list(context.user_data.get("session_mood_selection") or _session_mood_keys(active.get("mood")))
+    mood_key = parts[4]
+    if mood_key in selected:
+        selected.remove(mood_key)
+    else:
+        selected.append(mood_key)
+    context.user_data["session_mood_selection"] = selected
+    await query.edit_message_reply_markup(
+        reply_markup=_build_session_mood_selection_keyboard(user_id, selected)
+    )
+    await query.answer()
+
+
+async def session_mood_back_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    user_id = str(update.effective_user.id) if update.effective_user else ""
+    parts = (query.data or "").split("_")
+    if len(parts) != 4 or parts[3] != user_id:
+        await query.answer("Кнопка доступна только владельцу сессии.", show_alert=True)
+        return
+    active = _active_session_for_mood_change(context, user_id)
+    if not active:
+        await query.answer("Активная сессия не найдена.", show_alert=True)
+        return
+    context.user_data.pop("session_mood_selection", None)
+    await query.edit_message_text(
+        f"🎭 Тема общения: {active.get('mood') or 'не указана'}",
+        reply_markup=_build_session_mood_settings_keyboard(user_id),
+    )
+    await query.answer()
+
+
+async def session_mood_submit_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    user_id = str(update.effective_user.id) if update.effective_user else ""
+    parts = (query.data or "").split("_")
+    if len(parts) != 4 or parts[3] != user_id:
+        await query.answer("Кнопка доступна только владельцу сессии.", show_alert=True)
+        return
+    active = _active_session_for_mood_change(context, user_id)
+    if not active:
+        await query.answer("Активная сессия не найдена.", show_alert=True)
+        return
+    if active.get("topic_id") is None or not active.get("topic_message_id"):
+        await query.answer("Для этой сессии не найдено исходное сообщение темы.", show_alert=True)
+        return
+    selected = [key for key in context.user_data.get("session_mood_selection", []) if key in SESSION_MOOD_LABELS]
+    if not selected:
+        await query.answer("Выберите хотя бы одну тему общения.", show_alert=True)
+        return
+
+    requested_mood = ", ".join(SESSION_MOOD_LABELS[key] for key in SESSION_MOOD_LABELS if key in selected)
+    if set(selected) == set(_session_mood_keys(active.get("mood"))):
+        await query.answer("Тема общения не изменилась.", show_alert=True)
+        return
+
+    pending = context.application.bot_data.setdefault("pending_session_mood_changes", {})
+    if any(str(entry.get("user_id")) == user_id for entry in pending.values()):
+        await query.answer("Запрос на изменение темы уже ожидает решения старшей администрации.", show_alert=True)
+        return
+
+    review_seq = int(context.application.bot_data.get("session_mood_review_seq", 0) or 0) + 1
+    review_id = str(review_seq)
+    current_mood = str(active.get("mood") or "не указана")
+    profile = (context.application.bot_data.get("profiles", {}) or {}).get(user_id, {}) or {}
+    username = str(profile.get("user_nickname") or profile.get("username") or f"id{user_id}")
+    topic_link = _topic_url(active.get("chat_id"), active.get("topic_id"))
+    review_text = (
+        "🔄 Запрос на изменение темы общения\n\n"
+        f"Пользователь: {username} (ID {user_id})\n"
+        f"Текущая тема: {current_mood}\n"
+        f"Новая тема: {requested_mood}\n"
+        f"Тема сессии: {topic_link}"
+    )
+    try:
+        review_message = await context.bot.send_message(
+            chat_id=LOG_CHAT_ID,
+            text=review_text,
+            reply_markup=_build_session_mood_review_keyboard(review_id),
+        )
+    except Exception:
+        logging.exception("Failed to send session mood change request for user %s", user_id)
+        await query.answer("Не удалось отправить запрос старшей администрации.", show_alert=True)
+        return
+
+    context.application.bot_data["session_mood_review_seq"] = review_seq
+    pending[review_id] = {
+        "user_id": user_id,
+        "requested_mood": requested_mood,
+        "current_mood": current_mood,
+        "chat_id": active.get("chat_id"),
+        "topic_id": active.get("topic_id"),
+        "topic_message_id": active.get("topic_message_id"),
+        "review_message_id": review_message.message_id,
+    }
+    context.user_data.pop("session_mood_selection", None)
+    _save_runtime_snapshot(context)
+    await query.edit_message_text(
+        f"Запрос на изменение темы общения отправлен старшей администрации.\nТекущая тема: {current_mood}",
+        reply_markup=_build_session_mood_settings_keyboard(user_id),
+    )
+    await query.answer()
 
 
 def _thanks_cooldown_text(seconds: int) -> str:

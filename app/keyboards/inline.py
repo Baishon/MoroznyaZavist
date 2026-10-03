@@ -252,6 +252,45 @@ def _build_session_settings_keyboard(active: dict | None = None) -> ReplyKeyboar
     )
 
 
+def _build_session_mood_settings_keyboard(user_id: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [[InlineKeyboardButton("🎭 Изменить тему общения", callback_data=f"session_mood_open_{user_id}")]]
+    )
+
+
+def _build_session_mood_selection_keyboard(user_id: str, selected_keys: list[str]) -> InlineKeyboardMarkup:
+    choices = [
+        ("chat", "🗣 Общение"),
+        ("support", "❤️ Поддержка"),
+        ("flirt", "🔥 Флирт"),
+        ("aggressive", "👹 Агрессив"),
+    ]
+    buttons = [
+        InlineKeyboardButton(
+            f"{'✅ ' if key in selected_keys else ''}{label}",
+            callback_data=f"session_mood_toggle_{user_id}_{key}",
+        )
+        for key, label in choices
+    ]
+    return InlineKeyboardMarkup(
+        [
+            buttons[:2],
+            buttons[2:],
+            [InlineKeyboardButton("Изменить", callback_data=f"session_mood_submit_{user_id}")],
+            [InlineKeyboardButton("↩️ Назад", callback_data=f"session_mood_back_{user_id}")],
+        ]
+    )
+
+
+def _build_session_mood_review_keyboard(request_id: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [[
+            InlineKeyboardButton("✅ Принять", callback_data=f"session_mood_review_approve_{request_id}"),
+            InlineKeyboardButton("❌ Отказать", callback_data=f"session_mood_review_reject_{request_id}"),
+        ]]
+    )
+
+
 def _build_settings_menu_keyboard(profile: dict | None = None) -> ReplyKeyboardMarkup:
     profile_data = profile or {}
     ad_disabled = bool(profile_data.get("ad_disable_enabled", False))
