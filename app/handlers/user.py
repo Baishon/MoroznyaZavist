@@ -55,6 +55,8 @@ from app.services.messaging import deliver_message_to_user
 from app.services.owner_session import notify_owner_new_request
 from app.services.profiles import _set_user_blocked_bot_state
 from app.services.profiles import (
+    _build_admin_stats_text,
+    _build_user_stats_text,
     _candidate_block_text,
     _ensure_profile,
     _effective_admin_level,
@@ -2067,26 +2069,7 @@ async def send_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⛔ Для администраторов кнопка '👤 Профиль' недоступна.")
         return
 
-    profile_username = html.escape(str(profile.get("username", "")))
-    user_nickname = html.escape(str(profile.get("user_nickname") or "не указан"))
-    profile_last_admin = html.escape(str(profile.get("last_admin_tag", "не указан")))
-    profile_reason = html.escape(str(profile.get("reason", "")))
-    profile_date = html.escape(str(profile.get("date_registration", "")))
-
-    text = (
-        "📋 <b>ПРОФИЛЬ ПОЛЬЗОВАТЕЛЯ</b>\n\n"
-        "--------------------\n"
-        f"🆔 <b>ID профиля:</b> {profile.get('id_profile')}\n"
-        f"👤 <b>Статистика Number:</b> {profile_username}\n"
-        f"🍓Никнейм: {user_nickname}\n\n"
-        f"✉️ <b>Сообщений:</b> {profile.get('message_user')}\n"
-        f"👨‍💼 <b>Последний админ:</b> {profile_last_admin}\n"
-        f"⚠️ <b>Предупреждений:</b> {profile.get('warn')} | <b>Последняя причина:</b> {profile_reason}\n"
-        f"🪙Токенов: {int(profile.get('count_tokens', 0) or 0)}\n"
-        f"🪙 <b>Админ-коинов:</b> {profile.get('coin')}\n\n"
-        "--------------------\n\n"
-        f"📅 <b>В боте с:</b> {profile_date}"
-    )
+    text = _build_user_stats_text(context, user_id, profile)
 
     nickname_kb = InlineKeyboardMarkup(
         [[InlineKeyboardButton("🧸Сменить никнейм", callback_data=f"change_nickname_{user_id}")]]
@@ -2158,39 +2141,10 @@ async def send_admin_profile(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.message.reply_text("⛔ Кнопка '🔰Админ-профиль' доступна только администраторам.")
         return
 
-    admin_level = int(profile.get("admin_level", 0) or 0)
-    rank_title = ADMIN_LEVEL_TITLES.get(admin_level, "Не назначен")
-    prefix_text = html.escape(str(profile.get("prefix") or "не установлен"))
-    admin_tag = html.escape(str(profile.get("tag_admin") or "не указан"))
-    tip_admin = html.escape(str(profile.get("tip_admin") or "не указано"))
-    admin_gender = html.escape(str(profile.get("admin_gender") or "не указан"))
-    admin_bio = html.escape(str(profile.get("biography_admin") or "не заполнена"))
-    reputation = int(profile.get("admin_reputation", 0) or 0)
-    profile_username = html.escape(str(profile.get("username") or ""))
-    last_activity = float(
-        (context.application.bot_data.get("admin_work_chat_activity", {}) or {}).get(user_id, 0) or 0
+    await update.message.reply_text(
+        _build_admin_stats_text(user_id, profile),
+        parse_mode=ParseMode.HTML,
     )
-    if last_activity:
-        last_activity_text = _format_time_kyiv(last_activity)
-        online_marker = "🟢Онлайн" if time.time() - last_activity <= 5 * 60 else "🔴Не в сети"
-        online_text = f"{online_marker} ({last_activity_text})"
-    else:
-        online_text = "🔴Не в сети (данные об активности отсутствуют)"
-
-    text = (
-        "🔰 <b>АДМИН-ПРОФИЛЬ</b>\n\n"
-        f"🆔 <b>ID профиля:</b> {profile.get('id_profile')}\n"
-        f"👤 <b>Username:</b> {profile_username}\n"
-        f"🎀 <b>Префикс:</b> {prefix_text}\n"
-        f"🎖 <b>Уровень:</b> {admin_level} ({rank_title})\n"
-        f"⭐ <b>Репутация:</b> {reputation}\n"
-        f"🏷 <b>Тег:</b> {admin_tag}\n"
-        f"💕Тип диалогов: {tip_admin}\n"
-        f"👨‍👩‍👦 Пол: {admin_gender}\n"
-        f"👁‍🗨Был(-а) в сети: {online_text}\n"
-        f"📖 <b>Биография:</b> {admin_bio}"
-    )
-    await update.message.reply_text(text, parse_mode=ParseMode.HTML)
 
 
 async def track_user_message(update: Update, context: ContextTypes.DEFAULT_TYPE):

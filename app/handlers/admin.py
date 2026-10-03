@@ -2199,7 +2199,10 @@ async def stats_command_handler(update: Update, context: ContextTypes.DEFAULT_TY
         await update.message.reply_text(f'Пользователь с id_profile "{target_identifier}" не найден.')
         return
 
-    await update.message.reply_text(_build_user_stats_text(context, str(target_user_id), profile))
+    await update.message.reply_text(
+        _build_user_stats_text(context, str(target_user_id), profile),
+        parse_mode=ParseMode.HTML,
+    )
 
 
 
@@ -5283,7 +5286,10 @@ async def show_user_profile_callback(update: Update, context: ContextTypes.DEFAU
 
     profile = _ensure_profile(context, str(request_user_id), active.get("topic_base_name") or f"id{request_user_id}")
     _record_info_topic_action(context, request_user_id, update.effective_user.id, "VIEW_PROFILE", reason="Профиль пользователя открыт")
-    await update.callback_query.message.reply_text(_build_user_stats_text(context, str(request_user_id), profile))
+    await update.callback_query.message.reply_text(
+        _build_user_stats_text(context, str(request_user_id), profile),
+        parse_mode=ParseMode.HTML,
+    )
 
 
 
