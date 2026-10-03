@@ -3065,6 +3065,8 @@ async def astats_tip_menu_callback(update: Update, context: ContextTypes.DEFAULT
         selected_keys.append("support")
     if "🔥" in existing_tip:
         selected_keys.append("flirt")
+    if "👹" in existing_tip:
+        selected_keys.append("aggressive")
 
     session["status"] = "astats_tip_edit"
     session["tip_selected_keys"] = selected_keys
@@ -3088,7 +3090,7 @@ async def astats_tip_toggle_callback(update: Update, context: ContextTypes.DEFAU
     session_id = parts[3]
     tip_key = parts[4]
 
-    if tip_key not in {"chat", "support", "flirt"}:
+    if tip_key not in {"chat", "support", "flirt", "aggressive"}:
         return
 
     sessions = context.application.bot_data.setdefault("astats_tag_sessions", {})

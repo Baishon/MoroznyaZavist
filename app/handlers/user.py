@@ -1998,7 +1998,7 @@ async def restart_command_handler(update: Update, context: ContextTypes.DEFAULT_
         if stage == "await_tip_admin":
             selected = list(state.get("tip_admin_selected") or [])
             await update.message.reply_text(
-                "💬Теперь укажите тип общения которые вы больше всего можете обсуждать с будущими пользователями (можно выбрать все три)",
+                "💬Теперь укажите тип общения которые вы больше всего можете обсуждать с будущими пользователями (можно выбрать все четыре)",
                 reply_markup=_build_candidate_tip_keyboard(user_id, selected),
             )
             return
@@ -2222,8 +2222,10 @@ async def send_mood_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "вы решаете вопрос за 5 минут, а не за час нервотрепки.\n\n"
         "🗣️<b>Общение</b> - Обо всем и ни о чем, свободный разговор без обязательств.\n\n"
         "❤️<b>Поддержка</b> - если накопилось обиды или гнева и хочется, чтобы кто то послушал и пожалел.\n\n"
-        "🔥<b>Флирт</b> - Для тех, кто любит поролить и называть милыми словами"
+        "🔥<b>Флирт</b> - Для тех, кто любит поролить и называть милыми словами\n\n"
+        "👹<b>Агрессив</b> - Общение с взаимными оскорблениями после вашего подтверждения предупреждения."
     )
+    context.user_data["mood_selection_prompt"] = text
     user_id = str(update.effective_user.id)
     if update.callback_query:
         await update.callback_query.message.edit_text(
@@ -2260,7 +2262,7 @@ async def mood_selection_callback(update: Update, context: ContextTypes.DEFAULT_
     if not update.effective_user or str(update.effective_user.id) != user_id:
         await query.answer("Кнопка доступна только владельцу запроса", show_alert=True)
         return
-    if mood_key not in {"chat", "support", "flirt"}:
+    if mood_key not in {"chat", "support", "flirt", "aggressive"}:
         return
     if context.user_data.get("profile") != 2:
         await query.answer("Этап выбора типа запроса уже завершен", show_alert=True)
@@ -2272,6 +2274,15 @@ async def mood_selection_callback(update: Update, context: ContextTypes.DEFAULT_
     else:
         selected.append(mood_key)
     context.user_data["mood_selected"] = selected
+    if mood_key == "aggressive":
+        await query.message.edit_text(
+            "👹ВНИМАНИЕ\n\n"
+            "Здесь нет неприкосновенных — оскорблять администратора разрешено в любой форме и без ограничений. "
+            "Но запомните: администратор имеет полное право отвечать вам тем же. "
+            "Вы действительно хотите отправить запрос свободным администраторам?",
+            reply_markup=_build_aggressive_mood_confirmation_keyboard(user_id),
+        )
+        return
     await query.message.edit_reply_markup(
         reply_markup=_build_mood_selection_keyboard(user_id, selected)
     )
@@ -2293,13 +2304,67 @@ async def mood_selection_next_callback(update: Update, context: ContextTypes.DEF
         await query.answer("Этап выбора типа запроса уже завершен", show_alert=True)
         return
 
-    mood_labels = {"chat": "общение", "support": "поддержка", "flirt": "флирт"}
+    mood_labels = {"chat": "общение", "support": "поддержка", "flirt": "флирт", "aggressive": "агрессив"}
     selected = list(context.user_data.get("mood_selected") or [])
     if not selected:
         await query.answer("Выберите хотя бы один тип общения", show_alert=True)
         return
 
+    if "aggressive" in selected:
+        await query.message.edit_text(
+            "👹ВНИМАНИЕ\n\n"
+            "Здесь нет неприкосновенных — оскорблять администратора разрешено в любой форме и без ограничений. "
+            "Но запомните: администратор имеет полное право отвечать вам тем же. "
+            "Вы действительно хотите отправить запрос свободным администраторам?",
+            reply_markup=_build_aggressive_mood_confirmation_keyboard(user_id),
+        )
+        return
     await _submit_admin_search(update, context, [mood_labels[key] for key in selected])
+
+
+def _build_aggressive_mood_confirmation_keyboard(user_id: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton("✅Да, отправить запрос", callback_data=f"mood_aggressive_confirm_{user_id}")],
+            [InlineKeyboardButton("↩️Назад к выбору", callback_data=f"mood_aggressive_cancel_{user_id}")],
+        ]
+    )
+
+
+async def mood_aggressive_confirm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    user_id = str(update.effective_user.id) if update.effective_user else ""
+    parts = (query.data or "").split("_")
+    if len(parts) != 4 or parts[3] != user_id:
+        await query.answer("Кнопка доступна только владельцу запроса", show_alert=True)
+        return
+    selected = list(context.user_data.get("mood_selected") or [])
+    if context.user_data.get("profile") != 2 or "aggressive" not in selected:
+        await query.answer("Подтверждение устарело. Выберите тип запроса заново.", show_alert=True)
+        return
+    await query.answer()
+    mood_labels = {"chat": "общение", "support": "поддержка", "flirt": "флирт", "aggressive": "агрессив"}
+    await _submit_admin_search(update, context, [mood_labels[key] for key in selected])
+
+
+async def mood_aggressive_cancel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    user_id = str(update.effective_user.id) if update.effective_user else ""
+    parts = (query.data or "").split("_")
+    if len(parts) != 4 or parts[3] != user_id:
+        await query.answer("Кнопка доступна только владельцу запроса", show_alert=True)
+        return
+    if context.user_data.get("profile") != 2:
+        await query.answer("Этап выбора типа запроса уже завершен", show_alert=True)
+        return
+    selected = [key for key in (context.user_data.get("mood_selected") or []) if key != "aggressive"]
+    context.user_data["mood_selected"] = selected
+    await query.answer()
+    await query.message.edit_text(
+        context.user_data.get("mood_selection_prompt") or "›› Теперь выберите тип запроса",
+        parse_mode=ParseMode.HTML,
+        reply_markup=_build_mood_selection_keyboard(user_id, selected),
+    )
 
 
 async def _submit_admin_search(update: Update, context: ContextTypes.DEFAULT_TYPE, moods: list[str]):
