@@ -3,7 +3,18 @@ import logging
 import os
 from pathlib import Path
 
-from telethon import TelegramClient
+from telethon import TelegramClient, events
+
+
+async def _mark_owner_message_read(event) -> None:
+    try:
+        await event.client.send_read_acknowledge(event.chat_id, max_id=event.id)
+    except Exception:
+        logging.exception(
+            "Failed to mark owner-account message as read: chat_id=%s message_id=%s",
+            event.chat_id,
+            event.id,
+        )
 
 
 async def start_owner_session(app) -> None:
@@ -55,9 +66,10 @@ async def start_owner_session(app) -> None:
             await client.disconnect()
             return
 
+        client.add_event_handler(_mark_owner_message_read, events.NewMessage(incoming=True))
         app.bot_data["owner_telegram_client"] = client
         logging.info(
-            "Owner Telegram session connected for account %s. No message or command handlers are registered.",
+            "Owner Telegram session connected for account %s. Incoming messages will be marked read without replies.",
             account.id,
         )
     except Exception:
