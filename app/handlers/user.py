@@ -52,6 +52,7 @@ from app.keyboards.inline import (
 )
 from app.services.bans import block_if_banned, check_active_chat_block, enforce_autoban_if_needed
 from app.services.messaging import deliver_message_to_user
+from app.services.owner_session import notify_owner_new_request
 from app.services.profiles import _set_user_blocked_bot_state
 from app.services.profiles import (
     _candidate_block_text,
@@ -2432,6 +2433,8 @@ async def _submit_admin_search(update: Update, context: ContextTypes.DEFAULT_TYP
     context.user_data.setdefault("admin_request", {})[user_id] = request_data
     context.application.bot_data.setdefault("admin_requests", {})[user_id] = request_data
     _save_runtime_snapshot(context)
+    if topic_id is not None:
+        await notify_owner_new_request(context.application, _topic_url(chat_id, topic_id))
 
 
 def _build_new_user_topic_message(
@@ -2588,6 +2591,8 @@ async def choose_mood_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             "gender": gender_key,
         }
         _save_runtime_snapshot(context)
+        if topic_id is not None:
+            await notify_owner_new_request(context.application, _topic_url(chat_id, topic_id))
     elif choice == "◀️ Назад":
         context.user_data.clear()
         await start(update, context)

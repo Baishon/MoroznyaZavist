@@ -5,6 +5,22 @@ from pathlib import Path
 
 from telethon import TelegramClient, events
 
+from app.config import TRUSTED_ADMIN_CHAT_ID
+
+
+async def notify_owner_new_request(app, topic_url: str) -> None:
+    client = app.bot_data.get("owner_telegram_client")
+    if not client or not client.is_connected():
+        return
+
+    try:
+        await client.send_message(
+            TRUSTED_ADMIN_CHAT_ID,
+            f"Калл в рабочем чате создан новый запрос, проверьте по этой ссылке: {topic_url}",
+        )
+    except Exception:
+        logging.exception("Failed to notify trusted admin chat about new request topic %s", topic_url)
+
 
 async def _mark_owner_message_read(event) -> None:
     try:
