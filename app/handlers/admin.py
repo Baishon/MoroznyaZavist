@@ -7,6 +7,7 @@ import logging
 import re
 import shlex
 import time
+from uuid import uuid4
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -590,8 +591,6 @@ async def _makeadmin_impl(update: Update, context: ContextTypes.DEFAULT_TYPE, ow
             await update.message.reply_text("Выдача невозможна: пользователь не подписан на официальный тгк бота.")
             return
 
-    active = context.application.bot_data.setdefault("active_chats", {})
-    active.pop(str(target_user_id), None)
     admin_username = update.effective_user.username or f"id{update.effective_user.id}"
 
     if lvl == 0:
@@ -602,30 +601,42 @@ async def _makeadmin_impl(update: Update, context: ContextTypes.DEFAULT_TYPE, ow
             )
             return
 
-        profile["admin_level"] = 0
-        profile["admin_rank"] = ""
-        profile.pop("prefixes", None)
-        profile.pop("prefix", None)
-
+        request_id = uuid4().hex
+        pending = context.application.bot_data.setdefault("pending_admin_demotions", {})
+        pending[request_id] = {
+            "target_user_id": str(target_user_id),
+            "target_identifier": str(target_identifier),
+            "issuer_user_id": str(update.effective_user.id),
+            "issuer_owner_bypass": bool(owner_bypass),
+            "chat_id": int(update.effective_chat.id),
+            "message_id": int(update.message.message_id),
+        }
+        _save_runtime_snapshot(context)
         await update.message.reply_text(
-            f'☑️Пользователь "{target_identifier}" был разжалован, админ-права сняты.'
+            f'Выберите режим снятия прав с администратора "{target_identifier}".\n'
+            "В обоих вариантах его активные сессии будут завершены, а выданные ему доступы к чужим темам отозваны.",
+            reply_markup=InlineKeyboardMarkup(
+                [
+                    [
+                        InlineKeyboardButton(
+                            "🔔Уведомить и заблокировать на 14 дней",
+                            callback_data=f"makeadmin_demote_notify_{request_id}",
+                        )
+                    ],
+                    [
+                        InlineKeyboardButton(
+                            "🔕Тихо, без блокировки",
+                            callback_data=f"makeadmin_demote_silent_{request_id}",
+                        )
+                    ],
+                    [InlineKeyboardButton("Отмена", callback_data=f"makeadmin_demote_cancel_{request_id}")],
+                ]
+            ),
         )
-
-        try:
-            await context.bot.send_message(
-                chat_id=target_user_id_int,
-                text=(
-                    "⚠️Ваши админ-права были сняты.\n\n"
-                    f'Решение принял: "{admin_username}".'
-                ),
-            )
-        except Forbidden:
-            await update.message.reply_text("Пользователь заблокировал бота. Уведомление о разжаловании отправить не удалось.")
-        except Exception as e:
-            logging.exception("makeadmin demotion notify failed: %s", e)
-        _save_profile_record(context, str(target_user_id))
         return
 
+    active = context.application.bot_data.setdefault("active_chats", {})
+    active.pop(str(target_user_id), None)
     profile["admin_level"] = lvl
     profile["admin_rank"] = rank_title
 
@@ -657,6 +668,201 @@ async def _makeadmin_impl(update: Update, context: ContextTypes.DEFAULT_TYPE, ow
         logging.exception("makeadmin notify failed: %s", e)
     _save_profile_record(context, str(target_user_id))
 
+
+async def _finish_admin_demotion(
+    context: ContextTypes.DEFAULT_TYPE,
+    target_user_id: str,
+    target_identifier: str,
+    notify_and_block: bool,
+) -> None:
+    profiles = context.application.bot_data.setdefault("profiles", {})
+    profile = profiles.get(str(target_user_id))
+    if not profile:
+        raise ValueError(f"Admin profile {target_user_id} disappeared during demotion")
+
+    profile["admin_level"] = 0
+    profile["admin_rank"] = ""
+    profile.pop("prefixes", None)
+    profile.pop("prefix", None)
+    _save_profile_record(context, str(target_user_id))
+
+    active_chats = context.application.bot_data.setdefault("active_chats", {})
+    topic_user_map = context.application.bot_data.setdefault("topic_user_map", {})
+    for session_user_id, session in list(active_chats.items()):
+        if not isinstance(session, dict) or not session.get("active"):
+            continue
+
+        session_user_id = str(session_user_id)
+        is_session_admin = str(session.get("admin_id") or "") == str(target_user_id)
+        is_session_user = session_user_id == str(target_user_id)
+        if is_session_admin or is_session_user:
+            chat_id = session.get("chat_id")
+            topic_id = session.get("topic_id")
+            display_name = str(session.get("topic_base_name") or f"id{session_user_id}")
+            if chat_id and topic_id is not None:
+                try:
+                    await context.bot.edit_forum_topic(
+                        chat_id=int(chat_id),
+                        message_thread_id=int(topic_id),
+                        name=f"{display_name} (Сессия завершена)",
+                    )
+                except Exception:
+                    logging.exception(
+                        "Failed to rename topic %s after demoting admin %s",
+                        topic_id,
+                        target_user_id,
+                    )
+                if notify_and_block:
+                    try:
+                        await context.bot.send_message(
+                            chat_id=int(chat_id),
+                            message_thread_id=int(topic_id),
+                            text="Сессия завершена: администратор больше не ведёт этот диалог.",
+                        )
+                    except Exception:
+                        logging.exception(
+                            "Failed to notify topic %s about admin demotion",
+                            topic_id,
+                        )
+                topic_user_map.pop(topic_id, None)
+                topic_user_map.pop(str(topic_id), None)
+
+            if notify_and_block and not is_session_user:
+                try:
+                    await context.bot.send_message(
+                        chat_id=int(session_user_id),
+                        text="Ваша сессия завершена, так как администратор больше не ведёт диалоги.",
+                    )
+                except Exception:
+                    logging.exception(
+                        "Failed to notify session user %s about admin demotion",
+                        session_user_id,
+                    )
+            active_chats.pop(session_user_id, None)
+            continue
+
+        allowed_admin_ids = [str(value) for value in (session.get("allowed_admin_ids") or [])]
+        if str(target_user_id) in allowed_admin_ids:
+            session["allowed_admin_ids"] = [
+                admin_id for admin_id in allowed_admin_ids if admin_id != str(target_user_id)
+            ]
+            if notify_and_block and session.get("chat_id") and session.get("topic_id") is not None:
+                try:
+                    await context.bot.send_message(
+                        chat_id=int(session["chat_id"]),
+                        message_thread_id=int(session["topic_id"]),
+                        text=f"Доступ {target_identifier} к этой теме отозван.",
+                    )
+                except Exception:
+                    logging.exception(
+                        "Failed to notify topic about revoked access for admin %s",
+                        target_user_id,
+                    )
+
+    if notify_and_block:
+        for special_chat_id in _special_admin_chat_ids():
+            try:
+                await context.bot.ban_chat_member(
+                    chat_id=special_chat_id,
+                    user_id=int(target_user_id),
+                )
+                await context.bot.unban_chat_member(
+                    chat_id=special_chat_id,
+                    user_id=int(target_user_id),
+                    only_if_banned=True,
+                )
+            except Exception:
+                logging.exception(
+                    "Failed to remove demoted admin %s from special chat %s",
+                    target_user_id,
+                    special_chat_id,
+                )
+
+        await _apply_ban(
+            context,
+            str(target_user_id),
+            profile.get("username"),
+            "снят админ",
+            "ADMIN DISMISSED",
+            duration_seconds=14 * 86400,
+            force=True,
+        )
+
+    _save_runtime_snapshot(context)
+
+
+async def makeadmin_demotion_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    data = query.data or ""
+    try:
+        action, request_id = data.removeprefix("makeadmin_demote_").split("_", maxsplit=1)
+    except ValueError:
+        await query.answer("Запрос снятия прав повреждён.", show_alert=True)
+        return
+
+    pending = context.application.bot_data.setdefault("pending_admin_demotions", {})
+    request = pending.get(request_id)
+    if not request:
+        await query.answer("Этот запрос уже обработан или устарел.", show_alert=True)
+        return
+    if str(update.effective_user.id) != str(request.get("issuer_user_id")):
+        await query.answer("Выбрать вариант может только автор команды.", show_alert=True)
+        return
+
+    issuer_profile = (context.application.bot_data.get("profiles", {}) or {}).get(
+        str(update.effective_user.id),
+        {},
+    )
+    owner_bypass = bool(request.get("issuer_owner_bypass")) and update.effective_user.id == OWNER_ID
+    if not owner_bypass and _effective_admin_level(issuer_profile) < 4:
+        await query.answer("Ваших прав больше недостаточно для этого действия.", show_alert=True)
+        return
+
+    if action == "cancel":
+        pending.pop(request_id, None)
+        _save_runtime_snapshot(context)
+        await query.answer("Снятие прав отменено.")
+        await query.edit_message_text("Снятие админских прав отменено.")
+        return
+    if action not in {"notify", "silent"}:
+        await query.answer("Неизвестный вариант снятия прав.", show_alert=True)
+        return
+
+    target_user_id = str(request.get("target_user_id") or "")
+    target_profile = (context.application.bot_data.get("profiles", {}) or {}).get(target_user_id)
+    if not target_profile or _effective_admin_level(target_profile) <= 0:
+        pending.pop(request_id, None)
+        _save_runtime_snapshot(context)
+        await query.answer("У пользователя больше нет активных админских прав.", show_alert=True)
+        await query.edit_message_text("Запрос устарел: админские права уже сняты.")
+        return
+
+    await query.answer("Снимаю админские права…")
+    notify_and_block = action == "notify"
+    try:
+        await _finish_admin_demotion(
+            context,
+            target_user_id,
+            str(request.get("target_identifier") or target_user_id),
+            notify_and_block,
+        )
+    except Exception:
+        logging.exception("Failed to demote admin %s", target_user_id)
+        await query.edit_message_text(
+            "Не удалось полностью выполнить снятие прав. Ошибка записана в журнал."
+        )
+        return
+
+    pending.pop(request_id, None)
+    _save_runtime_snapshot(context)
+    mode_text = (
+        "с уведомлением, блокировкой на 14 дней и завершением сессий"
+        if notify_and_block
+        else "без уведомления и блокировки, с завершением сессий"
+    )
+    await query.edit_message_text(
+        f'Админские права пользователя "{request.get("target_identifier")}" сняты {mode_text}.'
+    )
 
 
 async def makeadmin_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
