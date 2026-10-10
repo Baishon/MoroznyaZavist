@@ -360,5 +360,60 @@ def _init_persistent_storage(app) -> None:
         row = conn.execute("SELECT value FROM meta WHERE key = ?", ("profile_seq",)).fetchone()
         if row and str(row[0]).isdigit():
             app.bot_data["profile_seq"] = int(row[0])
+
+        legacy_candidate_data = False
+        for user_id, profile in profiles.items():
+            if not isinstance(profile, dict):
+                continue
+            candidate_status = str(profile.get("admin_candidate_status") or "")
+            was_unapproved_candidate = bool(profile.get("admin_candidate")) or candidate_status in {
+                "onboarding",
+                "pending_review",
+            }
+            if was_unapproved_candidate:
+                try:
+                    if int(profile.get("admin_level", 0) or 0) > 0:
+                        profile["admin_level"] = 0
+                        profile["admin_rank"] = ""
+                        profile.pop("prefix", None)
+                        profile.pop("prefixes", None)
+                    profile.pop("admin_candidate", None)
+                    profile.pop("admin_candidate_status", None)
+                    conn.execute(
+                        "UPDATE profiles SET data = ? WHERE user_id = ?",
+                        (json.dumps(profile, ensure_ascii=False), str(user_id)),
+                    )
+                    legacy_candidate_data = True
+                    logging.info("Removed unapproved legacy admin candidate state for user %s", user_id)
+                except Exception:
+                    logging.exception("Failed to clean legacy admin candidate profile %s", user_id)
+            elif "admin_candidate" in profile or "admin_candidate_status" in profile:
+                profile.pop("admin_candidate", None)
+                profile.pop("admin_candidate_status", None)
+                conn.execute(
+                    "UPDATE profiles SET data = ? WHERE user_id = ?",
+                    (json.dumps(profile, ensure_ascii=False), str(user_id)),
+                )
+                legacy_candidate_data = True
+
+        for key in (
+            "admin_candidate_state",
+            "pending_admin_candidate_reviews",
+            "pending_candidate_rejections",
+        ):
+            if app.bot_data.pop(key, None) is not None:
+                legacy_candidate_data = True
+
+        if legacy_candidate_data:
+            snapshot = {
+                key: _json_safe(value)
+                for key, value in app.bot_data.items()
+                if key != "_state_db_connection"
+            }
+            conn.execute(
+                "UPDATE runtime_state SET data = ? WHERE id = 1",
+                (json.dumps(snapshot, ensure_ascii=False),),
+            )
+            conn.commit()
     except Exception:
         logging.exception("Failed to load persistent state")
