@@ -209,6 +209,7 @@ from app.handlers.user import (
     subscription_message_handler,
     subscription_callback_guard,
     subscription_check_callback,
+    user_menu_callback,
 )
 from app.services.messaging import mirror_session_message_edit, mirror_session_message_reaction
 from app.services.owner_session import start_owner_session, stop_owner_session
@@ -456,6 +457,7 @@ def build_application():
     app.add_handler(CallbackQueryHandler(mood_aggressive_confirm_callback, pattern=r"^mood_aggressive_confirm_\d+$"))
     app.add_handler(CallbackQueryHandler(mood_aggressive_cancel_callback, pattern=r"^mood_aggressive_cancel_\d+$"))
     app.add_handler(CallbackQueryHandler(request_gender_callback, pattern=r"^request_gender_\d+_(male|female)$"))
+    app.add_handler(CallbackQueryHandler(user_menu_callback, pattern=r"^user_menu:"))
     app.add_handler(CallbackQueryHandler(suspicious_admin_allow_callback, pattern=r"^susp_admin_allow_\d+$"))
     app.add_handler(CallbackQueryHandler(suspicious_admin_deny_callback, pattern=r"^susp_admin_deny_\d+$"))
     app.add_handler(CallbackQueryHandler(suspicious_user_allow_callback, pattern=r"^susp_user_allow_\d+$"))

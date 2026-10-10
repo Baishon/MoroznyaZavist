@@ -10,12 +10,11 @@ import html
 import logging
 import time
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 from telegram import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
-    KeyboardButton,
-    ReplyKeyboardMarkup,
     ReplyKeyboardRemove,
     Update,
 )
@@ -79,6 +78,90 @@ from app.services.topics import _is_member_of_chat
 
 
 BUG_TICKET_ADMIN_ID = 7545068007
+
+
+class _InlineMenuMessageProxy:
+    def __init__(self, query, context, button_text: str):
+        self._query = query
+        self._context = context
+        self._edited = False
+        self.text = button_text
+        self.entities = []
+        self.chat = query.message.chat
+        self.chat_id = query.message.chat_id
+        self.message_id = query.message.message_id
+        self.from_user = query.from_user
+
+    def __getattr__(self, name):
+        return getattr(self._query.message, name)
+
+    async def reply_text(self, text: str, **kwargs):
+        reply_markup = kwargs.pop("reply_markup", None)
+        if isinstance(reply_markup, InlineKeyboardMarkup):
+            rows = [list(row) for row in reply_markup.inline_keyboard]
+            if not any(
+                button.callback_data == "user_menu:main"
+                for row in rows
+                for button in row
+            ):
+                rows.append([InlineKeyboardButton("↩️ Главное меню", callback_data="user_menu:main")])
+            reply_markup = InlineKeyboardMarkup(rows)
+        elif reply_markup is None:
+            reply_markup = InlineKeyboardMarkup(
+                [[InlineKeyboardButton("↩️ Главное меню", callback_data="user_menu:main")]]
+            )
+
+        kwargs.pop("reply_to_message_id", None)
+        kwargs.pop("allow_sending_without_reply", None)
+        if not self._edited:
+            self._edited = True
+            try:
+                return await self._query.message.edit_text(
+                    text=text,
+                    reply_markup=reply_markup,
+                    **kwargs,
+                )
+            except BadRequest as exc:
+                logging.warning("Could not edit inline menu message %s: %s", self.message_id, exc)
+
+        return await self._context.bot.send_message(
+            chat_id=self.chat_id,
+            text=text,
+            reply_markup=reply_markup,
+            **kwargs,
+        )
+
+    async def delete(self):
+        return await self._query.message.delete()
+
+
+def _build_welcome_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton("Начать", callback_data="user_menu:start")],
+            [
+                InlineKeyboardButton("⭐ Канал бота", url="https://t.me/berlogaAskly"),
+                InlineKeyboardButton("❓ Помощь", url="https://t.me/asklyhelp"),
+            ],
+        ]
+    )
+
+
+async def _remove_legacy_user_menu(context: ContextTypes.DEFAULT_TYPE, user_id: int, profile: dict) -> None:
+    if profile.get("inline_menu_enabled"):
+        return
+    try:
+        await context.bot.send_message(
+            chat_id=user_id,
+            text="Меню обновлено. Теперь используйте кнопки в сообщениях бота.",
+            reply_markup=ReplyKeyboardRemove(),
+        )
+    except Exception:
+        logging.exception("Failed to remove the legacy reply keyboard for user %s", user_id)
+        return
+
+    profile["inline_menu_enabled"] = True
+    _save_profile_record(context, str(user_id))
 
 
 def _ticket_close_keyboard(ticket_id: str) -> InlineKeyboardMarkup:
@@ -196,6 +279,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if await block_if_banned(update, context):
             return
         profile = _ensure_profile(context, str(user.id), user.username or f"id{user.id}")
+        await _remove_legacy_user_menu(context, user.id, profile)
         refresh_timed_warnings(profile)
         expired_warns = consume_expired_warning_count(profile)
         if expired_warns:
@@ -214,6 +298,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "Мы хотим, чтобы Вы получили максимум внимания и помощи от текущего администратора. Если у Вас возникнут вопросы или пожелания — Вы всегда можете обсудить их с ним напрямую.\n\n"
                 "Если по какой-то причине Вы хотите завершить текущий диалог и начать новый — просто скажите об этом администратору. Он поможет Вам корректно завершить общение и при необходимости передаст Вас другому специалисту.",
                 parse_mode=ParseMode.MARKDOWN,
+                reply_markup=_build_welcome_keyboard(),
             )
             return
 
@@ -226,21 +311,113 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "👹 <b>Агрессив</b>\n"
         "Выберите нужный раздел — администратор подключится к вам."
     )
-    keyboard = InlineKeyboardMarkup(
-        [
-            [
-                InlineKeyboardButton("⭐ Канал бота", url="https://t.me/berlogaAskly"),
-                InlineKeyboardButton("❓ Помощь", url="https://t.me/asklyhelp")
-            ]
-        ]
-    )
-    await update.message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
-
-    menu_keyboard = _build_main_menu_keyboard(context, user.id, user.username)
     await update.message.reply_text(
-        "Выберите действие в меню ниже:",
-        reply_markup=menu_keyboard,
+        text,
+        parse_mode=ParseMode.HTML,
+        reply_markup=_build_welcome_keyboard(),
     )
+
+
+async def start_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    user = update.effective_user
+    if not query or not query.message or not user:
+        return
+    if query.message.chat.type != ChatType.PRIVATE or query.message.chat_id != user.id:
+        await query.answer("Эта кнопка доступна только в личном чате с ботом.", show_alert=True)
+        return
+    if await block_if_banned(update, context):
+        await query.answer()
+        return
+
+    await query.answer()
+    await query.message.edit_text(
+        "Выберите действие:",
+        reply_markup=_build_main_menu_keyboard(context, user.id, user.username),
+    )
+
+
+async def user_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    user = update.effective_user
+    if not query or not query.message or not user:
+        return
+    if query.message.chat.type != ChatType.PRIVATE or query.message.chat_id != user.id:
+        await query.answer("Эта кнопка доступна только в личном чате с ботом.", show_alert=True)
+        return
+
+    action = (query.data or "").partition(":")[2]
+    if action == "start":
+        await start_menu_callback(update, context)
+        return
+    if action == "main":
+        if await block_if_banned(update, context):
+            await query.answer()
+            return
+        await query.answer()
+        await query.message.edit_text(
+            "Выберите действие:",
+            reply_markup=_build_main_menu_keyboard(context, user.id, user.username),
+        )
+        return
+    if action == "mood_back":
+        if context.user_data.get("profile") != 2:
+            await query.answer("Этот этап выбора уже завершен.", show_alert=True)
+            return
+        await query.answer()
+        context.user_data["profile"] = 1
+        await send_admin_menu(update, context)
+        return
+
+    action_handlers = {
+        "main": send_main_submenu,
+        "find": find_admin_menu_callback,
+        "profile": send_profile,
+        "admin_profile": send_admin_profile,
+        "shop": admin_shop_menu_handler,
+        "quests": quests_menu_handler,
+        "help": help_menu_handler,
+        "settings": settings_menu_handler,
+        "dialog": return_to_dialog_menu_handler,
+        "cancel_admin": ask_cancel_admin,
+        "session_settings": session_settings_menu_handler,
+        "admin_online": check_session_admin_online_handler,
+        "pause_session": pause_session_request,
+        "disable_rp": session_rp_disable_prompt,
+        "enable_rp": session_rp_enable_handler,
+        "thank_admin": thanks_from_session_prompt,
+        "complaints": settings_complaint_menu_handler,
+        "report_bug": complaint_bug_menu_handler,
+        "report_admin": complaint_admin_menu_handler,
+        "complaint_tag": complaint_admin_write_tag_handler,
+        "complaint_last_admin": complaint_admin_last_admin_handler,
+        "complaint_back": complaint_admin_back_handler,
+        "disable_ads": settings_disable_ad_handler,
+        "enable_ads": settings_enable_ad_handler,
+        "gender_back": choose_admin_gender_callback,
+    }
+    handler = action_handlers.get(action)
+    if not handler:
+        await query.answer("Неизвестная кнопка.", show_alert=True)
+        return
+
+    if await block_if_banned(update, context):
+        await query.answer()
+        return
+
+    await query.answer()
+    button_text = {
+        "gender_back": "◀️ Назад",
+    }.get(action, action)
+    message = _InlineMenuMessageProxy(query, context, button_text)
+    callback_update = SimpleNamespace(
+        callback_query=query,
+        effective_user=user,
+        effective_chat=query.message.chat,
+        effective_message=message,
+        message=message,
+    )
+    await handler(callback_update, context)
 
 
 # ==== Agreement enforcement helpers ====
@@ -482,6 +659,8 @@ async def agreement_accept_callback(update: Update, context: ContextTypes.DEFAUL
     except Exception:
         pass
 
+    await _remove_legacy_user_menu(context, update.effective_user.id, profile)
+
     # send the same initial /start content
     try:
         text = (
@@ -493,18 +672,12 @@ async def agreement_accept_callback(update: Update, context: ContextTypes.DEFAUL
             "👹 <b>Агрессив</b>\n"
             "Выберите нужный раздел — администратор подключится к вам."
         )
-        keyboard = InlineKeyboardMarkup(
-            [
-                [
-                    InlineKeyboardButton("⭐ Канал бота", url="https://t.me/berlogaAskly"),
-                    InlineKeyboardButton("❓ Помощь", url="https://t.me/asklyhelp")
-                ]
-            ]
+        await context.bot.send_message(
+            chat_id=int(user_id),
+            text=text,
+            parse_mode=ParseMode.HTML,
+            reply_markup=_build_welcome_keyboard(),
         )
-        await context.bot.send_message(chat_id=int(user_id), text=text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
-
-        menu_keyboard = _build_main_menu_keyboard(context, int(user_id), update.effective_user.username)
-        await context.bot.send_message(chat_id=int(user_id), text="Выберите действие в меню ниже:", reply_markup=menu_keyboard)
     except Exception:
         pass
 
@@ -587,19 +760,18 @@ async def send_admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "—\n"
         "› Заявки, поступившие в ночное время (с 0:00 до 09:30 по МСК), будут обрабатываться с начала рабочего дня."
     )
-    await update.message.reply_text(
-        "Для возврата используйте кнопку ниже.",
-        reply_markup=ReplyKeyboardMarkup(
-            [[KeyboardButton("◀️ Назад")]],
-            resize_keyboard=True,
-            one_time_keyboard=False,
-        ),
-    )
-    await update.message.reply_text(
-        text,
-        parse_mode=ParseMode.HTML,
-        reply_markup=_build_request_gender_keyboard(str(update.effective_user.id)),
-    )
+    if update.callback_query:
+        await update.callback_query.message.edit_text(
+            text,
+            parse_mode=ParseMode.HTML,
+            reply_markup=_build_request_gender_keyboard(str(update.effective_user.id)),
+        )
+    else:
+        await update.message.reply_text(
+            text,
+            parse_mode=ParseMode.HTML,
+            reply_markup=_build_request_gender_keyboard(str(update.effective_user.id)),
+        )
 
 
 async def request_gender_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2274,14 +2446,6 @@ async def send_mood_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    await update.message.reply_text(
-        "Для возврата используйте кнопку ниже.",
-        reply_markup=ReplyKeyboardMarkup(
-            [[KeyboardButton("◀️ Назад")]],
-            resize_keyboard=True,
-            one_time_keyboard=False,
-        ),
-    )
     await update.message.reply_text(
         text,
         parse_mode=ParseMode.HTML,
