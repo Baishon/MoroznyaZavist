@@ -45,7 +45,6 @@ from app.keyboards.inline import (
     _build_session_mood_selection_keyboard,
     _build_session_mood_settings_keyboard,
     _build_settings_menu_keyboard,
-    _append_menu_restart_button,
 )
 from app.services.bans import block_if_banned, check_active_chat_block, enforce_autoban_if_needed
 from app.services.messaging import deliver_message_to_user
@@ -98,12 +97,6 @@ class _InlineMenuMessageProxy:
 
     async def reply_text(self, text: str, **kwargs):
         reply_markup = kwargs.pop("reply_markup", None)
-        if isinstance(reply_markup, InlineKeyboardMarkup):
-            reply_markup = _append_menu_restart_button(reply_markup)
-        elif reply_markup is None:
-            reply_markup = InlineKeyboardMarkup(
-                [[InlineKeyboardButton("🔄 Перезапустить меню", callback_data="user_menu:restart")]]
-            )
 
         kwargs.pop("reply_to_message_id", None)
         kwargs.pop("allow_sending_without_reply", None)
@@ -326,7 +319,6 @@ async def start_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     await query.answer()
     context.user_data["last_category_step"] = 0
-    context.user_data["last_menu_action"] = "main"
     await query.message.edit_text(
         "Выберите действие:",
         reply_markup=_build_main_menu_keyboard(context, user.id, user.username),
@@ -343,20 +335,6 @@ async def user_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
 
     action = (query.data or "").partition(":")[2]
-    restart_handlers = {
-        "find": find_admin_menu_callback,
-        "profile": send_profile,
-        "admin_profile": send_admin_profile,
-        "shop": admin_shop_menu_handler,
-        "quests": quests_menu_handler,
-        "help": help_menu_handler,
-        "settings": settings_menu_handler,
-        "dialog": return_to_dialog_menu_handler,
-        "session_settings": session_settings_menu_handler,
-        "complaints": settings_complaint_menu_handler,
-        "report_bug": complaint_bug_menu_handler,
-        "report_admin": complaint_admin_menu_handler,
-    }
     if action == "start":
         await start_menu_callback(update, context)
         return
@@ -365,63 +343,11 @@ async def user_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             await query.answer()
             return
         await query.answer()
-        user_id = str(user.id)
-        active = (context.application.bot_data.get("active_chats", {}) or {}).get(user_id)
-        last_menu_action = context.user_data.get("last_menu_action")
-        if last_menu_action == "session_settings" and active and active.get("active"):
-            message = _InlineMenuMessageProxy(query, context, "🔄 Перезапустить меню")
-            callback_update = SimpleNamespace(
-                callback_query=query,
-                effective_user=user,
-                effective_chat=query.message.chat,
-                effective_message=message,
-                message=message,
-            )
-            await session_settings_menu_handler(callback_update, context)
-            return
-        if active and active.get("active"):
-            if active.get("paused"):
-                await query.message.edit_text(
-                    "💤Сессия сейчас на паузе. Нажмите кнопку ниже, чтобы возобновить общение.",
-                    reply_markup=_append_menu_restart_button(
-                        InlineKeyboardMarkup(
-                            [[InlineKeyboardButton("Возобновить общение", callback_data=f"resume_session_{user_id}")]]
-                        )
-                    ),
-                )
-            else:
-                await send_active_session_menu(update, context)
-            return
-
-        step = context.user_data.get("last_category_step")
-        if step == 1:
-            await send_admin_menu(update, context)
-        elif step == 2:
-            await query.message.edit_text(
-                context.user_data.get("mood_selection_prompt", "Выберите тип запроса:"),
-                parse_mode=ParseMode.HTML,
-                reply_markup=_build_mood_selection_keyboard(
-                    str(user.id),
-                    context.user_data.get("mood_selected", []),
-                ),
-            )
-        elif last_menu_action in restart_handlers:
-            message = _InlineMenuMessageProxy(query, context, "🔄 Перезапустить меню")
-            callback_update = SimpleNamespace(
-                callback_query=query,
-                effective_user=user,
-                effective_chat=query.message.chat,
-                effective_message=message,
-                message=message,
-            )
-            await restart_handlers[last_menu_action](callback_update, context)
-        else:
-            context.user_data["last_category_step"] = 0
-            context.user_data["last_menu_action"] = "main"
-            await query.message.edit_text(
-                "Выберите действие:",
-                reply_markup=_build_main_menu_keyboard(context, user.id, user.username),
-            )
+        context.user_data["last_category_step"] = 0
+        await query.message.edit_text(
+            "Выберите действие:",
+            reply_markup=_build_main_menu_keyboard(context, user.id, user.username),
+        )
         return
     if action == "main":
         if await block_if_banned(update, context):
@@ -429,7 +355,6 @@ async def user_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             return
         await query.answer()
         context.user_data["last_category_step"] = 0
-        context.user_data["last_menu_action"] = "main"
         await query.message.edit_text(
             "Выберите действие:",
             reply_markup=_build_main_menu_keyboard(context, user.id, user.username),
@@ -481,8 +406,6 @@ async def user_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
 
     await query.answer()
-    if action in restart_handlers:
-        context.user_data["last_menu_action"] = action
     button_text = {
         "gender_back": "◀️ Назад",
     }.get(action, action)
@@ -873,7 +796,6 @@ async def request_gender_callback(update: Update, context: ContextTypes.DEFAULT_
 
 async def send_main_submenu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["last_category_step"] = 0
-    context.user_data["last_menu_action"] = "main"
     menu_keyboard = _build_main_menu_keyboard(
         context,
         update.effective_user.id,

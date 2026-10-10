@@ -42,18 +42,18 @@ def _build_mood_selection_keyboard(user_id: str, selected_keys: list[str]) -> In
         )
         for key, label in labels.items()
     ]
-    return _append_menu_restart_button(InlineKeyboardMarkup(
+    return InlineKeyboardMarkup(
         [
             [buttons[0], buttons[1]],
             [buttons[2], buttons[3]],
             [InlineKeyboardButton("▶️ Далее", callback_data=f"mood_next_{user_id}")],
             [InlineKeyboardButton("◀️ Назад", callback_data="user_menu:mood_back")],
         ]
-    ))
+    )
 
 
 def _build_request_gender_keyboard(user_id: str) -> InlineKeyboardMarkup:
-    return _append_menu_restart_button(InlineKeyboardMarkup(
+    return InlineKeyboardMarkup(
         [
             [
                 InlineKeyboardButton("👨 Мальчик", callback_data=f"request_gender_{user_id}_male"),
@@ -61,7 +61,7 @@ def _build_request_gender_keyboard(user_id: str) -> InlineKeyboardMarkup:
             ],
             [InlineKeyboardButton("◀️ Назад", callback_data="user_menu:gender_back")],
         ]
-    ))
+    )
 
 
 def _build_main_menu_keyboard(context: ContextTypes.DEFAULT_TYPE, user_id: int | str, username_hint: str | None = None) -> InlineKeyboardMarkup:
@@ -126,7 +126,7 @@ def _build_chat_menu_keyboard() -> ReplyKeyboardMarkup:
 
 
 def _build_quests_menu_keyboard() -> InlineKeyboardMarkup:
-    return _append_menu_restart_button(InlineKeyboardMarkup(
+    return InlineKeyboardMarkup(
         [
             [
                 InlineKeyboardButton("🗺️Квесты", callback_data="quests_open"),
@@ -134,39 +134,39 @@ def _build_quests_menu_keyboard() -> InlineKeyboardMarkup:
             ],
             [InlineKeyboardButton("↩️Выйти", callback_data="quests_exit")],
         ]
-    ))
+    )
 
 
 def _build_quests_section_keyboard() -> InlineKeyboardMarkup:
-    return _append_menu_restart_button(InlineKeyboardMarkup(
+    return InlineKeyboardMarkup(
         [
             [InlineKeyboardButton("🎮Игровые квесты", callback_data="game_quests_open")],
             [InlineKeyboardButton("📚Школьные примеры", callback_data="school_tasks_open")],
             [InlineKeyboardButton("↩️Назад", callback_data="quests_back")],
         ]
-    ))
+    )
 
 
 def _build_game_quests_keyboard() -> InlineKeyboardMarkup:
-    return _append_menu_restart_button(InlineKeyboardMarkup(
+    return InlineKeyboardMarkup(
         [
             [InlineKeyboardButton("Brawl stars", callback_data="brawl_stars_open")],
             [InlineKeyboardButton("↩️Назад", callback_data="quests_back")],
         ]
-    ))
+    )
 
 
 def _build_brawl_stars_keyboard() -> InlineKeyboardMarkup:
-    return _append_menu_restart_button(InlineKeyboardMarkup(
+    return InlineKeyboardMarkup(
         [[
             InlineKeyboardButton("▶️Начать", callback_data="brawl_stars_start"),
             InlineKeyboardButton("↩️Назад", callback_data="game_quests_back"),
         ]]
-    ))
+    )
 
 
 def _build_active_session_keyboard() -> InlineKeyboardMarkup:
-    return _append_menu_restart_button(InlineKeyboardMarkup(
+    return InlineKeyboardMarkup(
         [
             [InlineKeyboardButton("🤧Отказаться от админа", callback_data="user_menu:cancel_admin")],
             [
@@ -175,7 +175,7 @@ def _build_active_session_keyboard() -> InlineKeyboardMarkup:
             ],
             [InlineKeyboardButton("↪️Вернуться в главное меню", callback_data="user_menu:main")],
         ],
-    ))
+    )
 
 
 def _build_session_settings_keyboard(active: dict | None = None) -> InlineKeyboardMarkup:
@@ -193,17 +193,17 @@ def _build_session_settings_keyboard(active: dict | None = None) -> InlineKeyboa
         ],
     ]
     rows.append([InlineKeyboardButton("↩️Вернуться к кнопкам диалога", callback_data="user_menu:dialog")])
-    return _append_menu_restart_button(InlineKeyboardMarkup(rows))
+    return InlineKeyboardMarkup(rows)
 
 
 def _build_session_mood_settings_keyboard(user_id: str) -> InlineKeyboardMarkup:
-    return _append_menu_restart_button(InlineKeyboardMarkup(
+    return InlineKeyboardMarkup(
         [
             [InlineKeyboardButton("🎭 Изменить тему общения", callback_data=f"session_mood_open_{user_id}")],
             [InlineKeyboardButton("↩️ К настройкам сессии", callback_data="user_menu:session_settings")],
             [InlineKeyboardButton("↩️ Главное меню", callback_data="user_menu:main")],
         ]
-    ))
+    )
 
 
 def _build_session_mood_selection_keyboard(user_id: str, selected_keys: list[str]) -> InlineKeyboardMarkup:
@@ -220,14 +220,14 @@ def _build_session_mood_selection_keyboard(user_id: str, selected_keys: list[str
         )
         for key, label in choices
     ]
-    return _append_menu_restart_button(InlineKeyboardMarkup(
+    return InlineKeyboardMarkup(
         [
             buttons[:2],
             buttons[2:],
             [InlineKeyboardButton("Изменить", callback_data=f"session_mood_submit_{user_id}")],
             [InlineKeyboardButton("↩️ Назад", callback_data=f"session_mood_back_{user_id}")],
         ]
-    ))
+    )
 
 
 def _build_session_mood_review_keyboard(request_id: str) -> InlineKeyboardMarkup:
@@ -250,11 +250,11 @@ def _build_settings_menu_keyboard(profile: dict | None = None) -> InlineKeyboard
         rows.append([InlineKeyboardButton("🔕Отключить рекламу", callback_data="user_menu:disable_ads")])
     rows.append([InlineKeyboardButton("↩️Назад", callback_data="user_menu:main")])
 
-    return _append_menu_restart_button(InlineKeyboardMarkup(rows))
+    return InlineKeyboardMarkup(rows)
 
 
 def _build_complaint_menu_keyboard() -> InlineKeyboardMarkup:
-    return _append_menu_restart_button(InlineKeyboardMarkup(
+    return InlineKeyboardMarkup(
         [
             [
                 InlineKeyboardButton("👨‍🔧Сообщить о баге", callback_data="user_menu:report_bug"),
@@ -262,11 +262,11 @@ def _build_complaint_menu_keyboard() -> InlineKeyboardMarkup:
             ],
             [InlineKeyboardButton("↩️В настройки", callback_data="user_menu:settings")],
         ],
-    ))
+    )
 
 
 def _build_complaint_admin_menu_keyboard() -> InlineKeyboardMarkup:
-    return _append_menu_restart_button(InlineKeyboardMarkup(
+    return InlineKeyboardMarkup(
         [
             [
                 InlineKeyboardButton("✏️Написать тег админа", callback_data="user_menu:complaint_tag"),
@@ -274,7 +274,7 @@ def _build_complaint_admin_menu_keyboard() -> InlineKeyboardMarkup:
             ],
             [InlineKeyboardButton("↩️В раздел жалоб", callback_data="user_menu:complaints")],
         ],
-    ))
+    )
 
 
 def _build_active_dialog_admin_keyboard(request_user_id: str) -> InlineKeyboardMarkup:
