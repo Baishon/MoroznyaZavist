@@ -5028,7 +5028,7 @@ async def admin_take_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         try:
             await context.bot.send_message(
                 chat_id=int(request_user_id),
-                text="📱Меню диалога обновлено.",
+                text="Диалог начат.",
                 reply_markup=_build_active_session_keyboard(),
             )
         except Exception:
