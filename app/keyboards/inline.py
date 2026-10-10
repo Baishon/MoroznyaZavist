@@ -2,7 +2,7 @@
 
 Every `_build_*_keyboard` function returns an `InlineKeyboardMarkup` or
 `ReplyKeyboardMarkup` for one screen (main menu, settings, astats gender/tip
-editors, info-topic and setprefix panels, candidate onboarding); the
+editors, info-topic and setprefix panels); the
 `_next_*_panel_id` helpers generate the opaque ids those keyboards encode
 into callback_data. Pure UI construction only — no bot_data mutation beyond
 handing out sequence ids, no Telegram API calls.
@@ -11,32 +11,10 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton,
 from telegram.ext import ContextTypes
 
 from app.services.profiles import (
-    _candidate_tip_choices,
     _effective_admin_level,
     _ensure_profile,
     _has_admin_rights_level_1_5,
 )
-
-
-def _build_candidate_tip_keyboard(user_id: str, selected_keys: list[str]) -> InlineKeyboardMarkup:
-    selected_set = set(selected_keys)
-    tip_buttons = []
-    for key, label in _candidate_tip_choices():
-        prefix = "✅" if key in selected_set else ""
-        tip_buttons.append(
-            InlineKeyboardButton(
-                f"{prefix}{label}",
-                callback_data=f"candidate_tip_toggle_{user_id}_{key}",
-            )
-        )
-
-    return InlineKeyboardMarkup(
-        [
-            tip_buttons[:2],
-            tip_buttons[2:],
-            [InlineKeyboardButton("▶️Далее", callback_data=f"candidate_tip_next_{user_id}")],
-        ]
-    )
 
 
 def _build_mood_selection_keyboard(user_id: str, selected_keys: list[str]) -> InlineKeyboardMarkup:
@@ -62,75 +40,12 @@ def _build_mood_selection_keyboard(user_id: str, selected_keys: list[str]) -> In
     )
 
 
-def _build_candidate_gender_keyboard(user_id: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        [[
-            InlineKeyboardButton("👱🏻‍♂️Мальчик", callback_data=f"candidate_gender_{user_id}_male"),
-            InlineKeyboardButton("🙍‍♀️Девочка", callback_data=f"candidate_gender_{user_id}_female"),
-        ]]
-    )
-
-
 def _build_request_gender_keyboard(user_id: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [[
             InlineKeyboardButton("👨 Мальчик", callback_data=f"request_gender_{user_id}_male"),
             InlineKeyboardButton("👩 Девочка", callback_data=f"request_gender_{user_id}_female"),
         ]]
-    )
-
-
-def _build_candidate_profile_keyboard(
-    user_id: str,
-    images_saved: bool = False,
-    character_saved: bool = False,
-) -> InlineKeyboardMarkup:
-    image_label = "✅🔖Изображения" if images_saved else "🔖Изображения"
-    character_label = "✅💬Характер" if character_saved else "💬Характер"
-    return InlineKeyboardMarkup(
-        [
-            [
-                InlineKeyboardButton(image_label, callback_data=f"candidate_images_{user_id}"),
-                InlineKeyboardButton(character_label, callback_data=f"candidate_character_{user_id}"),
-            ],
-            [InlineKeyboardButton("↗️отправить заявку", callback_data=f"candidate_submit_{user_id}")],
-        ]
-    )
-
-
-def _build_candidate_character_confirm_keyboard(user_id: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        [[
-            InlineKeyboardButton("да", callback_data=f"candidate_character_yes_{user_id}"),
-            InlineKeyboardButton("нет", callback_data=f"candidate_character_no_{user_id}"),
-        ]]
-    )
-
-
-def _build_candidate_character_edit_keyboard(user_id: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        [[InlineKeyboardButton("отредактировать", callback_data=f"candidate_character_edit_{user_id}")],
-         [InlineKeyboardButton("отмена", callback_data=f"candidate_profile_{user_id}")]]
-    )
-
-
-def _build_candidate_images_confirm_keyboard(user_id: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        [
-            [
-                InlineKeyboardButton("переделать", callback_data=f"candidate_images_redo_{user_id}"),
-                InlineKeyboardButton("готово", callback_data=f"candidate_images_done_{user_id}"),
-            ]
-        ]
-    )
-
-
-def _build_candidate_images_preview_keyboard(user_id: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        [
-            [InlineKeyboardButton("↩️вернуться к заполнению анкеты", callback_data=f"candidate_profile_{user_id}")],
-            [InlineKeyboardButton("отредактировать", callback_data=f"candidate_images_edit_{user_id}")],
-        ]
     )
 
 
