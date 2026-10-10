@@ -17,7 +17,6 @@ from telegram import (
     KeyboardButton,
     MessageEntity,
     ReplyKeyboardMarkup,
-    ReplyKeyboardRemove,
     Update,
 )
 from telegram.constants import ChatType, ParseMode
@@ -37,7 +36,6 @@ from app.config import (
     WORK_CHAT_ID,
 )
 from app.database.requests import _save_ban_record, _save_profile_record, _save_runtime_snapshot
-from app.handlers.candidates import _send_candidate_stage_1
 from app.keyboards.inline import (
     _build_active_dialog_admin_keyboard,
     _build_active_session_keyboard,
@@ -76,7 +74,7 @@ from app.services.profiles import (
     _admin_supports_mood,
     _build_admin_stats_text,
     _build_user_stats_text,
-    _candidate_tip_value,
+    _admin_tip_value,
     _can_use_moderation_commands,
     _effective_admin_level,
     _ensure_profile,
@@ -84,7 +82,6 @@ from app.services.profiles import (
     _has_full_access_prefix,
     _has_admin_rights_level_1_5,
     _has_prefix,
-    _is_active_admin_candidate,
     _is_topic_admin,
     _resolve_ban_target,
     _resolve_warn_target,
@@ -243,9 +240,9 @@ def _record_info_topic_action(
 
     if panel_id is None:
         panels = context.application.bot_data.get("info_topic_panels", {}) or {}
-        for candidate_id, panel in panels.items():
+        for panel_key, panel in panels.items():
             if str(panel.get("target_user_id") or "") == target_key:
-                panel_id = str(candidate_id)
+                panel_id = str(panel_key)
                 break
     if panel_id is None:
         return
@@ -581,11 +578,6 @@ async def _makeadmin_impl(update: Update, context: ContextTypes.DEFAULT_TYPE, ow
         await update.message.reply_text(f'Пользователь с id_profile "{target_identifier}" не найден.')
         return
 
-    preview_prefix = str(profile.get("prefix") or "").strip()
-    if not preview_prefix and lvl > 0:
-        preview_prefix = str(_admin_default_prefix(lvl) or "").strip()
-    preview_prefix_text = preview_prefix or "не установлен"
-
     target_user_id_int = int(target_user_id)
     if lvl != 0:
         in_work_chat = await _is_member_of_chat(context, WORK_CHAT_ID, target_user_id_int)
@@ -596,17 +588,6 @@ async def _makeadmin_impl(update: Update, context: ContextTypes.DEFAULT_TYPE, ow
         in_channel = await _is_member_of_chat(context, OFFICIAL_CHANNEL_ID, target_user_id_int)
         if not in_channel:
             await update.message.reply_text("Выдача невозможна: пользователь не подписан на официальный тгк бота.")
-            return
-
-    if lvl > 1:
-        candidate_status = str(profile.get("admin_candidate_status") or "")
-        tag_admin = str(profile.get("tag_admin") or "").strip()
-        biography_admin = str(profile.get("biography_admin") or "").strip()
-        if candidate_status != "approved" or not tag_admin or not biography_admin:
-            await update.message.reply_text(
-                f"Префикс: {preview_prefix_text}\n"
-                "Выдача невозможна: сначала пользователь должен пройти кандидатуру 1 уровня и заполнить анкету (тег и биография)."
-            )
             return
 
     active = context.application.bot_data.setdefault("active_chats", {})
@@ -623,12 +604,8 @@ async def _makeadmin_impl(update: Update, context: ContextTypes.DEFAULT_TYPE, ow
 
         profile["admin_level"] = 0
         profile["admin_rank"] = ""
-        profile["admin_candidate"] = False
-        profile["admin_candidate_status"] = "none"
         profile.pop("prefixes", None)
         profile.pop("prefix", None)
-        state_map = context.application.bot_data.setdefault("admin_candidate_state", {})
-        state_map.pop(str(target_user_id), None)
 
         await update.message.reply_text(
             f'☑️Пользователь "{target_identifier}" был разжалован, админ-права сняты.'
@@ -658,48 +635,6 @@ async def _makeadmin_impl(update: Update, context: ContextTypes.DEFAULT_TYPE, ow
         if default_prefix:
             profile["prefix"] = default_prefix
     prefix_text = str(profile.get("prefix") or "не установлен")
-
-    if lvl == 1:
-        profile["admin_candidate"] = True
-        profile["admin_candidate_status"] = "onboarding"
-
-        candidate_state = context.application.bot_data.setdefault("admin_candidate_state", {})
-        candidate_state[str(target_user_id)] = {
-            "stage": "await_tag",
-            "initiated_by": update.effective_user.id,
-            "initiated_by_username": admin_username,
-        }
-
-        await update.message.reply_text(
-            f'☑️Пользователь "{target_identifier}" был успешно назначен на админ-права, инструктаж ему отправлен в ЛС.\n'
-            f'Префикс: {prefix_text}\n'
-            'Уровень: 1'
-        )
-
-        try:
-            await context.bot.send_message(chat_id=target_user_id_int, text="⚙️Клавиатура обновлена.", reply_markup=ReplyKeyboardRemove())
-            await context.bot.send_message(
-                chat_id=target_user_id_int,
-                text=(
-                    f"Префикс: {prefix_text}\n"
-                    "❤️‍🔥Поздравляем! Вы были назначены администратором 1 уровня. "
-                    f'Назначил вас "{admin_username}"\n\n'
-                    "📝Перед началой работы вам нужно заполнить информацию о себе..."
-                ),
-            )
-            await asyncio.sleep(2)
-            await _send_candidate_stage_1(context, target_user_id_int)
-        except Forbidden:
-            _set_user_blocked_bot_state(context, str(target_user_id), True)
-            await update.message.reply_text("Пользователь заблокировал бота. Инструктаж в ЛС отправить не удалось.")
-        except Exception as e:
-            logging.exception("makeadmin onboarding send failed: %s", e)
-        return
-
-    profile["admin_candidate"] = False
-    profile["admin_candidate_status"] = "approved"
-    state_map = context.application.bot_data.setdefault("admin_candidate_state", {})
-    state_map.pop(str(target_user_id), None)
 
     await update.message.reply_text(
         f'☑️Пользователь "{target_identifier}" был успешно назначен.\n'
@@ -737,10 +672,6 @@ async def prava_command_handler(update: Update, context: ContextTypes.DEFAULT_TY
     owner_profile = _ensure_profile(context, str(OWNER_ID), update.effective_user.username or f"id{OWNER_ID}")
     owner_profile["admin_level"] = 5
     owner_profile["admin_rank"] = ADMIN_LEVEL_TITLES[5]
-    owner_profile["admin_candidate"] = False
-    owner_profile["admin_candidate_status"] = "approved"
-    state_map = context.application.bot_data.setdefault("admin_candidate_state", {})
-    state_map.pop(str(OWNER_ID), None)
     _save_profile_record(context, str(OWNER_ID))
 
     if update.message:
@@ -1289,10 +1220,6 @@ async def givetopic_command_handler(update: Update, context: ContextTypes.DEFAUL
     if not _has_admin_rights_level_1_5(recipient_profile):
         await update.message.reply_text("У указанного пользователя нет действующих админских прав.")
         return
-    if _is_active_admin_candidate(context, recipient_id):
-        await update.message.reply_text("Кандидату с неодобренной заявкой нельзя выдавать доступ к сессии.")
-        return
-
     allowed_admin_ids = active.setdefault("allowed_admin_ids", [])
     if recipient_id not in {str(value) for value in allowed_admin_ids}:
         allowed_admin_ids.append(recipient_id)
@@ -1399,18 +1326,6 @@ async def taketopic_command_handler(update: Update, context: ContextTypes.DEFAUL
     await update.message.reply_text(
         f"✅У администратора с id_profile #{target_identifier} отобрано право писать в указанной теме."
     )
-
-
-async def admin_candidate_command_guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    message = getattr(update, "message", None)
-    user = getattr(update, "effective_user", None)
-    chat = getattr(update, "effective_chat", None)
-    if message is None or user is None or chat is None:
-        return
-    if chat.id not in _special_admin_chat_ids() or not _is_active_admin_candidate(context, str(user.id)):
-        return
-    await message.reply_text("⛔️Во время кандидатуры админские команды недоступны. Дождитесь одобрения заявки.")
-    raise ApplicationHandlerStop
 
 
 async def cooperation_admin_command_guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2032,8 +1947,6 @@ async def awarn_command_handler(update: Update, context: ContextTypes.DEFAULT_TY
 
     profile["admin_level"] = 0
     profile["admin_rank"] = ""
-    profile["admin_candidate"] = False
-    profile["admin_candidate_status"] = "none"
     profile.pop("prefix", None)
     profile.pop("prefixes", None)
     profile["admin_warns"] = []
@@ -3152,7 +3065,7 @@ async def astats_tip_apply_callback(update: Update, context: ContextTypes.DEFAUL
         return
 
     selected = list(session.get("tip_selected_keys") or [])
-    tip_value = _candidate_tip_value(selected)
+    tip_value = _admin_tip_value(selected)
 
     target_user_id = str(session.get("target_user_id"))
     target_profile = _ensure_profile(context, target_user_id, f"id{target_user_id}")
@@ -3982,14 +3895,14 @@ async def handle_astats_tag_input_message(update: Update, context: ContextTypes.
 
     reply_message_id = int(getattr(getattr(update.message, "reply_to_message", None), "message_id", 0) or 0)
     if not session_id and reply_message_id:
-        for candidate_id, candidate in sessions.items():
-            if str(candidate.get("status")) != "await_tag":
+        for session_key, tag_session in sessions.items():
+            if str(tag_session.get("status")) != "await_tag":
                 continue
-            if int(candidate.get("chat_id", 0) or 0) != int(update.effective_chat.id):
+            if int(tag_session.get("chat_id", 0) or 0) != int(update.effective_chat.id):
                 continue
-            if int(candidate.get("prompt_message_id", 0) or 0) != reply_message_id:
+            if int(tag_session.get("prompt_message_id", 0) or 0) != reply_message_id:
                 continue
-            session_id = str(candidate_id)
+            session_id = str(session_key)
             resolved_from = "reply"
             break
 
@@ -5102,10 +5015,7 @@ async def topic_access_menu_callback_handler(update: Update, context: ContextTyp
             if not tag_admin:
                 continue
             is_allowed = admin_id in allowed_admin_ids
-            if mode == "grant" and (
-                _effective_admin_level(profile) < 1
-                or _is_active_admin_candidate(context, admin_id)
-            ):
+            if mode == "grant" and _effective_admin_level(profile) < 1:
                 continue
             if (mode == "grant" and is_allowed) or (mode == "revoke" and not is_allowed):
                 continue
@@ -5161,10 +5071,7 @@ async def topic_access_menu_callback_handler(update: Update, context: ContextTyp
             or target_admin_id == str(active.get("admin_id") or "")
             or (
                 mode == "grant"
-                and (
-                    _effective_admin_level(target_profile) < 1
-                    or _is_active_admin_candidate(context, target_admin_id)
-                )
+                and _effective_admin_level(target_profile) < 1
             )
             or (mode == "grant" and is_allowed)
             or (mode == "revoke" and not is_allowed)
@@ -5198,10 +5105,7 @@ async def topic_access_menu_callback_handler(update: Update, context: ContextTyp
             or target_admin_id == str(active.get("admin_id") or "")
             or (
                 mode == "grant"
-                and (
-                    _effective_admin_level(target_profile) < 1
-                    or _is_active_admin_candidate(context, target_admin_id)
-                )
+                and _effective_admin_level(target_profile) < 1
             )
             or (mode == "grant" and is_allowed)
             or (mode == "revoke" and not is_allowed)
@@ -5776,9 +5680,8 @@ async def handle_warn_reason_message(update: Update, context: ContextTypes.DEFAU
 
 
 # ==== SECTION: Decline-request review flow ====
-# When staff decline an admin-candidate application, this flow (through
-# approve/reject_decline_callback) collects a reason and notifies the
-# applicant. unknown_chat_guard, dump_maps_handler (owner-only debug dump),
+# When staff decline an active-chat request, this flow collects a reason
+# and notifies the user. unknown_chat_guard, dump_maps_handler (owner-only debug dump),
 # and the rules-message admin commands (add/del_rule) are grouped in below
 # as the remaining misc/debug commands in this module.
 async def admin_decline_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -6542,20 +6445,6 @@ async def admin_group_message_handler(update: Update, context: ContextTypes.DEFA
         return
 
     profile = (context.application.bot_data.get("profiles", {}) or {}).get(str(update.effective_user.id), {})
-    if _is_active_admin_candidate(context, str(update.effective_user.id)):
-        try:
-            await context.bot.send_message(
-                chat_id=update.effective_chat.id,
-                message_thread_id=topic_id,
-                text="⛔️Во время кандидатуры админские права недоступны. Сообщение не отправлено.",
-            )
-        except Exception:
-            logging.exception(
-                "failed to notify candidate %s in topic %s",
-                update.effective_user.id,
-                topic_id,
-            )
-        return
     if _is_admin_muted(profile):
         remaining_minutes = _mute_remaining_minutes(profile)
         try:
@@ -7074,149 +6963,3 @@ async def suspicious_user_warn_callback(update: Update, context: ContextTypes.DE
         pass
 
     pending.pop(review_id, None)
-
-
-async def approve_candidate_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.callback_query.answer()
-    review_id = (update.callback_query.data or "").split("_")[-1]
-    pending = context.application.bot_data.setdefault("pending_admin_candidate_reviews", {})
-    review = pending.get(review_id)
-    if not review:
-        return
-
-    user_id = str(review.get("user_id"))
-    profile = _ensure_profile(context, user_id, review.get("username") or f"id{user_id}")
-    profile["admin_level"] = 1
-    profile["admin_rank"] = "Стажер"
-    profile["admin_candidate"] = False
-    profile["admin_candidate_status"] = "approved"
-    _save_profile_record(context, user_id)
-
-    state_map = context.application.bot_data.setdefault("admin_candidate_state", {})
-    state_map.pop(user_id, None)
-
-    try:
-        await context.bot.send_message(
-            chat_id=int(user_id),
-            text="✅Ваша кандидатура одобрена. Вам выданы права категории 1.",
-        )
-    except Exception:
-        pass
-
-    try:
-        await update.callback_query.message.edit_text((update.callback_query.message.text or "") + "\n\n✅Кандидат одобрен")
-    except Exception:
-        pass
-
-    pending.pop(review_id, None)
-
-
-
-async def reject_candidate_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.callback_query.answer()
-    review_id = (update.callback_query.data or "").split("_")[-1]
-    pending = context.application.bot_data.setdefault("pending_admin_candidate_reviews", {})
-    review = pending.get(review_id)
-    if not review:
-        return
-
-    prompt_kb = InlineKeyboardMarkup(
-        [[InlineKeyboardButton("отмена", callback_data=f"cancel_candidate_reject_{review_id}")]]
-    )
-    prompt = await context.bot.send_message(
-        chat_id=LOG_CHAT_ID,
-        text="Укажите причину отказа кандидату:",
-        reply_markup=prompt_kb,
-    )
-
-    pending_reject = context.application.bot_data.setdefault("pending_candidate_rejections", {})
-    pending_reject[review_id] = {
-        "admin_id": update.effective_user.id,
-        "candidate_user_id": str(review.get("user_id")),
-        "prompt_message_id": prompt.message_id,
-        "review_message_id": update.callback_query.message.message_id,
-    }
-    _save_runtime_snapshot(context)
-
-
-
-async def cancel_candidate_reject_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.callback_query.answer("Отмена")
-    review_id = (update.callback_query.data or "").split("_")[-1]
-    pending_reject = context.application.bot_data.setdefault("pending_candidate_rejections", {})
-    pending_reject.pop(review_id, None)
-    try:
-        await update.callback_query.message.delete()
-    except Exception:
-        pass
-    _save_runtime_snapshot(context)
-
-
-
-async def candidate_reject_reason_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_chat.id != LOG_CHAT_ID or not update.message or not update.effective_user:
-        return
-
-    pending_reject = context.application.bot_data.setdefault("pending_candidate_rejections", {})
-    if not pending_reject:
-        return
-
-    review_id = None
-    review = None
-    for rid, item in pending_reject.items():
-        if item.get("admin_id") == update.effective_user.id:
-            review_id = rid
-            review = item
-            break
-    if not review:
-        return
-
-    reason = (update.message.text or "").strip()
-    if not reason:
-        await update.message.reply_text("Причина не может быть пустой.")
-        raise ApplicationHandlerStop
-
-    candidate_user_id = str(review.get("candidate_user_id"))
-    profile = _ensure_profile(context, candidate_user_id, f"id{candidate_user_id}")
-    profile["tag_admin"] = ""
-    profile["biography_admin"] = ""
-    profile["tip_admin"] = ""
-    profile["admin_gender"] = ""
-    profile["admin_candidate"] = True
-    profile["admin_candidate_status"] = "onboarding"
-    _save_profile_record(context, candidate_user_id)
-
-    state_map = context.application.bot_data.setdefault("admin_candidate_state", {})
-    state_map[candidate_user_id] = {
-        "stage": "await_reject_restart",
-        "initiated_by": update.effective_user.id,
-        "initiated_by_username": update.effective_user.username or f"id{update.effective_user.id}",
-    }
-    _save_runtime_snapshot(context)
-
-    try:
-        await context.bot.send_message(
-            chat_id=int(candidate_user_id),
-            text=f'❌Заявка не была принята. Причина: "{reason}"\n\nНачните заново с этапа 1.',
-        )
-        await _send_candidate_stage_1(context, int(candidate_user_id))
-    except Exception:
-        pass
-
-    try:
-        await update.message.reply_text("✅Сообщение отправлено кандидату в ЛС.")
-    except Exception:
-        pass
-
-    pending_reviews = context.application.bot_data.setdefault("pending_admin_candidate_reviews", {})
-    pending_reviews.pop(review_id, None)
-    pending_reject.pop(review_id, None)
-
-    try:
-        if review.get("prompt_message_id"):
-            await context.bot.delete_message(chat_id=LOG_CHAT_ID, message_id=review.get("prompt_message_id"))
-    except Exception:
-        pass
-
-    _save_runtime_snapshot(context)
-    raise ApplicationHandlerStop

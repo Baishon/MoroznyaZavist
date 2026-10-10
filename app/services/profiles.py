@@ -11,7 +11,6 @@ from telegram.ext import ContextTypes
 
 from app.config import ADMIN_LEVEL_TITLES
 from app.database.requests import _save_ban_record, _save_profile_record, _save_profile_seq
-from app.states.form import ACTIVE_CANDIDATE_STAGES
 
 
 def _format_time_kyiv(timestamp: float) -> str:
@@ -390,18 +389,7 @@ def _effective_admin_level(profile: dict | None) -> int:
         return 0
 
 
-def _is_active_admin_candidate(context: ContextTypes.DEFAULT_TYPE, user_id: str) -> bool:
-    state = (context.application.bot_data.get("admin_candidate_state", {}) or {}).get(str(user_id))
-    if not state:
-        return False
-    return bool(state.get("stage") in ACTIVE_CANDIDATE_STAGES)
-
-
-def _candidate_block_text() -> str:
-    return "⚠️Сначала завершите анкету кандидата администратора."
-
-
-def _candidate_tip_choices() -> list[tuple[str, str]]:
+def _admin_tip_choices() -> list[tuple[str, str]]:
     return [
         ("chat", "🗣️Общение"),
         ("support", "❤️Поддержка"),
@@ -410,9 +398,9 @@ def _candidate_tip_choices() -> list[tuple[str, str]]:
     ]
 
 
-def _candidate_tip_value(selected_keys: list[str]) -> str:
-    labels = {key: label for key, label in _candidate_tip_choices()}
-    ordered_labels = [labels[key] for key, _ in _candidate_tip_choices() if key in set(selected_keys)]
+def _admin_tip_value(selected_keys: list[str]) -> str:
+    labels = {key: label for key, label in _admin_tip_choices()}
+    ordered_labels = [labels[key] for key, _ in _admin_tip_choices() if key in set(selected_keys)]
     return ", ".join(ordered_labels) if ordered_labels else "не указано"
 
 

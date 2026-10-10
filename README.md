@@ -16,8 +16,6 @@ app/
   database/
     models.py               # SQL schema (CREATE TABLE statements)
     requests.py              # sqlite connection + save/load helpers
-  states/
-    form.py                  # admin-candidate flow stage constants
   keyboards/
     inline.py                # inline/reply keyboard builders
   services/
@@ -29,12 +27,10 @@ app/
   handlers/
     user.py                   # private-chat / user-facing commands & callbacks
     admin.py                  # staff-group / log-chat commands & callbacks
-    candidates.py             # admin-candidate approval flow (shared by user.py and admin.py)
 ```
 
-`app/handlers/candidates.py` and `app/services/messaging.py` exist as neutral modules that both
-`handlers/user.py` and `handlers/admin.py` depend on, without depending on each other — this avoids
-a circular import between the two handler modules.
+`app/services/messaging.py` is shared by `handlers/user.py` and
+`handlers/admin.py`, without either handler module depending on the other.
 
 ## Deployment
 

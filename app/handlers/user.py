@@ -4,8 +4,6 @@ Covers: /start and the main/settings menus, bug reports, profile display and
 nickname changes, and mood/"find an admin" requests that open a work-chat
 forum topic for the user to talk to staff through. Actual message relay
 between a user and their assigned admin lives in `app.services.messaging`.
-Admin-candidate approval UI lives in `app.handlers.candidates` instead,
-shared with `admin.py`.
 """
 import asyncio
 import html
@@ -33,11 +31,8 @@ from app.config import (
     WORK_CHAT_ID,
 )
 from app.database.requests import _save_profile_record, _save_runtime_snapshot
-from app.handlers.candidates import _send_candidate_stage_1, admin_candidate_private_flow
 from app.keyboards.inline import (
     _build_active_session_keyboard,
-    _build_candidate_gender_keyboard,
-    _build_candidate_tip_keyboard,
     _build_complaint_admin_menu_keyboard,
     _build_complaint_menu_keyboard,
     _build_main_menu_keyboard,
@@ -59,13 +54,11 @@ from app.services.profiles import _set_user_blocked_bot_state
 from app.services.profiles import (
     _build_admin_stats_text,
     _build_user_stats_text,
-    _candidate_block_text,
     _ensure_profile,
     _effective_admin_level,
     _find_admin_profile_by_tag_admin,
     _is_admin_on_rest,
     _has_admin_rights_level_1_5,
-    _is_active_admin_candidate,
     _is_user_nickname_taken,
     _set_last_admin_tag_for_user,
     consume_expired_warning_count,
@@ -200,9 +193,6 @@ async def _route_bug_ticket_message(update: Update, context: ContextTypes.DEFAUL
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     if user:
-        if _is_active_admin_candidate(context, str(user.id)):
-            await update.message.reply_text(_candidate_block_text())
-            return
         if await block_if_banned(update, context):
             return
         profile = _ensure_profile(context, str(user.id), user.username or f"id{user.id}")
@@ -540,8 +530,8 @@ async def admin_search_command_guard(update: Update, context: ContextTypes.DEFAU
 
     raw_text = update.message.text or ""
     if raw_text:
-        candidate = raw_text.split()[0].lower().split("@", 1)[0]
-        if candidate in {"/restart", "/start"}:
+        command_name = raw_text.split()[0].lower().split("@", 1)[0]
+        if command_name in {"/restart", "/start"}:
             return
 
     user_id = str(update.effective_user.id)
@@ -1253,10 +1243,6 @@ async def settings_menu_handler(update: Update, context: ContextTypes.DEFAULT_TY
         return
     if await block_if_banned(update, context):
         return
-    if _is_active_admin_candidate(context, str(update.effective_user.id)):
-        await update.message.reply_text(_candidate_block_text())
-        return
-
     user_id = str(update.effective_user.id)
     profile = _ensure_profile(context, user_id, update.effective_user.username or f"id{user_id}")
     await update.message.reply_text("⚙️Раздел настроек", reply_markup=_build_settings_menu_keyboard(profile))
@@ -1453,10 +1439,6 @@ async def settings_disable_ad_handler(update: Update, context: ContextTypes.DEFA
         return
     if await block_if_banned(update, context):
         return
-    if _is_active_admin_candidate(context, str(update.effective_user.id)):
-        await update.message.reply_text(_candidate_block_text())
-        return
-
     user_id = str(update.effective_user.id)
     profile = _ensure_profile(context, user_id, update.effective_user.username or f"id{user_id}")
     if not bool(profile.get("ad_disable_access", False)):
@@ -1479,10 +1461,6 @@ async def settings_enable_ad_handler(update: Update, context: ContextTypes.DEFAU
         return
     if await block_if_banned(update, context):
         return
-    if _is_active_admin_candidate(context, str(update.effective_user.id)):
-        await update.message.reply_text(_candidate_block_text())
-        return
-
     user_id = str(update.effective_user.id)
     profile = _ensure_profile(context, user_id, update.effective_user.username or f"id{user_id}")
     if not bool(profile.get("ad_disable_enabled", False)):
@@ -1556,10 +1534,6 @@ async def settings_complaint_menu_handler(update: Update, context: ContextTypes.
         return
     if await block_if_banned(update, context):
         return
-    if _is_active_admin_candidate(context, str(update.effective_user.id)):
-        await update.message.reply_text(_candidate_block_text())
-        return
-
     await update.message.reply_text("💬Раздел жалоб", reply_markup=_build_complaint_menu_keyboard())
 
 
@@ -2140,33 +2114,6 @@ async def restart_command_handler(update: Update, context: ContextTypes.DEFAULT_
         await send_active_session_menu(update, context)
         return
 
-    state = (context.application.bot_data.get("admin_candidate_state", {}) or {}).get(user_id)
-    if state:
-        stage = str(state.get("stage") or "")
-        if stage in {"await_tag", "await_reject_restart"}:
-            await _send_candidate_stage_1(context, int(user_id))
-            return
-        if stage == "await_bio":
-            await update.message.reply_text("🔮Теперь напишите биографию своего персонажа (пример: любимое хобби, вредные привычки, распорядок дня )")
-            return
-        if stage == "await_tip_admin":
-            selected = list(state.get("tip_admin_selected") or [])
-            await update.message.reply_text(
-                "💬Теперь укажите тип общения которые вы больше всего можете обсуждать с будущими пользователями (можно выбрать все четыре)",
-                reply_markup=_build_candidate_tip_keyboard(user_id, selected),
-            )
-            return
-        if stage == "await_admin_gender":
-            await update.message.reply_text(
-                "**Пожалуйста, укажите Ваш пол**\nЭто надо чтобы пользователи знали с кем будут вести диалог",
-                parse_mode=ParseMode.MARKDOWN,
-                reply_markup=_build_candidate_gender_keyboard(user_id),
-            )
-            return
-        if stage == "pending_review":
-            await update.message.reply_text("✅Ваша заявка уже отправлена на обработку старшей администрации.")
-            return
-
     step = context.user_data.get("profile", 0)
     last_step = context.user_data.get("last_category_step")
     if last_step in {0, 1, 2}:
@@ -2184,10 +2131,6 @@ async def restart_command_handler(update: Update, context: ContextTypes.DEFAULT_
 async def choose_admin_gender_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await block_if_banned(update, context):
         return
-    if _is_active_admin_candidate(context, str(update.effective_user.id)):
-        await update.message.reply_text(_candidate_block_text())
-        return
-
     choice = update.message.text
     flow_step = context.user_data.get("profile")
     if choice in {"👨 Мальчик", "👩 Девочка", "◀️ Назад"} and flow_step != 1:
@@ -2220,10 +2163,6 @@ async def choose_admin_gender_callback(update: Update, context: ContextTypes.DEF
 async def send_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await block_if_banned(update, context):
         return
-    if _is_active_admin_candidate(context, str(update.effective_user.id)):
-        await update.message.reply_text(_candidate_block_text())
-        return
-
     user = update.effective_user
     user_id = str(user.id)
     profile = _ensure_profile(context, user_id, user.username or f"id{user.id}")
@@ -2292,10 +2231,6 @@ async def cancel_nickname_change_callback(update: Update, context: ContextTypes.
 async def send_admin_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await block_if_banned(update, context):
         return
-    if _is_active_admin_candidate(context, str(update.effective_user.id)):
-        await update.message.reply_text(_candidate_block_text())
-        return
-
     user = update.effective_user
     user_id = str(user.id)
     profile = _ensure_profile(context, user_id, user.username or f"id{user.id}")
@@ -2592,9 +2527,6 @@ def _build_new_user_topic_message(
 
 async def choose_mood_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await block_if_banned(update, context):
-        return
-    if _is_active_admin_candidate(context, str(update.effective_user.id)):
-        await update.message.reply_text(_candidate_block_text())
         return
 
     choice = update.message.text
@@ -3216,9 +3148,6 @@ async def user_private_message_handler(update: Update, context: ContextTypes.DEF
     if await _route_bug_ticket_message(update, context):
         return
 
-    if await admin_candidate_private_flow(update, context):
-        return
-
     pending_nickname = context.user_data.get("pending_nickname_change")
     if pending_nickname and pending_nickname.get("active"):
         nickname_text = (update.message.text or "").strip()
@@ -3607,9 +3536,6 @@ async def find_admin_menu_callback(update: Update, context: ContextTypes.DEFAULT
     )
     if _has_admin_rights_level_1_5(requester_profile):
         await update.message.reply_text("⛔ Администратору нельзя искать администратора для начала сессии.")
-        return
-    if _is_active_admin_candidate(context, user_id):
-        await update.message.reply_text(_candidate_block_text())
         return
     blocked, block_message = _check_admin_search_cooldown(context, user_id, requester_profile)
     if blocked:
