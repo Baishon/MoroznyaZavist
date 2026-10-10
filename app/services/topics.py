@@ -3,7 +3,16 @@ import re
 
 from telegram.ext import ContextTypes
 
-from app.config import AUTO_ADMIN_CHAT_ID, COOPERATION_CHAT_ID, LOG_CHAT_ID, NORMAL_CHAT_ID, RULES_CHAT_ID, TRUSTED_ADMIN_CHAT_ID, WORK_CHAT_ID
+from app.config import (
+    ADDITIONAL_TRUSTED_ADMIN_CHAT_ID,
+    AUTO_ADMIN_CHAT_ID,
+    COOPERATION_CHAT_ID,
+    LOG_CHAT_ID,
+    NORMAL_CHAT_ID,
+    RULES_CHAT_ID,
+    TRUSTED_ADMIN_CHAT_ID,
+    WORK_CHAT_ID,
+)
 
 
 def _special_admin_chat_ids() -> set[int]:
@@ -13,6 +22,7 @@ def _special_admin_chat_ids() -> set[int]:
         RULES_CHAT_ID,
         COOPERATION_CHAT_ID,
         TRUSTED_ADMIN_CHAT_ID,
+        ADDITIONAL_TRUSTED_ADMIN_CHAT_ID,
         NORMAL_CHAT_ID,
         AUTO_ADMIN_CHAT_ID,
     }
