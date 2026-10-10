@@ -674,7 +674,8 @@ async def _finish_admin_demotion(
     target_user_id: str,
     target_identifier: str,
     notify_and_block: bool,
-) -> None:
+) -> list[tuple[int, str]]:
+    special_chat_failures = []
     profiles = context.application.bot_data.setdefault("profiles", {})
     profile = profiles.get(str(target_user_id))
     if not profile:
@@ -771,12 +772,16 @@ async def _finish_admin_demotion(
                     user_id=int(target_user_id),
                     only_if_banned=True,
                 )
-            except Exception:
-                logging.exception(
-                    "Failed to remove demoted admin %s from special chat %s",
-                    target_user_id,
-                    special_chat_id,
-                )
+            except Exception as error:
+                if isinstance(error, BadRequest) and "chat not found" in str(error).casefold():
+                    special_chat_failures.append((special_chat_id, "Telegram не нашёл чат"))
+                else:
+                    special_chat_failures.append((special_chat_id, str(error)))
+                    logging.exception(
+                        "Failed to remove demoted admin %s from special chat %s",
+                        target_user_id,
+                        special_chat_id,
+                    )
 
         await _apply_ban(
             context,
@@ -789,6 +794,7 @@ async def _finish_admin_demotion(
         )
 
     _save_runtime_snapshot(context)
+    return special_chat_failures
 
 
 async def makeadmin_demotion_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -840,7 +846,7 @@ async def makeadmin_demotion_callback(update: Update, context: ContextTypes.DEFA
     await query.answer("Снимаю админские права…")
     notify_and_block = action == "notify"
     try:
-        await _finish_admin_demotion(
+        special_chat_failures = await _finish_admin_demotion(
             context,
             target_user_id,
             str(request.get("target_identifier") or target_user_id),
@@ -860,8 +866,19 @@ async def makeadmin_demotion_callback(update: Update, context: ContextTypes.DEFA
         if notify_and_block
         else "без уведомления и блокировки, с завершением сессий"
     )
+    result_text = f'Админские права пользователя "{request.get("target_identifier")}" сняты {mode_text}.'
+    if special_chat_failures:
+        failed_chats = "\n".join(
+            f"• Чат {chat_id}: {reason}."
+            for chat_id, reason in special_chat_failures
+        )
+        result_text += (
+            "\n\nНе удалось исключить администратора из некоторых служебных чатов:\n"
+            f"{failed_chats}\n"
+            "Проверьте ID чатов и права бота. Снятие прав и блокировка в боте выполнены."
+        )
     await query.edit_message_text(
-        f'Админские права пользователя "{request.get("target_identifier")}" сняты {mode_text}.'
+        result_text
     )
 
 
