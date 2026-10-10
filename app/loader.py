@@ -358,7 +358,13 @@ def build_application():
         ),
         group=-1,
     )
-    app.add_handler(MessageHandler(filters.TEXT & filters.Chat(LOG_CHAT_ID), log_command_router), group=-1)
+    app.add_handler(
+        MessageHandler(
+            filters.TEXT & filters.Chat([LOG_CHAT_ID, TRUSTED_ADMIN_CHAT_ID]),
+            log_command_router,
+        ),
+        group=-1,
+    )
     app.add_handler(
         MessageHandler(
             filters.Regex("^📊Моя норма$") & filters.Chat(TRUSTED_ADMIN_CHAT_ID),
