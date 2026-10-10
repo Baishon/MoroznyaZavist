@@ -87,6 +87,7 @@ from app.handlers.admin import (
     log_command_router,
     log_ping_handler,
     makeadmin_command_handler,
+    makeadmin_demotion_callback,
     pm_command_handler,
     prava_command_handler,
     restart_chat_menu_handler,
@@ -469,6 +470,7 @@ def build_application():
     app.add_handler(CallbackQueryHandler(brawl_stars_start_callback, pattern=r"^brawl_stars_start$"))
     app.add_handler(CallbackQueryHandler(riddles_callback, pattern=r"^riddles_open$"))
     app.add_handler(CallbackQueryHandler(quests_exit_callback, pattern=r"^quests_exit$"))
+    app.add_handler(CallbackQueryHandler(makeadmin_demotion_callback, pattern=r"^makeadmin_demote_(?:notify|silent|cancel)_[a-f0-9]{32}$"))
     app.add_handler(CallbackQueryHandler(setprefix_select_callback, pattern=r"^prefix_select_\d+_[a-z]+$"))
     app.add_handler(CallbackQueryHandler(setprefix_apply_callback, pattern=r"^prefix_apply_\d+$"))
     app.add_handler(CallbackQueryHandler(astats_tag_change_callback, pattern=r"^astats_tag_change_\d+$"))
