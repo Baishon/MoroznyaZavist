@@ -17,7 +17,14 @@ from telegram.error import TimedOut
 from telegram.ext import ApplicationBuilder, CallbackQueryHandler, ChatMemberHandler, CommandHandler, MessageHandler, MessageReactionHandler, filters
 
 from app import logging_setup  # noqa: F401  (side effect: attaches Telegram log handler)
-from app.config import AUTO_ADMIN_CHAT_ID, COOPERATION_CHAT_ID, LOG_CHAT_ID, TOKEN, TRUSTED_ADMIN_CHAT_ID, WORK_CHAT_ID
+from app.config import (
+    AUTO_ADMIN_CHAT_ID,
+    COOPERATION_CHAT_ID,
+    LOG_CHAT_ID,
+    TOKEN,
+    TRUSTED_ADMIN_CHAT_IDS,
+    WORK_CHAT_ID,
+)
 from app.database.requests import (
     _init_persistent_storage,
     _save_incoming_message,
@@ -361,14 +368,14 @@ def build_application():
     )
     app.add_handler(
         MessageHandler(
-            filters.TEXT & filters.Chat([LOG_CHAT_ID, TRUSTED_ADMIN_CHAT_ID]),
+            filters.TEXT & filters.Chat([LOG_CHAT_ID, *TRUSTED_ADMIN_CHAT_IDS]),
             log_command_router,
         ),
         group=-1,
     )
     app.add_handler(
         MessageHandler(
-            filters.Regex("^📊Моя норма$") & filters.Chat(TRUSTED_ADMIN_CHAT_ID),
+            filters.Regex("^📊Моя норма$") & filters.Chat(list(TRUSTED_ADMIN_CHAT_IDS)),
             my_admin_norm_handler,
         ),
         group=-1,
@@ -414,7 +421,7 @@ def build_application():
     app.add_handler(CommandHandler("restart", restart_command_handler, filters=filters.ChatType.PRIVATE))
     app.add_handler(
         MessageHandler(
-            filters.Regex(r"^/restartchat(?:@[\w_]+)?$") & filters.Chat(TRUSTED_ADMIN_CHAT_ID),
+            filters.Regex(r"^/restartchat(?:@[\w_]+)?$") & filters.Chat(list(TRUSTED_ADMIN_CHAT_IDS)),
             restart_chat_menu_handler,
         ),
         group=-1,

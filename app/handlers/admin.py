@@ -33,7 +33,7 @@ from app.config import (
     OWNER_ID,
     RULES_CHAT_ID,
     RULES_THREAD_ID,
-    TRUSTED_ADMIN_CHAT_ID,
+    TRUSTED_ADMIN_CHAT_IDS,
     WORK_CHAT_ID,
 )
 from app.database.requests import _save_ban_record, _save_profile_record, _save_runtime_snapshot
@@ -388,7 +388,7 @@ async def topic_command_handler(update: Update, context: ContextTypes.DEFAULT_TY
     if not update.message or not update.effective_user:
         return
 
-    allowed_topic_chats = {WORK_CHAT_ID, LOG_CHAT_ID, COOPERATION_CHAT_ID, TRUSTED_ADMIN_CHAT_ID}
+    allowed_topic_chats = {WORK_CHAT_ID, LOG_CHAT_ID, COOPERATION_CHAT_ID} | TRUSTED_ADMIN_CHAT_IDS
     if update.effective_chat.id not in allowed_topic_chats:
         await update.message.reply_text("Команда /topic доступна только в спец-группах.")
         return
@@ -1075,7 +1075,7 @@ async def admin_mute_guard_handler(update: Update, context: ContextTypes.DEFAULT
 # cooperation_admin_command_guard/sp/anpiar manage the
 # cooperation-prefix ad text an admin can post in the cooperation chat.
 def _is_log_or_trusted_admin_chat(chat_id: int) -> bool:
-    return chat_id in {LOG_CHAT_ID, TRUSTED_ADMIN_CHAT_ID}
+    return chat_id == LOG_CHAT_ID or chat_id in TRUSTED_ADMIN_CHAT_IDS
 
 
 async def log_command_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1159,7 +1159,7 @@ async def log_ping_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def restart_chat_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.effective_message
-    if not message or not update.effective_chat or update.effective_chat.id != TRUSTED_ADMIN_CHAT_ID:
+    if not message or not update.effective_chat or update.effective_chat.id not in TRUSTED_ADMIN_CHAT_IDS:
         return
     await message.reply_text(
         "✅Подменю чата общения обновлено.",
@@ -1168,7 +1168,7 @@ async def restart_chat_menu_handler(update: Update, context: ContextTypes.DEFAUL
 
 
 async def my_admin_norm_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message or not update.effective_chat or update.effective_chat.id != TRUSTED_ADMIN_CHAT_ID:
+    if not update.message or not update.effective_chat or update.effective_chat.id not in TRUSTED_ADMIN_CHAT_IDS:
         return
     if not update.effective_user or update.effective_user.is_bot:
         return
@@ -1387,7 +1387,7 @@ async def givetopic_command_handler(update: Update, context: ContextTypes.DEFAUL
     if (
         not update.message
         or not update.effective_user
-        or update.effective_chat.id not in {LOG_CHAT_ID, WORK_CHAT_ID, TRUSTED_ADMIN_CHAT_ID}
+        or update.effective_chat.id not in ({LOG_CHAT_ID, WORK_CHAT_ID} | TRUSTED_ADMIN_CHAT_IDS)
     ):
         return
 
@@ -1470,7 +1470,7 @@ async def taketopic_command_handler(update: Update, context: ContextTypes.DEFAUL
     if (
         not update.message
         or not update.effective_user
-        or update.effective_chat.id not in {LOG_CHAT_ID, WORK_CHAT_ID, TRUSTED_ADMIN_CHAT_ID}
+        or update.effective_chat.id not in ({LOG_CHAT_ID, WORK_CHAT_ID} | TRUSTED_ADMIN_CHAT_IDS)
     ):
         return
 
@@ -2043,7 +2043,7 @@ async def anpiar_command_handler(update: Update, context: ContextTypes.DEFAULT_T
 # and every astats_*_callback below render and edit an admin's profile card
 # (tag, bio, gender, cooperation tip text) via app.services.profiles.
 async def warn_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_chat.id not in {LOG_CHAT_ID, WORK_CHAT_ID, TRUSTED_ADMIN_CHAT_ID} or not update.message:
+    if update.effective_chat.id not in ({LOG_CHAT_ID, WORK_CHAT_ID} | TRUSTED_ADMIN_CHAT_IDS) or not update.message:
         return
 
     if not _can_use_moderation_commands(context, str(update.effective_user.id)):
@@ -2119,7 +2119,7 @@ async def warn_command_handler(update: Update, context: ContextTypes.DEFAULT_TYP
 
 
 async def awarn_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message or update.effective_chat.id not in {LOG_CHAT_ID, WORK_CHAT_ID, TRUSTED_ADMIN_CHAT_ID}:
+    if not update.message or update.effective_chat.id not in ({LOG_CHAT_ID, WORK_CHAT_ID} | TRUSTED_ADMIN_CHAT_IDS):
         return
     if not _can_use_moderation_commands(context, str(update.effective_user.id)):
         await update.message.reply_text("Команда доступна только администраторам 2 категории и выше.")
@@ -2213,7 +2213,7 @@ async def awarn_command_handler(update: Update, context: ContextTypes.DEFAULT_TY
 
 
 async def aunwarn_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message or update.effective_chat.id not in {LOG_CHAT_ID, WORK_CHAT_ID, TRUSTED_ADMIN_CHAT_ID}:
+    if not update.message or update.effective_chat.id not in ({LOG_CHAT_ID, WORK_CHAT_ID} | TRUSTED_ADMIN_CHAT_IDS):
         return
     if not _can_use_moderation_commands(context, str(update.effective_user.id)):
         await update.message.reply_text("Команда доступна только администраторам 2 категории и выше.")
@@ -3036,7 +3036,7 @@ async def astats_command_handler(update: Update, context: ContextTypes.DEFAULT_T
         )
         return
 
-    if update.effective_chat.id == TRUSTED_ADMIN_CHAT_ID:
+    if update.effective_chat.id in TRUSTED_ADMIN_CHAT_IDS:
         await update.message.reply_text(
             _build_admin_stats_text(str(target_user_id), profile),
             parse_mode=ParseMode.HTML,
@@ -4721,7 +4721,7 @@ async def setprefix_apply_callback(update: Update, context: ContextTypes.DEFAULT
 # flow (issued from a user's profile card) apply moderation actions via
 # app.services.bans and persist through app.database.requests.
 async def unwarn_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_chat.id not in {LOG_CHAT_ID, WORK_CHAT_ID, TRUSTED_ADMIN_CHAT_ID} or not update.message:
+    if update.effective_chat.id not in ({LOG_CHAT_ID, WORK_CHAT_ID} | TRUSTED_ADMIN_CHAT_IDS) or not update.message:
         return
 
     if not _can_use_moderation_commands(context, str(update.effective_user.id)):
@@ -6634,7 +6634,7 @@ async def admin_group_message_handler(update: Update, context: ContextTypes.DEFA
 
     # Track registered admins in the work and trusted admin chats. Messages in
     # the trusted chat are observed only for online status and never forwarded.
-    if update.effective_chat.id not in {WORK_CHAT_ID, TRUSTED_ADMIN_CHAT_ID}:
+    if update.effective_chat.id != WORK_CHAT_ID and update.effective_chat.id not in TRUSTED_ADMIN_CHAT_IDS:
         return
 
     # Ignore bots
@@ -6642,7 +6642,7 @@ async def admin_group_message_handler(update: Update, context: ContextTypes.DEFA
         return
     profiles = context.application.bot_data.get("profiles", {}) or {}
     existing_profile = profiles.get(str(update.effective_user.id))
-    if update.effective_chat.id == TRUSTED_ADMIN_CHAT_ID:
+    if update.effective_chat.id in TRUSTED_ADMIN_CHAT_IDS:
         if not existing_profile or _effective_admin_level(existing_profile) < 1:
             return
         activity_profile = existing_profile
@@ -6655,7 +6655,7 @@ async def admin_group_message_handler(update: Update, context: ContextTypes.DEFA
     group_activity = context.application.bot_data.setdefault("admin_work_chat_activity", {})
     group_activity[str(update.effective_user.id)] = time.time()
     activity_profile["last_work_chat_message_at"] = group_activity[str(update.effective_user.id)]
-    if update.effective_chat.id == TRUSTED_ADMIN_CHAT_ID:
+    if update.effective_chat.id in TRUSTED_ADMIN_CHAT_IDS:
         _save_profile_record(context, str(update.effective_user.id))
         return
 
