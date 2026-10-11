@@ -26,7 +26,7 @@ from app.config import (
     ADMIN_LEVEL_TITLES,
     LOG_CHAT_ID,
     OFFICIAL_CHANNEL_ID,
-    TRUSTED_ADMIN_CHAT_ID,
+    TRUSTED_ADMIN_CHAT_IDS,
     WORK_CHAT_ID,
 )
 from app.database.requests import _save_profile_record, _save_runtime_snapshot
@@ -581,7 +581,7 @@ async def agreement_message_handler(update: Update, context: ContextTypes.DEFAUL
         return
 
     # Keep the trusted admin chat quiet for users who have not accepted the terms.
-    if update.effective_chat and update.effective_chat.id == TRUSTED_ADMIN_CHAT_ID:
+    if update.effective_chat and update.effective_chat.id in TRUSTED_ADMIN_CHAT_IDS:
         raise ApplicationHandlerStop
 
     # Send agreement as a private message
@@ -626,7 +626,7 @@ async def agreement_callback_guard(update: Update, context: ContextTypes.DEFAULT
     if agreed == 1 and agreed_version == AGREEMENT_VERSION:
         return
 
-    if query.message and query.message.chat.id == TRUSTED_ADMIN_CHAT_ID:
+    if query.message and query.message.chat.id in TRUSTED_ADMIN_CHAT_IDS:
         raise ApplicationHandlerStop
 
     # Notify user and send PM with agreement
