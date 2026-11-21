@@ -8,39 +8,47 @@ between a user and their assigned admin lives in `app.services.messaging`.
 import asyncio
 import html
 import logging
+import re
 import time
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from telegram import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
+    InputMediaPhoto,
     KeyboardButton,
     ReplyKeyboardMarkup,
     ReplyKeyboardRemove,
     Update,
 )
 from telegram.constants import ChatType, ParseMode
-from telegram.error import BadRequest, Forbidden
+from telegram.error import BadRequest, Forbidden, TelegramError
 from telegram.ext import ApplicationHandlerStop, ContextTypes
 
 from app.config import (
     ADMIN_LEVEL_TITLES,
+    ACADEMY_CHAT_ID,
+    CANDIDATE_REVIEW_CHAT_ID,
+    CANDIDATE_REVIEW_THREAD_ID,
     LOG_CHAT_ID,
     OFFICIAL_CHANNEL_ID,
     TRUSTED_ADMIN_CHAT_IDS,
     WORK_CHAT_ID,
 )
-from app.database.requests import _save_profile_record, _save_runtime_snapshot
+from app.database.requests import (
+    _close_user_session,
+    _record_user_action,
+    _save_profile_record,
+    _save_runtime_snapshot,
+)
 from app.keyboards.inline import (
     _build_active_session_keyboard,
     _build_complaint_admin_menu_keyboard,
     _build_complaint_menu_keyboard,
     _build_main_menu_keyboard,
+    _build_main_menu_inline_keyboard,
     _build_mood_selection_keyboard,
-    _build_quests_menu_keyboard,
-    _build_quests_section_keyboard,
-    _build_game_quests_keyboard,
-    _build_brawl_stars_keyboard,
     _build_request_gender_keyboard,
     _build_session_settings_keyboard,
     _build_session_mood_selection_keyboard,
@@ -54,8 +62,8 @@ from app.services.profiles import _set_user_blocked_bot_state
 from app.services.profiles import (
     _build_admin_stats_text,
     _build_user_stats_text,
-    _ensure_profile,
     _effective_admin_level,
+    _ensure_profile,
     _find_admin_profile_by_tag_admin,
     _is_admin_on_rest,
     _has_admin_rights_level_1_5,
@@ -64,6 +72,7 @@ from app.services.profiles import (
     consume_expired_warning_count,
     refresh_timed_warnings,
 )
+from app.services.web_auth import WEB_AUTH_STORE
 from app.services.topics import (
     _build_paused_topic_name,
     _has_suspicious_username,
@@ -190,12 +199,601 @@ async def _route_bug_ticket_message(update: Update, context: ContextTypes.DEFAUL
     return True
 
 
+IMAGES_DIR = Path(__file__).resolve().parents[1] / "images"
+MAIN_MENU_IMAGE_PATH = IMAGES_DIR / "okak.png"
+CANDIDATE_IMAGE_PATH = IMAGES_DIR / "kandidat.png"
+PROFILE_IMAGE_PATH = IMAGES_DIR / "profile.png"
+
+CANDIDATE_INTRO_CAPTION = (
+    "# ❄️ РАЗДЕЛ КАНДИДАТУР\n"
+    "{name}, добро пожаловать в раздел кандидатур! Здесь начинается твой путь к вступлению в администрацию. "
+    "Прежде чем стать частью команды, тебе предстоит пройти несколько этапов, которые помогут познакомиться "
+    "с внутренними правилами, обязанностями и принципами работы администрации.\n\n"
+    "Что тебя ожидает:\n\n"
+    "❖ I. Инструктаж - знакомство с правилами администрации, основными обязанностями, порядком работы и "
+    "требованиями к её членам.\n\n"
+    "❖ II. Начало работы - после прохождения инструктажа ты приступишь к выполнению своих обязанностей, "
+    "получишь необходимые задачи и станешь частью административной команды.\n\n"
+    "Мы ожидаем от каждого кандидата ответственного подхода, активности, уважения к коллегам и готовности "
+    "развиваться.\n\n"
+    "Если вы готовы помогать таким пользователям как вы, нажимайте на кнопку ниже!"
+)
+
+
+def _candidate_intro_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [[
+            InlineKeyboardButton("Продолжить", callback_data="candidate_continue"),
+            InlineKeyboardButton("Назад", callback_data="candidate_back"),
+        ]]
+    )
+
+
+def _candidate_confirmation_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [[
+            InlineKeyboardButton("✅ Подтверждаю", callback_data="candidate_confirm"),
+            InlineKeyboardButton("Назад", callback_data="candidate_back"),
+        ]]
+    )
+
+
+_CANDIDATE_SPHERES = {
+    "chat": "🗣️ Общение",
+    "support": "❤️ Поддержка",
+    "flirt": "🔥 Флирт",
+    "aggressive": "👹 Агрессив",
+}
+
+
+def _candidate_flow_keyboard(user_id: str, step: int, selected: list[str] | None = None):
+    if step == 3:
+        selected_set = set(selected or [])
+        buttons = [
+            InlineKeyboardButton(
+                f"{'✅ ' if key in selected_set else ''}{label}",
+                callback_data=f"candidate_scope_toggle_{user_id}_{key}",
+            )
+            for key, label in _CANDIDATE_SPHERES.items()
+        ]
+        return InlineKeyboardMarkup(
+            [
+                buttons[:2],
+                buttons[2:],
+                [InlineKeyboardButton("▶️ Продолжить", callback_data=f"candidate_scope_continue_{user_id}")],
+            ]
+        )
+    if step == 5:
+        return InlineKeyboardMarkup(
+            [[InlineKeyboardButton("Да", callback_data=f"candidate_privacy_yes_{user_id}")]]
+        )
+    if step == 6:
+        return InlineKeyboardMarkup(
+            [[
+                InlineKeyboardButton("✅ Да, отправить", callback_data=f"candidate_submit_yes_{user_id}"),
+                InlineKeyboardButton("Нет", callback_data=f"candidate_submit_no_{user_id}"),
+            ]]
+        )
+    return None
+
+
+def _candidate_step_prompt(profile: dict, user_id: str) -> tuple[str, InlineKeyboardMarkup | None]:
+    step = int(profile.get("candidate_application_step", 1) or 1)
+    prompts = {
+        1: "ЭТАП 1/5. Напишите ваше настоящее имя.",
+        2: "ЭТАП 2/5. Напишите ваш полный возраст.",
+        3: "ЭТАП 3/5. Выберите интересующие сферы общения и нажмите «Продолжить».",
+        4: "ЭТАП 4/5. Есть ли у вас опыт администрирования в подобных ботах? Расскажите, где вы раньше работали.",
+        5: "ЭТАП 5/5. Готовы ли вы сохранять анонимность и не распространять информацию администрации за пределами официальных админ-чатов?",
+        6: "Проверьте ответы. Подтвердите, что хотите подать заявку в академию и начать инструктаж.",
+    }
+    return prompts.get(step, prompts[1]), _candidate_flow_keyboard(
+        user_id,
+        step,
+        profile.get("candidate_application_spheres", []),
+    )
+
+
+def _candidate_application_lock_message(profile: dict) -> str | None:
+    status = profile.get("candidate_application_status")
+    if status == "active":
+        return "Вы уже проходите этап кандидатуры. Используйте /restart или /stop."
+    if status == "pending_review":
+        return "Ваша заявка уже отправлена и ожидает рассмотрения."
+    if status == "reviewing":
+        return "Ваша заявка рассматривается."
+    if status == "accepted":
+        return "Ваша кандидатура уже принята."
+    if status == "rejected":
+        try:
+            retry_at = float(profile.get("candidate_application_reapply_after", 0) or 0)
+        except (TypeError, ValueError):
+            retry_at = 0
+        if retry_at > time.time():
+            return "После отклонения заявки повторная подача будет доступна через 7 дней."
+    return None
+
+
+def _is_candidate_flow_callback(callback_data: str, user_id: str) -> bool:
+    return bool(
+        re.fullmatch(
+            rf"candidate_(?:scope_toggle_{re.escape(user_id)}_(?:chat|support|flirt|aggressive)|"
+            rf"scope_continue_{re.escape(user_id)}|privacy_yes_{re.escape(user_id)}|"
+            rf"submit_(?:yes|no)_{re.escape(user_id)})",
+            callback_data,
+        )
+    )
+
+
+async def _edit_candidate_message(
+    query,
+    caption: str,
+    reply_markup: InlineKeyboardMarkup | None,
+) -> None:
+    if not query.message or not query.message.photo:
+        raise ValueError("Candidate flow must be opened from the main menu photo")
+    with CANDIDATE_IMAGE_PATH.open("rb") as photo:
+        await query.message.edit_media(
+            media=InputMediaPhoto(media=photo, caption=caption),
+            reply_markup=reply_markup,
+        )
+
+
+async def show_candidate_intro_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    user = update.effective_user
+    if not query or not user or not query.message:
+        return
+    profile = _ensure_profile(context, str(user.id), user.username or f"id{user.id}")
+    lock_message = _candidate_application_lock_message(profile)
+    if lock_message:
+        await query.answer(lock_message, show_alert=True)
+        return
+    if _has_admin_rights_level_1_5(profile):
+        await query.message.reply_text("У вас уже есть административные права.")
+        return
+    try:
+        await _edit_candidate_message(
+            query,
+            CANDIDATE_INTRO_CAPTION.format(name=user.full_name),
+            _candidate_intro_keyboard(),
+        )
+    except (OSError, TelegramError, ValueError):
+        logging.exception("Failed to open admin candidate introduction for user %s", user.id)
+        await query.message.reply_text("Не удалось открыть раздел кандидатур. Попробуйте ещё раз.")
+
+
+async def candidate_continue_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    user = update.effective_user
+    if not query or not user or not query.message:
+        return
+    if not update.effective_chat or update.effective_chat.type != ChatType.PRIVATE:
+        await query.answer("Откройте раздел в личном чате с ботом.", show_alert=True)
+        return
+    if await block_if_banned(update, context):
+        return
+    await query.answer()
+    await _edit_candidate_message(
+        query,
+        "⚠️ ПЕРЕД НАЧАЛОМ КАНДИДАТУРЫ\n\n"
+        "Для начала этапа все ваши активные сессии с пользователями и администраторами будут завершены. "
+        "После подтверждения команды и другие функции бота будут временно недоступны, кроме /restart и /stop.\n\n"
+        "Продолжить?",
+        _candidate_confirmation_keyboard(),
+    )
+
+
+async def candidate_back_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    user = update.effective_user
+    if not query or not user:
+        return
+    if not update.effective_chat or update.effective_chat.type != ChatType.PRIVATE:
+        await query.answer("Откройте раздел в личном чате с ботом.", show_alert=True)
+        return
+    await query.answer()
+    await return_to_main_menu_callback(update, context)
+
+
+async def _finish_candidate_sessions(
+    context: ContextTypes.DEFAULT_TYPE,
+    candidate_id: str,
+) -> None:
+    active_chats = context.application.bot_data.setdefault("active_chats", {})
+    topic_user_map = context.application.bot_data.setdefault("topic_user_map", {})
+    for session_user_key, session in list(active_chats.items()):
+        if not isinstance(session, dict) or not session.get("active"):
+            continue
+        session_user_id = str(session_user_key)
+        is_candidate_user = session_user_id == candidate_id
+        is_candidate_admin = str(session.get("admin_id") or "") == candidate_id
+        if not is_candidate_user and not is_candidate_admin:
+            continue
+
+        chat_id = session.get("chat_id")
+        topic_id = session.get("topic_id")
+        if chat_id and topic_id is not None:
+            try:
+                await context.bot.send_message(
+                    chat_id=int(chat_id),
+                    message_thread_id=int(topic_id),
+                    text="Сессия завершена: пользователь начал этап кандидатуры.",
+                )
+            except TelegramError:
+                logging.exception(
+                    "Failed to notify topic %s about candidate session closure",
+                    topic_id,
+                )
+            try:
+                await context.bot.edit_forum_topic(
+                    chat_id=int(chat_id),
+                    message_thread_id=int(topic_id),
+                    name=f"{session.get('topic_base_name') or f'id{session_user_id}'} (Сессия завершена)",
+                )
+            except TelegramError:
+                logging.exception(
+                    "Failed to rename topic %s after candidate session closure",
+                    topic_id,
+                )
+            topic_user_map.pop(topic_id, None)
+            topic_user_map.pop(str(topic_id), None)
+
+        counterpart_id = (
+            str(session.get("admin_id") or "")
+            if is_candidate_user
+            else session_user_id
+        )
+        if counterpart_id and counterpart_id != candidate_id:
+            try:
+                await context.bot.send_message(
+                    chat_id=int(counterpart_id),
+                    text="Ваша сессия завершена: собеседник начал этап кандидатуры.",
+                )
+            except TelegramError:
+                logging.exception(
+                    "Failed to notify user %s about candidate session closure",
+                    counterpart_id,
+                )
+
+        _close_user_session(context, session_user_id, session)
+        active_chats.pop(session_user_key, None)
+
+
+async def candidate_confirm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    user = update.effective_user
+    if not query or not user or not query.message:
+        return
+    if (
+        not update.effective_chat
+        or update.effective_chat.type != ChatType.PRIVATE
+        or update.effective_chat.id != user.id
+    ):
+        await query.answer("Кандидатуру можно начать только в личном чате с ботом.", show_alert=True)
+        return
+    if await block_if_banned(update, context):
+        return
+
+    profile = _ensure_profile(context, str(user.id), user.username or f"id{user.id}")
+    if profile.get("candidate_application_status") == "active":
+        await query.answer("Кандидатура уже начата.", show_alert=True)
+        return
+    lock_message = _candidate_application_lock_message(profile)
+    if lock_message:
+        await query.answer(lock_message, show_alert=True)
+        return
+    if _has_admin_rights_level_1_5(profile):
+        await query.answer("У вас уже есть административные права.", show_alert=True)
+        return
+
+    await query.answer("Завершаем активные сессии и начинаем кандидатуру…")
+    user_id = str(user.id)
+    await _finish_candidate_sessions(context, user_id)
+    profile["candidate_application_status"] = "active"
+    profile["candidate_application_started_at"] = datetime.now(timezone.utc).isoformat()
+    profile["candidate_application_step"] = 1
+    profile["candidate_application_spheres"] = []
+    _save_profile_record(context, user_id)
+    _record_user_action(
+        context,
+        user_id,
+        "Начало кандидатуры",
+        details="Все активные сессии завершены; начата анкета кандидата",
+    )
+    _save_runtime_snapshot(context)
+
+    stage_caption, _ = _candidate_step_prompt(profile, user_id)
+    try:
+        with CANDIDATE_IMAGE_PATH.open("rb") as photo:
+            await query.message.edit_media(
+                media=InputMediaPhoto(media=photo, caption=stage_caption),
+                reply_markup=None,
+            )
+    except (OSError, TelegramError):
+        logging.exception("Failed to show candidate stage to user %s", user_id)
+        await query.message.reply_text(stage_caption)
+    await context.bot.send_message(
+        chat_id=user.id,
+        text=(
+            "Кандидатура начата. Кнопки меню отключены; отвечайте на вопросы по очереди. "
+            "Используйте /restart или /stop."
+        ),
+        reply_markup=ReplyKeyboardRemove(),
+    )
+
+
+async def candidate_scope_toggle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    user = update.effective_user
+    if not query or not user:
+        return
+    match = re.fullmatch(r"candidate_scope_toggle_(\d+)_(chat|support|flirt|aggressive)", query.data or "")
+    if not match or match.group(1) != str(user.id):
+        await query.answer("Эта кнопка предназначена другому пользователю.", show_alert=True)
+        return
+    profile = _ensure_profile(context, str(user.id), user.username or f"id{user.id}")
+    if profile.get("candidate_application_status") != "active" or int(profile.get("candidate_application_step", 1) or 1) != 3:
+        await query.answer("Этот этап уже завершен.", show_alert=True)
+        return
+    selected = list(profile.get("candidate_application_spheres", []) or [])
+    sphere = match.group(2)
+    if sphere in selected:
+        selected.remove(sphere)
+    else:
+        selected.append(sphere)
+    profile["candidate_application_spheres"] = [
+        key for key in _CANDIDATE_SPHERES if key in selected
+    ]
+    _save_profile_record(context, str(user.id))
+    _save_runtime_snapshot(context)
+    await query.answer()
+    await query.edit_message_reply_markup(
+        reply_markup=_candidate_flow_keyboard(
+            str(user.id),
+            3,
+            profile["candidate_application_spheres"],
+        )
+    )
+
+
+async def candidate_scope_continue_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    user = update.effective_user
+    if not query or not user:
+        return
+    if (query.data or "") != f"candidate_scope_continue_{user.id}":
+        await query.answer("Эта кнопка предназначена другому пользователю.", show_alert=True)
+        return
+    profile = _ensure_profile(context, str(user.id), user.username or f"id{user.id}")
+    if profile.get("candidate_application_status") != "active" or int(profile.get("candidate_application_step", 1) or 1) != 3:
+        await query.answer("Этот этап уже завершен.", show_alert=True)
+        return
+    if not profile.get("candidate_application_spheres"):
+        await query.answer("Выберите хотя бы одну сферу общения.", show_alert=True)
+        return
+    profile["candidate_application_step"] = 4
+    _save_profile_record(context, str(user.id))
+    _save_runtime_snapshot(context)
+    await query.answer()
+    prompt, markup = _candidate_step_prompt(profile, str(user.id))
+    await query.edit_message_text(prompt, reply_markup=markup)
+
+
+async def candidate_privacy_yes_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    user = update.effective_user
+    if not query or not user:
+        return
+    if (query.data or "") != f"candidate_privacy_yes_{user.id}":
+        await query.answer("Эта кнопка предназначена другому пользователю.", show_alert=True)
+        return
+    profile = _ensure_profile(context, str(user.id), user.username or f"id{user.id}")
+    if profile.get("candidate_application_status") != "active" or int(profile.get("candidate_application_step", 1) or 1) != 5:
+        await query.answer("Этот этап уже завершен.", show_alert=True)
+        return
+    profile["candidate_application_privacy_agreed"] = True
+    profile["candidate_application_step"] = 6
+    _save_profile_record(context, str(user.id))
+    _save_runtime_snapshot(context)
+    await query.answer()
+    prompt, markup = _candidate_step_prompt(profile, str(user.id))
+    await query.edit_message_text(prompt, reply_markup=markup)
+
+
+async def candidate_submit_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    user = update.effective_user
+    if not query or not user:
+        return
+    callback_data = query.data or ""
+    if callback_data not in {
+        f"candidate_submit_yes_{user.id}",
+        f"candidate_submit_no_{user.id}",
+    }:
+        await query.answer("Эта кнопка предназначена другому пользователю.", show_alert=True)
+        return
+    profile = _ensure_profile(context, str(user.id), user.username or f"id{user.id}")
+    if profile.get("candidate_application_status") != "active" or int(profile.get("candidate_application_step", 1) or 1) != 6:
+        await query.answer("Эта заявка уже обработана.", show_alert=True)
+        return
+    if callback_data == f"candidate_submit_no_{user.id}":
+        profile["candidate_application_step"] = 5
+        _save_profile_record(context, str(user.id))
+        _save_runtime_snapshot(context)
+        await query.answer("Вернулись к предыдущему этапу.")
+        prompt, markup = _candidate_step_prompt(profile, str(user.id))
+        await query.edit_message_text(prompt, reply_markup=markup)
+        return
+
+    profile["candidate_application_status"] = "submitting"
+    sphere_labels = [
+        _CANDIDATE_SPHERES[key]
+        for key in profile.get("candidate_application_spheres", [])
+        if key in _CANDIDATE_SPHERES
+    ]
+    application_text = (
+        "НОВАЯ КАНДИДАТУРА\n"
+        "В администрацию поступила новая заявка на вступление. Кандидат предоставил необходимую информацию о себе, "
+        "выбрал интересующие направления и ответил на вопросы для первичного рассмотрения.\n"
+        "╭─── Информация о кандидате ───╮\n"
+        f"・ Имя: {profile.get('candidate_application_name', '')}\n"
+        f"・ Возраст: {profile.get('candidate_application_age', '')}\n"
+        f"・ Сферы общения: {', '.join(sphere_labels)}\n"
+        "╰──────────────────────╯\n"
+        "╭─── Ответы на вопросы ───╮\n"
+        f"1. {profile.get('candidate_application_experience', '')}\n"
+        "2. Да\n"
+        "╰──────────────────────╯\n\n"
+        "Заявка ожидает рассмотрения. После принятия кандидат перейдёт к этапу инструктажа, "
+        "а затем приступит к выполнению административных обязанностей.\n\n"
+        f"Telegram ID: {user.id}"
+    )
+    review_keyboard = InlineKeyboardMarkup(
+        [[
+            InlineKeyboardButton("Принять", callback_data=f"candidate_review_accept_{user.id}"),
+            InlineKeyboardButton("Отказать", callback_data=f"candidate_review_reject_{user.id}"),
+        ]]
+    )
+    try:
+        sent = await context.bot.send_message(
+            chat_id=CANDIDATE_REVIEW_CHAT_ID,
+            message_thread_id=CANDIDATE_REVIEW_THREAD_ID,
+            text=application_text,
+            reply_markup=review_keyboard,
+        )
+    except TelegramError:
+        profile["candidate_application_status"] = "active"
+        logging.exception("Failed to submit candidate application for user %s", user.id)
+        await query.answer("Не удалось отправить заявку. Попробуйте ещё раз позже.", show_alert=True)
+        return
+
+    profile["candidate_application_status"] = "pending_review"
+    profile["candidate_application_submitted_at"] = datetime.now(timezone.utc).isoformat()
+    profile["candidate_application_review_message_id"] = sent.message_id
+    _save_profile_record(context, str(user.id))
+    _record_user_action(context, str(user.id), "Подача кандидатуры", details="Заявка отправлена на рассмотрение")
+    _save_runtime_snapshot(context)
+    await query.answer("Заявка отправлена на рассмотрение.")
+    try:
+        await query.edit_message_text(
+            "✅ Заявка отправлена на рассмотрение. Пока её не рассмотрят, повторная подача недоступна."
+        )
+    except TelegramError:
+        logging.exception("Failed to update candidate confirmation message for user %s", user.id)
+    await send_main_submenu(update, context)
+
+
+async def _candidate_text_answer(update: Update, context: ContextTypes.DEFAULT_TYPE, profile: dict) -> None:
+    message = update.effective_message
+    user = update.effective_user
+    if not message or not user:
+        return
+    step = int(profile.get("candidate_application_step", 1) or 1)
+    if step not in {1, 2, 4}:
+        await message.reply_text("Используйте кнопку под сообщением, чтобы продолжить этот этап.")
+        return
+    answer = (message.text or "").strip()
+    if not answer or len(answer) > 2000:
+        await message.reply_text("Отправьте текстовый ответ длиной не более 2000 символов.")
+        return
+    if step == 1:
+        if len(answer) > 100:
+            await message.reply_text("Имя должно быть не длиннее 100 символов. Попробуйте ещё раз.")
+            return
+        profile["candidate_application_name"] = answer
+        profile["candidate_application_step"] = 2
+    elif step == 2:
+        if not re.fullmatch(r"\d{1,3}", answer) or int(answer) < 1:
+            await message.reply_text("Укажите возраст числом.")
+            return
+        profile["candidate_application_age"] = answer
+        profile["candidate_application_step"] = 3
+    else:
+        profile["candidate_application_experience"] = answer
+        profile["candidate_application_step"] = 5
+    _save_profile_record(context, str(user.id))
+    _save_runtime_snapshot(context)
+    prompt, markup = _candidate_step_prompt(profile, str(user.id))
+    await message.reply_text(prompt, reply_markup=markup)
+
+
+async def candidate_application_guard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user = update.effective_user
+    if not user:
+        return
+    profile = (
+        context.application.bot_data.get("profiles", {}) or {}
+    ).get(str(user.id), {})
+    if not isinstance(profile, dict) or profile.get("candidate_application_status") not in {"active", "submitting"}:
+        return
+
+    query = update.callback_query
+    if query:
+        if profile.get("candidate_application_status") == "active" and _is_candidate_flow_callback(
+            query.data or "",
+            str(user.id),
+        ):
+            return
+        await query.answer("Во время кандидатуры доступны только её этапы, /restart и /stop.", show_alert=True)
+        raise ApplicationHandlerStop
+
+    message = update.effective_message
+    if not message:
+        return
+    raw_text = message.text or ""
+    command_name = raw_text.split(maxsplit=1)[0].split("@", 1)[0].lower() if raw_text else ""
+    if command_name in {"/restart", "/stop"}:
+        return
+    if (
+        profile.get("candidate_application_status") == "active"
+        and update.effective_chat
+        and update.effective_chat.type == ChatType.PRIVATE
+        and not command_name.startswith("/")
+    ):
+        await _candidate_text_answer(update, context, profile)
+        raise ApplicationHandlerStop
+    await message.reply_text(
+        "Во время кандидатуры доступны только её этапы и команды /restart или /stop."
+    )
+    raise ApplicationHandlerStop
+
+
+async def stop_candidate_command_handler(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+) -> None:
+    message = update.effective_message
+    user = update.effective_user
+    if not message or not user or not update.effective_chat or update.effective_chat.type != ChatType.PRIVATE:
+        return
+    profile = _ensure_profile(context, str(user.id), user.username or f"id{user.id}")
+    if profile.get("candidate_application_status") != "active":
+        await message.reply_text("Активной кандидатуры нет.")
+        return
+    profile["candidate_application_status"] = "cancelled"
+    profile["candidate_application_cancelled_at"] = datetime.now(timezone.utc).isoformat()
+    _save_profile_record(context, str(user.id))
+    _record_user_action(
+        context,
+        str(user.id),
+        "Остановка кандидатуры",
+        details="Пользователь остановил этап кандидатуры командой /stop",
+    )
+    _save_runtime_snapshot(context)
+    await message.reply_text("Кандидатура остановлена. Вы вернулись в главное меню.")
+    await send_main_submenu(update, context)
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     if user:
         if await block_if_banned(update, context):
             return
         profile = _ensure_profile(context, str(user.id), user.username or f"id{user.id}")
+        if context.args and context.args[0].startswith("web_"):
+            await _handle_website_login_start(update, context, profile)
+            return
         refresh_timed_warnings(profile)
         expired_warns = consume_expired_warning_count(profile)
         if expired_warns:
@@ -223,24 +821,139 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🧸 <b>Поддержка</b>\n"
         "💬 <b>Общение</b>\n"
         "🌬️ <b>Помощь</b>\n"
-        "👹 <b>Агрессив</b>\n"
-        "Выберите нужный раздел — администратор подключится к вам."
+        "👹 <b>Агрессив</b>"
     )
-    keyboard = InlineKeyboardMarkup(
-        [
-            [
-                InlineKeyboardButton("⭐ Канал бота", url="https://t.me/berlogaAskly"),
-                InlineKeyboardButton("❓ Помощь", url="https://t.me/asklyhelp")
-            ]
-        ]
-    )
-    await update.message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
+    await _send_main_menu_message(update, context, user.id, user.username, text)
 
-    menu_keyboard = _build_main_menu_keyboard(context, user.id, user.username)
-    await update.message.reply_text(
-        "Выберите действие в меню ниже:",
-        reply_markup=menu_keyboard,
+
+def _has_exact_logs_prefix(profile: dict) -> bool:
+    prefixes = profile.get("prefixes")
+    if not isinstance(prefixes, list):
+        prefixes = str(profile.get("prefix") or "").split(",")
+    return "👁Logs" in {str(prefix).strip() for prefix in prefixes}
+
+
+async def _handle_website_login_start(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    profile: dict,
+) -> None:
+    user = update.effective_user
+    message = update.effective_message
+    payload = context.args[0][4:]
+    if (
+        not user
+        or not message
+        or not re.fullmatch(r"[A-Za-z0-9_-]{20,64}", payload)
+    ):
+        if message:
+            await message.reply_text("Ссылка авторизации недействительна или устарела.")
+        return
+
+    if _effective_admin_level(profile) < 4 or not _has_exact_logs_prefix(profile):
+        await message.reply_text(
+            "Вход на сайт доступен только администраторам 4-го уровня с префиксом 👁Logs."
+        )
+        return
+
+    status, verification_code = WEB_AUTH_STORE.claim_request(payload, user.id)
+    if status != "ok":
+        await message.reply_text(
+            "Запрос авторизации устарел или уже используется. Вернитесь на сайт и начните вход заново."
+        )
+        return
+
+    keyboard = InlineKeyboardMarkup(
+        [[
+            InlineKeyboardButton("✅ Да, войти", callback_data=f"web_auth_yes_{payload}"),
+            InlineKeyboardButton("❌ Нет", callback_data=f"web_auth_no_{payload}"),
+        ]]
     )
+    await message.reply_text(
+        "Запрошен вход в панель логов бота.\n\n"
+        f"Код проверки: <code>{verification_code}</code>\n"
+        "Сверьте его с кодом на странице сайта. Если коды совпадают и запрос ваш, подтвердите вход.",
+        parse_mode=ParseMode.HTML,
+        reply_markup=keyboard,
+    )
+
+
+async def web_auth_confirmation_callback(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+) -> None:
+    query = update.callback_query
+    user = update.effective_user
+    if not query or not user:
+        return
+
+    action, request_id = (query.data or "").split("_", 3)[2:]
+    profiles = context.application.bot_data.get("profiles", {}) or {}
+    profile = profiles.get(str(user.id), profiles.get(user.id, {}))
+    if _effective_admin_level(profile) < 4 or not _has_exact_logs_prefix(profile):
+        await query.answer("Для входа нужны 4-й уровень и префикс 👁Logs.", show_alert=True)
+        return
+
+    if action == "no":
+        completed = WEB_AUTH_STORE.finish_request(request_id, user.id, approved=False)
+        await query.answer("Запрос отклонён." if completed else "Запрос устарел.", show_alert=not completed)
+        if completed and query.message:
+            await query.edit_message_text("❌ Запрос входа на сайт отклонён.")
+        return
+
+    await query.answer("Подтверждаем вход…")
+    avatar = None
+    try:
+        photos = await context.bot.get_user_profile_photos(user.id, limit=1)
+        if photos.photos:
+            photo = photos.photos[0][-1]
+            photo_file = await context.bot.get_file(photo.file_id)
+            if photo_file.file_size is None or photo_file.file_size <= 1_000_000:
+                avatar = bytes(await photo_file.download_as_bytearray())
+            else:
+                logging.warning("Website login avatar is too large for user %s", user.id)
+    except TelegramError:
+        logging.warning("Could not load website login avatar for user %s", user.id)
+
+    completed = WEB_AUTH_STORE.finish_request(
+        request_id,
+        user.id,
+        approved=True,
+        username=user.username,
+        display_name=user.full_name,
+        avatar=avatar,
+    )
+    if not completed:
+        if query.message:
+            await query.edit_message_text("⚠️ Запрос устарел или уже обработан.")
+        return
+
+    if query.message:
+        await query.edit_message_text(
+            f"✅ Вход на сайт подтверждён для аккаунта {user.full_name}."
+        )
+
+
+async def _send_main_menu_message(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    user_id: int,
+    username: str | None,
+    caption: str | None,
+) -> None:
+    await context.bot.send_message(
+        chat_id=user_id,
+        text="Главное меню",
+        reply_markup=ReplyKeyboardRemove(),
+    )
+    with MAIN_MENU_IMAGE_PATH.open("rb") as photo:
+        await context.bot.send_photo(
+            chat_id=user_id,
+            photo=photo,
+            caption=caption,
+            parse_mode=ParseMode.HTML if caption else None,
+            reply_markup=_build_main_menu_inline_keyboard(context, user_id, username),
+        )
 
 
 # ==== Agreement enforcement helpers ====
@@ -482,7 +1195,7 @@ async def agreement_accept_callback(update: Update, context: ContextTypes.DEFAUL
     except Exception:
         pass
 
-    # send the same initial /start content
+    # Send the main menu after the agreement is accepted.
     try:
         text = (
             "☀️ <b>Добро пожаловать!</b>\n\n"
@@ -490,21 +1203,15 @@ async def agreement_accept_callback(update: Update, context: ContextTypes.DEFAUL
             "🧸 <b>Поддержка</b>\n"
             "💬 <b>Общение</b>\n"
             "🌬️ <b>Помощь</b>\n"
-            "👹 <b>Агрессив</b>\n"
-            "Выберите нужный раздел — администратор подключится к вам."
+            "👹 <b>Агрессив</b>"
         )
-        keyboard = InlineKeyboardMarkup(
-            [
-                [
-                    InlineKeyboardButton("⭐ Канал бота", url="https://t.me/berlogaAskly"),
-                    InlineKeyboardButton("❓ Помощь", url="https://t.me/asklyhelp")
-                ]
-            ]
+        await _send_main_menu_message(
+            update,
+            context,
+            int(user_id),
+            update.effective_user.username,
+            text,
         )
-        await context.bot.send_message(chat_id=int(user_id), text=text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
-
-        menu_keyboard = _build_main_menu_keyboard(context, int(user_id), update.effective_user.username)
-        await context.bot.send_message(chat_id=int(user_id), text="Выберите действие в меню ниже:", reply_markup=menu_keyboard)
     except Exception:
         pass
 
@@ -533,6 +1240,13 @@ async def admin_search_command_guard(update: Update, context: ContextTypes.DEFAU
         command_name = raw_text.split()[0].lower().split("@", 1)[0]
         if command_name in {"/restart", "/start"}:
             return
+        if command_name == "/stop":
+            profile = (context.application.bot_data.get("profiles", {}) or {}).get(
+                str(update.effective_user.id),
+                {},
+            )
+            if isinstance(profile, dict) and profile.get("candidate_application_status") == "active":
+                return
 
     user_id = str(update.effective_user.id)
     active = (context.application.bot_data.get("active_chats", {}) or {}).get(user_id)
@@ -573,6 +1287,9 @@ async def find_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def send_admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await check_active_chat_block(update, context):
         return
+    message = update.effective_message
+    if not message:
+        return
     context.user_data["last_category_step"] = 1
 
     text = (
@@ -587,15 +1304,7 @@ async def send_admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "—\n"
         "› Заявки, поступившие в ночное время (с 0:00 до 09:30 по МСК), будут обрабатываться с начала рабочего дня."
     )
-    await update.message.reply_text(
-        "Для возврата используйте кнопку ниже.",
-        reply_markup=ReplyKeyboardMarkup(
-            [[KeyboardButton("◀️ Назад")]],
-            resize_keyboard=True,
-            one_time_keyboard=False,
-        ),
-    )
-    await update.message.reply_text(
+    await message.reply_text(
         text,
         parse_mode=ParseMode.HTML,
         reply_markup=_build_request_gender_keyboard(str(update.effective_user.id)),
@@ -624,20 +1333,73 @@ async def request_gender_callback(update: Update, context: ContextTypes.DEFAULT_
 
 async def send_main_submenu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["last_category_step"] = 0
-    menu_keyboard = _build_main_menu_keyboard(
+    user = update.effective_user
+    if not user:
+        return
+    await _send_main_menu_message(
+        update,
         context,
-        update.effective_user.id,
-        update.effective_user.username if update.effective_user else None,
+        user.id,
+        user.username,
+        None,
     )
-    await update.message.reply_text("Выберите действие в меню ниже:", reply_markup=menu_keyboard)
 
 
-async def help_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message or update.effective_chat.type != ChatType.PRIVATE:
+async def main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    user = update.effective_user
+    if not query or not user or not update.effective_chat:
+        return
+    await query.answer()
+    if update.effective_chat.type != ChatType.PRIVATE or update.effective_chat.id != user.id:
         return
     if await block_if_banned(update, context):
         return
-    await update.message.reply_text(
+
+    handlers = {
+        "main_menu_find_admin": find_admin_menu_callback,
+        "main_menu_candidate": show_candidate_intro_callback,
+        "main_menu_profile": send_profile,
+        "main_menu_admin_profile": send_admin_profile,
+        "main_menu_admin_shop": admin_shop_menu_handler,
+        "main_menu_help": help_menu_handler,
+        "main_menu_settings": settings_menu_handler,
+        "main_menu_dialog": send_active_session_menu,
+        "main_menu_back": return_to_main_menu_callback,
+    }
+    handler = handlers.get(query.data or "")
+    if handler:
+        await handler(update, context)
+
+
+async def return_to_main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data.clear()
+    query = update.callback_query
+    user = update.effective_user
+    if query and user and query.message and query.message.photo:
+        with MAIN_MENU_IMAGE_PATH.open("rb") as photo:
+            await query.message.edit_media(
+                media=InputMediaPhoto(
+                    media=photo,
+                    caption="Главное меню",
+                ),
+                reply_markup=_build_main_menu_inline_keyboard(
+                    context,
+                    user.id,
+                    user.username,
+                ),
+            )
+        return
+    await send_main_submenu(update, context)
+
+
+async def help_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    message = update.effective_message
+    if not message or update.effective_chat.type != ChatType.PRIVATE:
+        return
+    if await block_if_banned(update, context):
+        return
+    await message.reply_text(
         "🔈Уважаемый пользователь, помощь по использованию нашего бота вы можете увидеть нажав на ссылку ниже. https://t.me/asklyhelp"
     )
 
@@ -658,7 +1420,8 @@ def _admin_shop_confirmation_keyboard() -> InlineKeyboardMarkup:
 
 
 async def admin_shop_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message or update.effective_chat.type != ChatType.PRIVATE or not update.effective_user:
+    message = update.effective_message
+    if not message or update.effective_chat.type != ChatType.PRIVATE or not update.effective_user:
         return
     if await block_if_banned(update, context):
         return
@@ -668,9 +1431,9 @@ async def admin_shop_menu_handler(update: Update, context: ContextTypes.DEFAULT_
         update.effective_user.username or f"id{update.effective_user.id}",
     )
     if not _has_admin_rights_level_1_5(profile):
-        await update.message.reply_text("Админ-магазин доступен только действующим администраторам.")
+        await message.reply_text("Админ-магазин доступен только действующим администраторам.")
         return
-    await update.message.reply_text(
+    await message.reply_text(
         "🛒Админ-магазин\n\n"
         "🧾 Снять выговор — 100 админ-репутации\n"
         "Снимает один активный админский выговор. Перед покупкой бот проверит наличие "
@@ -764,16 +1527,17 @@ async def admin_shop_cancel_callback(update: Update, context: ContextTypes.DEFAU
 
 
 async def send_active_session_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message or update.effective_chat.type != ChatType.PRIVATE:
+    message = update.effective_message
+    if not message or update.effective_chat.type != ChatType.PRIVATE:
         return
     if await block_if_banned(update, context):
         return
     active = (context.application.bot_data.get("active_chats", {}) or {}).get(str(update.effective_user.id)) if update.effective_user else None
     if not active or not active.get("active"):
-        await update.message.reply_text("У вас нет активной сессии с администратором.")
+        await message.reply_text("У вас нет активной сессии с администратором.")
         await send_main_submenu(update, context)
         return
-    await update.message.reply_text("Кнопки диалога:", reply_markup=_build_active_session_keyboard())
+    await message.reply_text("Кнопки диалога:", reply_markup=_build_active_session_keyboard())
 
 
 async def session_settings_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1239,190 +2003,14 @@ async def return_to_dialog_menu_handler(update: Update, context: ContextTypes.DE
 
 
 async def settings_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message or update.effective_chat.type != ChatType.PRIVATE:
+    message = update.effective_message
+    if not message or update.effective_chat.type != ChatType.PRIVATE:
         return
     if await block_if_banned(update, context):
         return
     user_id = str(update.effective_user.id)
     profile = _ensure_profile(context, user_id, update.effective_user.username or f"id{user_id}")
-    await update.message.reply_text("⚙️Раздел настроек", reply_markup=_build_settings_menu_keyboard(profile))
-
-
-def _quests_access_allowed(profile: dict) -> bool:
-    return not _has_admin_rights_level_1_5(profile) or _effective_admin_level(profile) <= 3
-
-
-async def quests_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message or update.effective_chat.type != ChatType.PRIVATE:
-        return
-    if await block_if_banned(update, context):
-        return
-
-    user = update.effective_user
-    user_id = str(user.id)
-    profile = _ensure_profile(context, user_id, user.username or f"id{user_id}")
-    if not _quests_access_allowed(profile):
-        await update.message.reply_text("⛔ Этот раздел недоступен администраторам 4–5 категории.")
-        return
-
-    active = (context.application.bot_data.get("active_chats", {}) or {}).get(user_id)
-    if active and active.get("active") and active.get("chat_id") is not None and active.get("topic_id") is not None:
-        try:
-            await context.bot.send_message(
-                chat_id=int(active["chat_id"]),
-                message_thread_id=int(active["topic_id"]),
-                text="👨‍🏫Пользователь зашел в раздел квестов и загадок.",
-            )
-        except Exception:
-            logging.exception("Failed to notify admin about quests section for user %s", user_id)
-
-    text = (
-        "🗝️ **РАЗДЕЛ: ЗАГАДКИ И КВЕСТЫ**\n\n"
-        "Добро пожаловать в раздел **«Загадки и квесты»**!\n\n"
-        "Здесь вас ждут различные загадки, головоломки и небольшие задания, для прохождения которых потребуется "
-        "**внимательность, логика и смекалка**.\n\n"
-        "📜 **Что вас ожидает:**\n"
-        "— 🧩 Загадки и логические задачи\n"
-        "— 🔎 Поиск скрытых подсказок\n"
-        "— 🗺️ Квесты с несколькими этапами\n"
-        "— 🔐 Тайны, секретные коды и шифры\n"
-        "— 🎯 Необычные задания и испытания\n\n"
-        "Некоторые задания могут быть простыми на первый взгляд, но скрывать **неожиданный ответ или дополнительный смысл**.\n\n"
-        "**Ваша задача — найти подсказки, разгадать тайну или пройти квест до конца.**\n\n"
-        "> ⚠️ Внимательно изучайте условия. Иногда самая маленькая деталь может оказаться ключом к разгадке."
-    )
-    await update.message.reply_text(
-        text,
-        parse_mode=ParseMode.MARKDOWN,
-        reply_markup=_build_quests_menu_keyboard(),
-    )
-
-
-async def quests_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    if not query or not update.effective_user:
-        return
-    await query.answer()
-    user_id = str(update.effective_user.id)
-    profile = _ensure_profile(context, user_id, update.effective_user.username or f"id{user_id}")
-    if not _quests_access_allowed(profile):
-        await query.answer("Раздел недоступен для вашей категории.", show_alert=True)
-        return
-    await query.message.edit_text(
-        "🗝 РАЗДЕЛ: КВЕСТЫ\n\n"
-        "Сейчас вы находитесь в разделе квестов, выберите кнопки ниже и выбирайте задания на свой вкус!\n\n"
-        '🔆За выполненные задания вы будете получать специальную валюту "Токены" которые в будущем обновлении можно обменять на прикольные плюшки (подарки тг, звезды)\n\n'
-        "❗️Не используйте нейросеть для выполнения задач, это наказуемо!",
-        reply_markup=_build_quests_section_keyboard(),
-    )
-
-
-async def quests_back_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    if not query or not update.effective_user:
-        return
-    await query.answer()
-    profile = _ensure_profile(
-        context,
-        str(update.effective_user.id),
-        update.effective_user.username or f"id{update.effective_user.id}",
-    )
-    if not _quests_access_allowed(profile):
-        await query.answer("Раздел недоступен для вашей категории.", show_alert=True)
-        return
-    await query.message.edit_text(
-        "🗝️ **РАЗДЕЛ: ЗАГАДКИ И КВЕСТЫ**\n\n"
-        "Добро пожаловать в раздел **«Загадки и квесты»**!\n\n"
-        "Здесь вас ждут различные загадки, головоломки и небольшие задания.",
-        parse_mode=ParseMode.MARKDOWN,
-        reply_markup=_build_quests_menu_keyboard(),
-    )
-
-
-async def game_quests_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    if not query or not update.effective_user:
-        return
-    await query.answer()
-    profile = _ensure_profile(
-        context,
-        str(update.effective_user.id),
-        update.effective_user.username or f"id{update.effective_user.id}",
-    )
-    if not _quests_access_allowed(profile):
-        await query.answer("Раздел недоступен для вашей категории.", show_alert=True)
-        return
-    await query.message.edit_text(
-        "🎮 ИГРОВЫЕ КВЕСТЫ",
-        reply_markup=_build_game_quests_keyboard(),
-    )
-
-
-async def brawl_stars_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    if not query or not update.effective_user:
-        return
-    await query.answer()
-    await query.message.edit_text(
-        "🎮 Brawl Stars\n"
-        "В этом разделе вас ждёт тест по игре Brawl Stars, который состоит из 20 вопросов.\n\n"
-        "Вопросы будут посвящены:\n\n"
-        "- 🦸 Бойцам и их способностям;\n"
-        "- 🗺️ Режимам и картам;\n"
-        "- ⭐ Гаджетам и звёздным силам;\n"
-        "- 🏆 Системам прогресса и игровым механикам;\n"
-        "- 🎯 Различным фактам и особенностям игры.\n"
-        "За каждый правильный ответ вы получаете токен.\n"
-        "Постарайтесь ответить на все вопросы внимательно — в некоторых из них могут встретиться неожиданные моменты! 🔥",
-        reply_markup=_build_brawl_stars_keyboard(),
-    )
-
-
-async def game_quests_back_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    if not query:
-        return
-    await query.answer()
-    await query.message.edit_text("🎮 ИГРОВЫЕ КВЕСТЫ", reply_markup=_build_game_quests_keyboard())
-
-
-async def brawl_stars_start_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.callback_query.answer("Тест скоро будет доступен.")
-
-
-async def riddles_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    if not query or not update.effective_user:
-        return
-    await query.answer()
-    user_id = str(update.effective_user.id)
-    profile = _ensure_profile(context, user_id, update.effective_user.username or f"id{user_id}")
-    if not _quests_access_allowed(profile):
-        await query.answer("Раздел недоступен для вашей категории.", show_alert=True)
-        return
-    await query.message.reply_text("🧩Раздел загадок скоро будет доступен.")
-
-
-async def quests_exit_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    if not query or not update.effective_user:
-        return
-    await query.answer()
-    try:
-        await query.message.delete()
-    except Exception:
-        pass
-    await context.bot.send_message(
-        chat_id=update.effective_user.id,
-        text="Вы вышли из раздела квестов и загадок.",
-        reply_markup=_build_main_menu_keyboard(
-            context,
-            update.effective_user.id,
-            update.effective_user.username,
-        ),
-    )
-
-
+    await message.reply_text("⚙️Раздел настроек", reply_markup=_build_settings_menu_keyboard(profile))
 
 
 async def settings_back_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2099,6 +2687,14 @@ async def restart_command_handler(update: Update, context: ContextTypes.DEFAULT_
         return
 
     user_id = str(update.effective_user.id)
+    profile = (context.application.bot_data.get("profiles", {}) or {}).get(user_id, {})
+    if isinstance(profile, dict) and profile.get("candidate_application_status") == "active":
+        prompt, markup = _candidate_step_prompt(profile, user_id)
+        await update.message.reply_text(
+            f"Кандидатура продолжается.\n{prompt}\nДоступны только этапы кандидатуры, /restart и /stop.",
+            reply_markup=markup,
+        )
+        return
     active = (context.application.bot_data.get("active_chats", {}) or {}).get(user_id)
     if active and active.get("active"):
         if active.get("paused"):
@@ -2106,7 +2702,7 @@ async def restart_command_handler(update: Update, context: ContextTypes.DEFAULT_
                 [[InlineKeyboardButton("Возомновить общение", callback_data=f"resume_session_{user_id}")]]
             )
             await update.message.reply_text(
-                "💤Сессия сейчас на паузе. Нажмите кнопку ниже, чтобы возобновить общение.",
+                "💤Сессия сейчас на паузе.",
                 reply_markup=resume_kb,
             )
             return
@@ -2134,7 +2730,6 @@ async def choose_admin_gender_callback(update: Update, context: ContextTypes.DEF
     choice = update.message.text
     flow_step = context.user_data.get("profile")
     if choice in {"👨 Мальчик", "👩 Девочка", "◀️ Назад"} and flow_step != 1:
-        await update.message.reply_text("Используйте подменю кнопки")
         context.user_data["profile"] = 0
         await send_main_submenu(update, context)
         return
@@ -2155,28 +2750,43 @@ async def choose_admin_gender_callback(update: Update, context: ContextTypes.DEF
     elif choice == "🔰Админ-профиль":
         await send_admin_profile(update, context)
     else:
-        await update.message.reply_text(
-            "Пожалуйста, выберите одного из администраторов ниже."
-        )
+        return
 
 
 async def send_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await block_if_banned(update, context):
+        return
+    message = update.effective_message
+    if not message:
         return
     user = update.effective_user
     user_id = str(user.id)
     profile = _ensure_profile(context, user_id, user.username or f"id{user.id}")
 
     if _has_admin_rights_level_1_5(profile):
-        await update.message.reply_text("⛔ Для администраторов кнопка '👤 Профиль' недоступна.")
+        await message.reply_text("⛔ Для администраторов кнопка '👤 Профиль' недоступна.")
         return
 
     text = _build_user_stats_text(context, user_id, profile)
 
     nickname_kb = InlineKeyboardMarkup(
-        [[InlineKeyboardButton("🧸Сменить никнейм", callback_data=f"change_nickname_{user_id}")]]
+        [
+            [InlineKeyboardButton("🧸Сменить никнейм", callback_data=f"change_nickname_{user_id}")],
+            [InlineKeyboardButton("◀️ Назад", callback_data="main_menu_back")],
+        ]
     )
-    await update.message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=nickname_kb)
+    if update.callback_query and message.photo:
+        with PROFILE_IMAGE_PATH.open("rb") as photo:
+            await message.edit_media(
+                media=InputMediaPhoto(
+                    media=photo,
+                    caption=text,
+                    parse_mode=ParseMode.HTML,
+                ),
+                reply_markup=nickname_kb,
+            )
+        return
+    await message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=nickname_kb)
 
 
 
@@ -2231,15 +2841,18 @@ async def cancel_nickname_change_callback(update: Update, context: ContextTypes.
 async def send_admin_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await block_if_banned(update, context):
         return
+    message = update.effective_message
+    if not message:
+        return
     user = update.effective_user
     user_id = str(user.id)
     profile = _ensure_profile(context, user_id, user.username or f"id{user.id}")
 
     if not _has_admin_rights_level_1_5(profile):
-        await update.message.reply_text("⛔ Кнопка '🔰Админ-профиль' доступна только администраторам.")
+        await message.reply_text("⛔ Кнопка '🔰Админ-профиль' доступна только администраторам.")
         return
 
-    await update.message.reply_text(
+    await message.reply_text(
         _build_admin_stats_text(user_id, profile),
         parse_mode=ParseMode.HTML,
     )
@@ -2274,14 +2887,6 @@ async def send_mood_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    await update.message.reply_text(
-        "Для возврата используйте кнопку ниже.",
-        reply_markup=ReplyKeyboardMarkup(
-            [[KeyboardButton("◀️ Назад")]],
-            resize_keyboard=True,
-            one_time_keyboard=False,
-        ),
-    )
     await update.message.reply_text(
         text,
         parse_mode=ParseMode.HTML,
@@ -2537,7 +3142,6 @@ async def choose_mood_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         "🔥 Флирт": "флирт",
     }
     if (choice in mood_map or choice == "◀️ Назад") and flow_step != 2:
-        await update.message.reply_text("Используйте подменю кнопки")
         context.user_data["profile"] = 0
         await send_main_submenu(update, context)
         return
@@ -2563,7 +3167,7 @@ async def choose_mood_callback(update: Update, context: ContextTypes.DEFAULT_TYP
 
         user = update.effective_user
         user_confirmation = await update.message.reply_text(
-            "Если хотите отменить поиск администратора — нажмите кнопку ниже.",
+            "Поиск администратора",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Отменить", callback_data=f"cancel_search_{user.id}")]]),
         )
 
@@ -2646,9 +3250,7 @@ async def choose_mood_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         context.user_data.clear()
         await start(update, context)
     else:
-        await update.message.reply_text(
-            "Пожалуйста, выберите один из вариантов ниже."
-        )
+        return
 
 
 async def pause_session_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2918,7 +3520,7 @@ async def deny_cancel_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     # Restore the single "Отменить" button
     try:
         await update.callback_query.message.edit_text(
-            "Если хотите отменить поиск администратора — нажмите кнопку ниже.",
+            "Поиск администратора продолжается.",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Отменить", callback_data=f"cancel_search_{user_id}")]]),
         )
     except BadRequest:
@@ -2942,7 +3544,7 @@ async def confirm_cancel_callback(update: Update, context: ContextTypes.DEFAULT_
     # Edit the confirmation message to show cancellation text and remove buttons
     try:
         await update.callback_query.message.edit_text(
-            "Вы отменили поиск администратора. Если захотите начать заново, нажмите кнопку \"👤 Найти админа\"."
+            "Вы отменили поиск администратора."
         )
     except BadRequest:
         pass
@@ -3243,6 +3845,7 @@ async def user_private_message_handler(update: Update, context: ContextTypes.DEF
             url_topic_closed = _topic_url(chat_id, topic_id) if chat_id and topic_id is not None else "тема недоступна"
             date_closed = active_session.get("closed_at") or datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
             active_session["closed_at"] = date_closed
+            _close_user_session(context, user_id_int, active_session, closed_at=date_closed)
             user_handle = f"@{username}" if username and not str(username).startswith("@") else str(username or "@unknown")
             cancel_review_text = (
                 f"💔Пользователь отказался от администратора {admin_tag}\n\n"
@@ -3290,13 +3893,12 @@ async def user_private_message_handler(update: Update, context: ContextTypes.DEF
         await update.message.reply_text(
             f"🙏 **Диалог завершён по Вашему желанию с причиной \"{reason_otkazik}\"**\n\n"
             "Мы приняли Ваш запрос на завершение общения. Администратор уже знает, что Вы закончили беседу.\n\n"
-            "Вы всегда можете вернуться в любое время - мы будем рады Вас слышать.\n\n"
-            "Если захотите оставить отзыв или задать вопрос, кнопки ниже помогут Вам.",
+            "Вы всегда можете вернуться в любое время - мы будем рады Вас слышать.",
             parse_mode=ParseMode.MARKDOWN,
         )
         try:
             kb = _build_main_menu_keyboard(context, user_id_int, profile.get("username"))
-            await context.bot.send_message(chat_id=user_id_int, text="Выберите действие в меню ниже:", reply_markup=kb)
+            await context.bot.send_message(chat_id=user_id_int, text="Главное меню", reply_markup=kb)
         except Exception:
             pass
         return
@@ -3370,8 +3972,7 @@ async def user_private_message_handler(update: Update, context: ContextTypes.DEF
 
         review_text = (
             "💬Подозрительное сообщение\n\n"
-            f'Пользователь "{username}" попытался отправить админу сообщение в тему "{topic_link}" с текстом "{suspicious_text}"\n\n'
-            "Выберите действие ниже⬇️"
+            f'Пользователь "{username}" попытался отправить админу сообщение в тему "{topic_link}" с текстом "{suspicious_text}"'
         )
         review_kb = InlineKeyboardMarkup(
             [[
@@ -3521,13 +4122,16 @@ async def admin_cancel_deny_callback(update: Update, context: ContextTypes.DEFAU
 
     context.user_data.pop("pending_admin_cancel", None)
     try:
-        await update.callback_query.message.edit_text("Отмена успешна. Если потребуется, нажмите кнопку снова.")
+        await update.callback_query.message.edit_text("Отмена успешна.")
     except BadRequest:
         pass
 
 
 
 async def find_admin_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    message = update.effective_message
+    if not message or not update.effective_user:
+        return
     user_id = str(update.effective_user.id)
     requester_profile = _ensure_profile(
         context,
@@ -3535,11 +4139,11 @@ async def find_admin_menu_callback(update: Update, context: ContextTypes.DEFAULT
         update.effective_user.username or f"id{user_id}",
     )
     if _has_admin_rights_level_1_5(requester_profile):
-        await update.message.reply_text("⛔ Администратору нельзя искать администратора для начала сессии.")
+        await message.reply_text("⛔ Администратору нельзя искать администратора для начала сессии.")
         return
     blocked, block_message = _check_admin_search_cooldown(context, user_id, requester_profile)
     if blocked:
-        await update.message.reply_text(block_message)
+        await message.reply_text(block_message)
         return
     if await check_active_chat_block(update, context):
         return

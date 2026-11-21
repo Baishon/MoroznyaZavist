@@ -1,5 +1,7 @@
 """Logging configuration, including a handler mirroring warnings/errors to Telegram."""
+from collections import deque
 import logging
+import threading
 import time
 
 try:
@@ -25,6 +27,26 @@ except Exception:
 from app.config import LOG_CHAT_ID, TOKEN
 
 logging.basicConfig(level=logging.INFO, format='Logs: %(levelname)s: %(message)s')
+
+_dashboard_log_lock = threading.Lock()
+_dashboard_logs: deque[str] = deque(maxlen=100)
+
+
+class DashboardLogHandler(logging.Handler):
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            message = self.format(record).replace("\r", " ").replace("\n", " ")
+            with _dashboard_log_lock:
+                _dashboard_logs.append(
+                    f"{time.strftime('%H:%M:%S', time.localtime(record.created))} {message[:500]}"
+                )
+        except Exception:
+            self.handleError(record)
+
+
+def get_recent_dashboard_logs(limit: int = 30) -> list[str]:
+    with _dashboard_log_lock:
+        return list(_dashboard_logs)[-limit:]
 
 
 class TelegramLogHandler(logging.Handler):
@@ -61,6 +83,10 @@ try:
     t_handler.setLevel(logging.WARNING)
     t_handler.setFormatter(logging.Formatter("Logs: %(levelname)s: %(message)s"))
     logging.getLogger().addHandler(t_handler)
+    dashboard_handler = DashboardLogHandler()
+    dashboard_handler.setLevel(logging.WARNING)
+    dashboard_handler.setFormatter(logging.Formatter("%(levelname)s: %(message)s"))
+    logging.getLogger().addHandler(dashboard_handler)
     # Emit a startup log so it appears in the special log chat (verifies handler works)
     logging.info(f"TelegramLogHandler initialized, logs will be sent to chat {LOG_CHAT_ID}")
 except Exception:

@@ -7,6 +7,7 @@ import logging
 import re
 import shlex
 import time
+from pathlib import Path
 from uuid import uuid4
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -21,12 +22,15 @@ from telegram import (
     Update,
 )
 from telegram.constants import ChatType, ParseMode
-from telegram.error import BadRequest, Forbidden, RetryAfter
+from telegram.error import BadRequest, Forbidden, RetryAfter, TelegramError
 from telegram.ext import ApplicationHandlerStop, ContextTypes
 
 from app.config import (
     ADMIN_LEVEL_TITLES,
+    ACADEMY_CHAT_ID,
     AUTO_ADMIN_CHAT_ID,
+    CANDIDATE_REVIEW_CHAT_ID,
+    CANDIDATE_REVIEW_THREAD_ID,
     COOPERATION_CHAT_ID,
     LOG_CHAT_ID,
     OFFICIAL_CHANNEL_ID,
@@ -36,7 +40,14 @@ from app.config import (
     TRUSTED_ADMIN_CHAT_IDS,
     WORK_CHAT_ID,
 )
-from app.database.requests import _save_ban_record, _save_profile_record, _save_runtime_snapshot
+from app.database.requests import (
+    _close_user_session,
+    _record_user_action,
+    _record_user_session,
+    _save_ban_record,
+    _save_profile_record,
+    _save_runtime_snapshot,
+)
 from app.keyboards.inline import (
     _build_active_dialog_admin_keyboard,
     _build_active_session_keyboard,
@@ -117,6 +128,10 @@ from app.services.topics import (
 
 MAX_MODERATION_DURATION_SECONDS = 365 * 24 * 60 * 60
 KYIV_TIMEZONE = ZoneInfo("Europe/Kyiv")
+MOSCOW_TIMEZONE = ZoneInfo("Europe/Moscow")
+WEEKLY_REPORT_THREAD_ID = 1480
+WEEKLY_REPORT_IMAGE_PATH = Path(__file__).resolve().parents[1] / "images" / "Sunday.png"
+WEEKLY_STATS_TRIGGER_PATTERN = r"(?is)(?:стат.*недел|недел.*стат)"
 SENIOR_FORWARD_PREFIXES = {"👁Logs", "💋Владелец", "💘Заместитель владельца"}
 KD_ALLOWED_PREFIXES = {
     "👁Logs",
@@ -639,6 +654,13 @@ async def _makeadmin_impl(update: Update, context: ContextTypes.DEFAULT_TYPE, ow
     active.pop(str(target_user_id), None)
     profile["admin_level"] = lvl
     profile["admin_rank"] = rank_title
+    _record_user_action(
+        context,
+        target_user_id,
+        "Назначение администратора",
+        actor_id=update.effective_user.id,
+        details=f"Уровень {lvl} ({rank_title}); префикс: {profile.get('prefix') or 'не установлен'}",
+    )
 
     had_prefix = str(profile.get("prefix") or "").strip()
     if not had_prefix:
@@ -674,6 +696,7 @@ async def _finish_admin_demotion(
     target_user_id: str,
     target_identifier: str,
     notify_and_block: bool,
+    actor_id: str | int | None = None,
 ) -> list[tuple[int, str]]:
     special_chat_failures = []
     profiles = context.application.bot_data.setdefault("profiles", {})
@@ -686,6 +709,13 @@ async def _finish_admin_demotion(
     profile.pop("prefixes", None)
     profile.pop("prefix", None)
     _save_profile_record(context, str(target_user_id))
+    _record_user_action(
+        context,
+        target_user_id,
+        "Снятие префикса",
+        actor_id=actor_id,
+        details="Префикс удалён вместе с административными правами",
+    )
 
     active_chats = context.application.bot_data.setdefault("active_chats", {})
     topic_user_map = context.application.bot_data.setdefault("topic_user_map", {})
@@ -739,6 +769,7 @@ async def _finish_admin_demotion(
                         "Failed to notify session user %s about admin demotion",
                         session_user_id,
                     )
+            _close_user_session(context, session_user_id, session)
             active_chats.pop(session_user_id, None)
             continue
 
@@ -791,6 +822,7 @@ async def _finish_admin_demotion(
             "ADMIN DISMISSED",
             duration_seconds=14 * 86400,
             force=True,
+            actor_id=actor_id,
         )
 
     _save_runtime_snapshot(context)
@@ -851,6 +883,7 @@ async def makeadmin_demotion_callback(update: Update, context: ContextTypes.DEFA
             target_user_id,
             str(request.get("target_identifier") or target_user_id),
             notify_and_block,
+            update.effective_user.id,
         )
     except Exception:
         logging.exception("Failed to demote admin %s", target_user_id)
@@ -859,6 +892,13 @@ async def makeadmin_demotion_callback(update: Update, context: ContextTypes.DEFA
         )
         return
 
+    _record_user_action(
+        context,
+        target_user_id,
+        "Снятие прав администратора",
+        actor_id=update.effective_user.id,
+        details="Режим: с уведомлением и блокировкой" if notify_and_block else "Режим: без уведомления",
+    )
     pending.pop(request_id, None)
     _save_runtime_snapshot(context)
     mode_text = (
@@ -1271,10 +1311,21 @@ async def auto_promote_trusted_group_admin(update: Update, context: ContextTypes
 
 def _admin_period_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
+        [[InlineKeyboardButton("📅 Недельная", callback_data="admin_period_week")]]
+    )
+
+
+def _weekly_stats_reset_keyboard(user_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [[InlineKeyboardButton("Обнулить статистику", callback_data=f"weekly_reset_request_{user_id}")]]
+    )
+
+
+def _weekly_stats_reset_confirmation_keyboard(user_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
         [[
-            InlineKeyboardButton("📅 Дневная", callback_data="admin_period_day"),
-            InlineKeyboardButton("📅 Недельная", callback_data="admin_period_week"),
-            InlineKeyboardButton("📅 Месяц", callback_data="admin_period_month"),
+            InlineKeyboardButton("Да", callback_data=f"weekly_reset_yes_{user_id}"),
+            InlineKeyboardButton("Нет", callback_data=f"weekly_reset_no_{user_id}"),
         ]]
     )
 
@@ -1283,7 +1334,7 @@ async def admin_period_menu_handler(update: Update, context: ContextTypes.DEFAUL
     if not update.message or update.effective_chat.id != LOG_CHAT_ID:
         return
     await update.message.reply_text(
-        "Выберите сколько должно подсчитать норму администрации",
+        "Недельная статистика администрации",
         reply_markup=_admin_period_keyboard(),
     )
 
@@ -1294,14 +1345,10 @@ async def admin_period_callback(update: Update, context: ContextTypes.DEFAULT_TY
     if not query.message or query.message.chat_id != LOG_CHAT_ID:
         return
 
-    period_key = (query.data or "").rsplit("_", 1)[-1]
-    period_days = {"day": 1, "week": 7, "month": 30}.get(period_key)
-    period_title = {"day": "за день", "week": "за неделю", "month": "за месяц"}.get(period_key)
-    if period_days is None or period_title is None:
+    if query.data != "admin_period_week":
         return
 
     now = time.time()
-    cutoff = now - period_days * 86400
     profiles = context.application.bot_data.get("profiles", {}) or {}
     rows = []
     for telegram_id, profile in profiles.items():
@@ -1309,28 +1356,8 @@ async def admin_period_callback(update: Update, context: ContextTypes.DEFAULT_TY
         level = _effective_admin_level(profile)
         if level < 1:
             continue
-        if period_key == "week":
-            messages = max(0, int(profile.get("admin_weekly_messages", 0) or 0))
-            rp_commands = max(0, int(profile.get("admin_weekly_rp_commands", 0) or 0))
-        else:
-            history = profile.get("admin_activity_history", [])
-            if not isinstance(history, list):
-                history = []
-            messages = 0
-            rp_commands = 0
-            for entry in history:
-                if not isinstance(entry, dict):
-                    continue
-                try:
-                    timestamp = float(entry.get("timestamp", 0) or 0)
-                except (TypeError, ValueError):
-                    continue
-                if timestamp < cutoff:
-                    continue
-                if entry.get("type") == "message":
-                    messages += 1
-                elif entry.get("type") == "rp":
-                    rp_commands += 1
+        messages = max(0, int(profile.get("admin_weekly_messages", 0) or 0))
+        rp_commands = max(0, int(profile.get("admin_weekly_rp_commands", 0) or 0))
         reputation = messages // 20 + rp_commands // 5
         rest_until = _admin_rest_until(profile)
         rest_text = (
@@ -1341,46 +1368,242 @@ async def admin_period_callback(update: Update, context: ContextTypes.DEFAULT_TY
         tag = str(profile.get("tag_admin") or profile.get("user_nickname") or "не указан")
         profile_id = profile.get("id_profile", "не указан")
         role = ADMIN_LEVEL_TITLES.get(level, "Не назначена")
-        minimum_messages = {"day": 16, "week": 110, "month": 440}[period_key]
-        norm = "✅" if messages >= minimum_messages else "❌"
+        norm = "✅" if messages >= 110 else "❌"
         rows.append(
             f"{norm} {tag} | id_profile: {profile_id}\n"
             f"Должность: {role}\n"
-            f"Рабочих сообщений: {messages}/{minimum_messages}\n"
-            f"Репутация {period_title}: ⭐ {reputation}\n"
+            f"Рабочих сообщений: {messages}/110\n"
+            f"Репутация за неделю: ⭐ {reputation}\n"
             f"{rest_text}"
         )
 
     rows.sort()
-    text = f"📊Статистика администрации {period_title}\n\n"
+    text = "📊Статистика администрации за неделю\n\n"
     text += "\n\n".join(rows) if rows else "Администраторы не найдены."
-    await query.edit_message_text(text)
+    await query.edit_message_text(
+        text,
+        reply_markup=_weekly_stats_reset_keyboard(query.from_user.id),
+    )
 
 
-async def weekly_admin_norm_report_job(context: ContextTypes.DEFAULT_TYPE) -> None:
+def _weekly_admin_report_data(context: ContextTypes.DEFAULT_TYPE) -> list[tuple[int, str, str]]:
     profiles = context.application.bot_data.get("profiles", {}) or {}
     rows = []
     for telegram_id, profile in profiles.items():
-        profile = profile or {}
-        if _effective_admin_level(profile) < 1:
+        if not isinstance(profile, dict) or _effective_admin_level(profile) < 1:
             continue
-        messages = max(0, int(profile.get("admin_weekly_messages", 0) or 0))
+        try:
+            messages = max(0, int(profile.get("admin_weekly_messages", 0) or 0))
+        except (TypeError, ValueError):
+            messages = 0
         tag = str(profile.get("tag_admin") or profile.get("user_nickname") or "не указан")
-        username = str(profile.get("username") or f"id{telegram_id}")
-        rows.append((messages, f"{tag} ({username}) — {messages}/110"))
+        rows.append((messages, tag, str(telegram_id)))
+    return sorted(rows, key=lambda row: (-row[0], row[1].casefold(), row[2]))
 
-    rows.sort(key=lambda item: (-item[0], item[1].casefold()))
-    report = "📊 Недельная норма администрации\n\n"
-    report += "\n".join(item[1] for item in rows) if rows else "Администраторы не найдены."
-    sent = await context.bot.send_message(chat_id=LOG_CHAT_ID, text=report)
-    if sent:
-        for profile in profiles.values():
-            if isinstance(profile, dict) and _effective_admin_level(profile) >= 1:
-                profile["admin_weekly_messages"] = 0
-                profile["admin_weekly_rp_commands"] = 0
-        for telegram_id, profile in profiles.items():
-            if isinstance(profile, dict) and _effective_admin_level(profile) >= 1:
-                _save_profile_record(context, str(telegram_id))
+
+def _weekly_admin_stats_text(context: ContextTypes.DEFAULT_TYPE) -> str:
+    rows = _weekly_admin_report_data(context)
+    if not rows:
+        return "📊 Статистика администрации за неделю\n\nАдминистраторы не найдены."
+    lines = []
+    for messages, tag, telegram_id in rows:
+        norm = "✅" if messages >= 110 else "❌"
+        mention = f'<a href="tg://user?id={escape(telegram_id, quote=True)}">{escape(tag)}</a>'
+        lines.append(f"{norm} {mention} — {messages}/110 сообщений")
+    return "📊 <b>Статистика администрации за неделю</b>\n\n" + "\n".join(lines)
+
+
+async def weekly_admin_stats_message_handler(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+) -> None:
+    message = update.effective_message
+    user = update.effective_user
+    if not message:
+        return
+    text = (message.text or "").casefold()
+    if "стат" not in text or "недел" not in text:
+        return
+    chat = update.effective_chat
+    if not chat or chat.type not in {
+        ChatType.PRIVATE,
+        ChatType.GROUP,
+        ChatType.SUPERGROUP,
+    }:
+        return
+    if not user or user.is_bot:
+        logging.warning(
+            "Weekly statistics request has no human sender: chat_id=%s chat_type=%s sender_chat_id=%s",
+            chat.id,
+            chat.type,
+            getattr(getattr(message, "sender_chat", None), "id", None),
+        )
+        return
+    profiles = context.application.bot_data.get("profiles", {}) or {}
+    profile = profiles.get(str(user.id), profiles.get(user.id, {}))
+    if _effective_admin_level(profile) < 1:
+        logging.warning(
+            "Weekly statistics request ignored: sender has no admin rights: chat_id=%s user_id=%s",
+            chat.id,
+            user.id,
+        )
+        return
+    await message.reply_text(
+        _weekly_admin_stats_text(context),
+        parse_mode=ParseMode.HTML,
+        reply_markup=_weekly_stats_reset_keyboard(user.id),
+    )
+
+
+async def _publish_weekly_admin_report(context: ContextTypes.DEFAULT_TYPE) -> None:
+    report_date = datetime.now(MOSCOW_TIMEZONE).date().isoformat()
+    bot_data = context.application.bot_data
+    profiles = context.application.bot_data.get("profiles", {}) or {}
+    rows = _weekly_admin_report_data(context)
+    if rows:
+        top_messages, top_tag, top_id = rows[0]
+        top_mention = f'<a href="tg://user?id={escape(top_id, quote=True)}">{escape(top_tag)}</a>'
+        top_admin = f"{top_mention} — {top_messages}/110"
+        details = "\n".join(
+            f"{'✅' if messages >= 110 else '❌'} "
+            f'<a href="tg://user?id={escape(telegram_id, quote=True)}">{escape(tag)}</a> '
+            f"— {messages}/110 сообщений"
+            for messages, tag, telegram_id in rows
+        )
+    else:
+        top_admin = "Администраторы не найдены."
+        details = "Администраторы не найдены."
+
+    caption = (
+        "📊 <b>Итоги недели</b>\n\n"
+        f"🥇 Самый активный администратор: {top_admin}\n\n"
+        f"{details}"
+    )
+    with WEEKLY_REPORT_IMAGE_PATH.open("rb") as photo:
+        if len(caption) <= 1024:
+            await context.bot.send_photo(
+                chat_id=WORK_CHAT_ID,
+                message_thread_id=WEEKLY_REPORT_THREAD_ID,
+                photo=photo,
+                caption=caption,
+                parse_mode=ParseMode.HTML,
+            )
+        else:
+            await context.bot.send_photo(
+                chat_id=WORK_CHAT_ID,
+                message_thread_id=WEEKLY_REPORT_THREAD_ID,
+                photo=photo,
+                caption=(
+                    "📊 <b>Итоги недели</b>\n\n"
+                    f"🥇 Самый активный администратор: {top_admin}"
+                ),
+                parse_mode=ParseMode.HTML,
+            )
+            await context.bot.send_message(
+                chat_id=WORK_CHAT_ID,
+                message_thread_id=WEEKLY_REPORT_THREAD_ID,
+                text=details,
+                parse_mode=ParseMode.HTML,
+            )
+
+    bot_data["last_weekly_admin_report_date"] = report_date
+    for telegram_id, profile in profiles.items():
+        if isinstance(profile, dict) and _effective_admin_level(profile) >= 1:
+            profile["admin_weekly_messages"] = 0
+            profile["admin_weekly_rp_commands"] = 0
+            _save_profile_record(context, str(telegram_id))
+    _save_runtime_snapshot(context)
+
+
+async def weekly_admin_stats_reset_callback(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+) -> None:
+    query = update.callback_query
+    message = query.message
+    user = update.effective_user
+    data = query.data or ""
+    try:
+        action, owner_id = data.rsplit("_", 1)
+        owner_id = int(owner_id)
+    except (ValueError, TypeError):
+        await query.answer("Кнопка устарела.", show_alert=True)
+        return
+
+    if (
+        not message
+        or not user
+        or message.chat.type
+        not in {ChatType.PRIVATE, ChatType.GROUP, ChatType.SUPERGROUP}
+        or user.id != owner_id
+    ):
+        await query.answer("Эта кнопка недоступна.", show_alert=True)
+        return
+    profiles = context.application.bot_data.get("profiles", {}) or {}
+    profile = profiles.get(str(user.id), profiles.get(user.id, {}))
+    if _effective_admin_level(profile) < 1:
+        await query.answer("Недостаточно прав.", show_alert=True)
+        return
+
+    if action == "weekly_reset_request":
+        await query.answer()
+        await query.edit_message_text(
+            "Вы уверены, что хотите отправить недельную статистику в тему 1480 и обнулить счётчики?",
+            reply_markup=_weekly_stats_reset_confirmation_keyboard(user.id),
+        )
+        return
+
+    message_key = f"{message.chat_id}:{message.message_id}"
+    if action == "weekly_reset_no":
+        await query.answer("Обнуление отменено.")
+        await query.edit_message_reply_markup(
+            reply_markup=_weekly_stats_reset_keyboard(user.id),
+        )
+        return
+    if action != "weekly_reset_yes":
+        await query.answer("Кнопка устарела.", show_alert=True)
+        return
+
+    bot_data = context.application.bot_data
+    completed = bot_data.setdefault("weekly_stats_reset_completed", [])
+    processing = bot_data.setdefault("weekly_stats_reset_processing", [])
+    if message_key in completed:
+        await query.answer("Статистика уже отправлена и обнулена.", show_alert=True)
+        return
+    if message_key in processing:
+        await query.answer("Отправка статистики уже выполняется.", show_alert=True)
+        return
+
+    processing.append(message_key)
+    try:
+        await _publish_weekly_admin_report(context)
+    except (OSError, TelegramError):
+        logging.exception("Failed to publish manually requested weekly admin statistics")
+        processing.remove(message_key)
+        await query.answer(
+            "Не удалось отправить статистику; счётчики не обнулены.",
+            show_alert=True,
+        )
+        return
+
+    processing.remove(message_key)
+    completed.append(message_key)
+    del completed[:-100]
+    _save_runtime_snapshot(context)
+    await query.answer("Статистика отправлена, счётчики обнулены.")
+    try:
+        await query.edit_message_text(
+            "✅ Недельная статистика отправлена в тему 1480, счётчики обнулены."
+        )
+    except TelegramError:
+        logging.exception("Failed to update weekly-statistics confirmation message")
+
+
+async def weekly_admin_norm_report_job(context: ContextTypes.DEFAULT_TYPE) -> None:
+    report_date = datetime.now(MOSCOW_TIMEZONE).date().isoformat()
+    if context.application.bot_data.get("last_weekly_admin_report_date") == report_date:
+        return
+    await _publish_weekly_admin_report(context)
 
 
 async def givetopic_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2097,6 +2320,13 @@ async def warn_command_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     profile["reason"] = reason
     profile.setdefault("timed_warns", []).append(expires_at)
     _save_profile_record(context, str(target_user_id))
+    _record_user_action(
+        context,
+        target_user_id,
+        "Предупреждение",
+        actor_id=update.effective_user.id,
+        details=f"{format_ban_remaining(duration_seconds)}; причина: {reason}",
+    )
     _schedule_timed_warning_expiry(context, str(target_user_id), expires_at, duration_seconds)
     await enforce_autoban_if_needed(context, str(target_user_id), profile.get("username"))
 
@@ -2155,6 +2385,13 @@ async def awarn_command_handler(update: Update, context: ContextTypes.DEFAULT_TY
     admin_warns.append({"reason": reason, "issued_by": issuer_tag, "issued_at": time.time()})
     warn_count = len(admin_warns)
     _save_profile_record(context, str(target_user_id))
+    _record_user_action(
+        context,
+        target_user_id,
+        "Выговор администратору",
+        actor_id=update.effective_user.id,
+        details=reason,
+    )
 
     await update.message.reply_text(
         f'⚠️Администратору id_profile #{profile.get("id_profile")} выдан выговор. '
@@ -2178,6 +2415,20 @@ async def awarn_command_handler(update: Update, context: ContextTypes.DEFAULT_TY
     profile.pop("prefixes", None)
     profile["admin_warns"] = []
     _save_profile_record(context, str(target_user_id))
+    _record_user_action(
+        context,
+        target_user_id,
+        "Снятие прав администратора",
+        actor_id=update.effective_user.id,
+        details="После получения трёх выговоров",
+    )
+    _record_user_action(
+        context,
+        target_user_id,
+        "Снятие префикса",
+        actor_id=update.effective_user.id,
+        details="Префикс удалён вместе с административными правами",
+    )
 
     for special_chat_id in _special_admin_chat_ids():
         try:
@@ -2205,6 +2456,7 @@ async def awarn_command_handler(update: Update, context: ContextTypes.DEFAULT_TY
         "ADMIN DISMISSED",
         duration_seconds=14 * 86400,
         force=True,
+        actor_id=update.effective_user.id,
     )
     await update.message.reply_text(
         f"🚫Администратор id_profile #{profile.get('id_profile')} снят с должности после 3 выговоров, "
@@ -2236,6 +2488,13 @@ async def aunwarn_command_handler(update: Update, context: ContextTypes.DEFAULT_
     removed = admin_warns.pop()
     profile["admin_warns"] = admin_warns
     _save_profile_record(context, str(target_user_id))
+    _record_user_action(
+        context,
+        target_user_id,
+        "Снятие выговора",
+        actor_id=update.effective_user.id,
+        details=str(removed.get("reason") or "") if isinstance(removed, dict) else None,
+    )
     await update.message.reply_text(
         f'✅С администратора id_profile #{profile.get("id_profile")} снят последний выговор. '
         f"Осталось: {len(admin_warns)}/3."
@@ -3723,6 +3982,7 @@ async def _finish_info_topic_action(context: ContextTypes.DEFAULT_TYPE, panel_id
         except Exception:
             pass
         active["active"] = False
+        _close_user_session(context, target_user_id, active)
         context.application.bot_data.get("topic_user_map", {}).pop(topic_id, None)
         context.application.bot_data.get("topic_user_map", {}).pop(str(topic_id), None)
         context.application.bot_data.get("active_chats", {}).pop(target_user_id, None)
@@ -4695,9 +4955,16 @@ async def setprefix_apply_callback(update: Update, context: ContextTypes.DEFAULT
         target_profile.pop("prefixes", None)
         target_profile.pop("prefix", None)
     _save_profile_record(context, target_user_id)
-
     target_id_profile = int(target_profile.get("id_profile", 0) or panel.get("target_id_profile", 0) or 0)
     prefix_text = ", ".join(selected_labels) if selected_labels else "не установлен"
+    _record_user_action(
+        context,
+        target_user_id,
+        "Изменение префикса",
+        actor_id=update.effective_user.id,
+        details=prefix_text,
+    )
+
     try:
         await update.callback_query.message.edit_text(
             f"✅Префикс для id_profile #{target_id_profile} применен: {prefix_text}"
@@ -4761,6 +5028,12 @@ async def unwarn_command_handler(update: Update, context: ContextTypes.DEFAULT_T
     if profile["warn"] <= 0:
         profile["reason"] = "нет причин"
     _save_profile_record(context, str(target_user_id))
+    _record_user_action(
+        context,
+        target_user_id,
+        "Снятие предупреждения",
+        actor_id=update.effective_user.id,
+    )
 
     await update.message.reply_text(
         f'✅Пользователю id_profile #{profile.get("id_profile")} снято предупреждение. Теперь у него {profile["warn"]} warn(-ов).'
@@ -4851,6 +5124,7 @@ async def ban_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         reason,
         "BAN",
         duration_seconds=duration_seconds,
+        actor_id=update.effective_user.id,
     )
     await update.message.reply_text(
         f'⛔Пользователь id_profile #{profile.get("id_profile")} заблокирован на {parts[1]}. Причина: "{reason}"'
@@ -4905,6 +5179,7 @@ async def permanent_ban_command_handler(update: Update, context: ContextTypes.DE
         profile.get("username"),
         reason,
         "PERMANENT BAN",
+        actor_id=update.effective_user.id,
     )
     if not applied:
         await update.message.reply_text("Не удалось выдать бессрочный бан пользователю.")
@@ -4954,6 +5229,12 @@ async def unban_command_handler(update: Update, context: ContextTypes.DEFAULT_TY
         await update.message.reply_text(f'Пользователь id_profile #{profile.get("id_profile")} не находится в бане.')
         return
     _save_ban_record(context, str(target_user_id))
+    _record_user_action(
+        context,
+        target_user_id,
+        "Разблокировка",
+        actor_id=update.effective_user.id,
+    )
 
     await update.message.reply_text(f'✅Пользователь id_profile #{profile.get("id_profile")} разбанен.')
 
@@ -5008,6 +5289,12 @@ async def admin_take_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     await update.callback_query.answer("Пользователь принят")
     _record_info_topic_action(context, request_user_id, update.effective_user.id, "TAKE_USER", reason="Запрос принят")
+    _record_user_action(
+        context,
+        request_user_id,
+        "Сессия принята",
+        actor_id=update.effective_user.id,
+    )
 
     # delete the original admin request panel
     try:
@@ -5156,6 +5443,7 @@ async def admin_take_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         "session_started_at": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"),
         "active": True,
     }
+    _record_user_session(context, str(request_user_id), user_session[str(request_user_id)])
     if topic_id:
         topic_map = context.application.bot_data.setdefault("topic_user_map", {})
         # store both int and str keys to be robust when Telegram returns int or str
@@ -6145,6 +6433,13 @@ async def handle_decline_input_message(update: Update, context: ContextTypes.DEF
         raise ApplicationHandlerStop
 
     pending["reason_otkaz_ot_username"] = text_reason
+    _record_user_action(
+        context,
+        pending.get("request_user_id") or request_user_id,
+        "Сессия отклонена",
+        actor_id=update.effective_user.id,
+        details=text_reason,
+    )
     _record_info_topic_action(context, pending.get("request_user_id") or request_user_id, update.effective_user.id, "DECLINE_USER", reason=text_reason)
 
     if pending.get("mode") == "search_request":
@@ -6229,7 +6524,7 @@ async def handle_decline_input_message(update: Update, context: ContextTypes.DEF
 
         try:
             kb = _build_main_menu_keyboard(context, int(request_user_id), profile.get("username"))
-            await context.bot.send_message(chat_id=int(request_user_id), text="Выберите действие в меню ниже:", reply_markup=kb)
+            await context.bot.send_message(chat_id=int(request_user_id), text="Главное меню", reply_markup=kb)
         except Exception:
             pass
 
@@ -6383,7 +6678,6 @@ async def approve_decline_callback(update: Update, context: ContextTypes.DEFAULT
     try:
         kb = _build_main_menu_keyboard(context, int(user_id), review.get("username"))
         await context.bot.send_message(chat_id=int(user_id), text=user_text, parse_mode=ParseMode.MARKDOWN, reply_markup=kb)
-        await context.bot.send_message(chat_id=int(user_id), text="Выберите действие в меню ниже:", reply_markup=kb)
     except Exception as e:
         logging.exception("approve_decline_callback notify user failed: %s", e)
 
@@ -6421,6 +6715,121 @@ async def reject_decline_callback(update: Update, context: ContextTypes.DEFAULT_
 
     reviews.pop(review_id, None)
 
+
+
+async def _candidate_review_callback(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    accepted: bool,
+) -> None:
+    query = update.callback_query
+    reviewer = update.effective_user
+    message = query.message if query else None
+    if not query or not reviewer or not message:
+        return
+    callback_data = query.data or ""
+    action = "accept" if accepted else "reject"
+    match = re.fullmatch(r"candidate_review_(accept|reject)_(\d+)", callback_data)
+    if not match or match.group(1) != action:
+        await query.answer("Некорректное действие.", show_alert=True)
+        return
+    if (
+        not update.effective_chat
+        or update.effective_chat.id != CANDIDATE_REVIEW_CHAT_ID
+        or getattr(message, "message_thread_id", None) != CANDIDATE_REVIEW_THREAD_ID
+    ):
+        await query.answer("Решение можно принять только в теме рассмотрения кандидатур.", show_alert=True)
+        return
+
+    reviewer_profile = _ensure_profile(
+        context,
+        str(reviewer.id),
+        reviewer.username or f"id{reviewer.id}",
+    )
+    if _effective_admin_level(reviewer_profile) < 4:
+        await query.answer("Рассматривать кандидатуры могут администраторы 4 уровня и выше.", show_alert=True)
+        return
+
+    candidate_id = match.group(2)
+    profiles = context.application.bot_data.get("profiles", {}) or {}
+    candidate_profile = profiles.get(candidate_id)
+    if not isinstance(candidate_profile, dict) or candidate_profile.get("candidate_application_status") != "pending_review":
+        await query.answer("Заявка уже рассмотрена или больше недоступна.", show_alert=True)
+        return
+
+    candidate_profile["candidate_application_status"] = "reviewing"
+    invite_url = None
+    if accepted:
+        try:
+            invite = await context.bot.create_chat_invite_link(
+                chat_id=ACADEMY_CHAT_ID,
+                expire_date=datetime.now(timezone.utc) + timedelta(hours=1),
+                member_limit=1,
+            )
+            invite_url = invite.invite_link
+        except TelegramError:
+            candidate_profile["candidate_application_status"] = "pending_review"
+            logging.exception("Failed to create academy invite for candidate %s", candidate_id)
+            await query.answer("Не удалось создать ссылку академии. Заявка не изменена.", show_alert=True)
+            return
+
+    reviewed_at = datetime.now(timezone.utc)
+    candidate_profile["candidate_application_status"] = "accepted" if accepted else "rejected"
+    candidate_profile["candidate_application_reviewed_at"] = reviewed_at.isoformat()
+    candidate_profile["candidate_application_reviewed_by"] = str(reviewer.id)
+    if accepted:
+        candidate_profile["candidate_application_academy_invite"] = invite_url
+    else:
+        candidate_profile["candidate_application_reapply_after"] = time.time() + 7 * 24 * 60 * 60
+    _save_profile_record(context, candidate_id)
+    _record_user_action(
+        context,
+        candidate_id,
+        "Кандидатура принята" if accepted else "Кандидатура отклонена",
+        actor_id=reviewer.id,
+        details="Решение принято в теме рассмотрения кандидатур",
+    )
+    _save_runtime_snapshot(context)
+    await query.answer("Решение сохранено.")
+
+    if accepted:
+        notification = (
+            "✅ Ваша заявка принята! Инструктор ожидает вас в академии:\n"
+            f"{invite_url}\n\nСсылка действует 1 час и рассчитана на одно использование."
+        )
+    else:
+        notification = (
+            "К сожалению, ваша заявка на вступление в администрацию отклонена. "
+            "Повторная подача будет доступна через 7 дней."
+        )
+    notified = True
+    try:
+        await context.bot.send_message(chat_id=int(candidate_id), text=notification)
+    except TelegramError:
+        notified = False
+        logging.exception("Failed to notify candidate %s about review result", candidate_id)
+
+    result_text = (
+        f"✅ Заявка кандидата {candidate_id} принята."
+        if accepted
+        else f"❌ Заявка кандидата {candidate_id} отклонена; повторная подача доступна через 7 дней."
+    )
+    if accepted:
+        result_text += f"\nСсылка академии: {invite_url}"
+    if not notified:
+        result_text += "\nНе удалось доставить уведомление кандидату."
+    try:
+        await query.edit_message_text(result_text, reply_markup=None)
+    except TelegramError:
+        logging.exception("Failed to update reviewed candidate message for %s", candidate_id)
+
+
+async def candidate_review_accept_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await _candidate_review_callback(update, context, accepted=True)
+
+
+async def candidate_review_reject_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await _candidate_review_callback(update, context, accepted=False)
 
 
 async def unknown_chat_guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -6848,8 +7257,7 @@ async def admin_group_message_handler(update: Update, context: ContextTypes.DEFA
 
         review_text = (
             "💬Подозрительное сообщение\n\n"
-            f'Админ "{admin_username}" попытался отправить сообщение в тему "{topic_link}" с текстом "{suspicious_text}"\n\n'
-            "Выберите действие ниже⬇️"
+            f'Админ "{admin_username}" попытался отправить сообщение в тему "{topic_link}" с текстом "{suspicious_text}"'
         )
         review_kb = InlineKeyboardMarkup(
             [[

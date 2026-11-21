@@ -13,7 +13,12 @@ from telegram.error import Forbidden
 from telegram.ext import ContextTypes
 
 from app.config import LOG_CHAT_ID
-from app.database.requests import _save_ban_record, _save_profile_record
+from app.database.requests import (
+    _close_user_session,
+    _record_user_action,
+    _save_ban_record,
+    _save_profile_record,
+)
 from app.services.profiles import (
     _has_admin_ban_immunity,
     format_ban_remaining,
@@ -31,6 +36,7 @@ async def _apply_ban(
     log_title: str,
     duration_seconds: int | None = None,
     force: bool = False,
+    actor_id: str | int | None = None,
 ) -> bool:
     profiles = context.application.bot_data.setdefault("profiles", {})
     profile = profiles.get(str(user_id))
@@ -54,6 +60,18 @@ async def _apply_ban(
     profile["reason"] = reason
     _save_profile_record(context, str(user_id))
     _save_ban_record(context, str(user_id))
+    duration_text = (
+        f"на {format_ban_remaining(duration_seconds)}"
+        if duration_seconds
+        else "бессрочно"
+    )
+    _record_user_action(
+        context,
+        user_id,
+        "Блокировка",
+        actor_id=actor_id,
+        details=f"{duration_text}; причина: {reason}",
+    )
 
     try:
         duration_text = (
@@ -78,6 +96,7 @@ async def _apply_ban(
     active_chats = context.application.bot_data.setdefault("active_chats", {})
     active_session = active_chats.pop(str(user_id), None)
     if active_session:
+        _close_user_session(context, user_id, active_session)
         topic_targets.append((active_session.get("chat_id"), active_session.get("topic_id")))
 
     admin_requests = context.application.bot_data.setdefault("admin_requests", {})

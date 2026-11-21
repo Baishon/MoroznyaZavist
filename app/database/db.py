@@ -57,6 +57,7 @@ class _PostgresConnection:
             self._conn.commit()
         except (psycopg2.OperationalError, psycopg2.InterfaceError):
             self._reconnect()
+            self._conn.commit()
 
     def close(self) -> None:
         self._conn.close()

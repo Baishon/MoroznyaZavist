@@ -6,7 +6,7 @@ from telegram.error import Forbidden
 from telegram.ext import ContextTypes
 
 from app.config import WORK_CHAT_ID
-from app.database.requests import _save_runtime_snapshot
+from app.database.requests import _close_user_session, _save_runtime_snapshot
 from app.services.profiles import _set_user_blocked_bot_state
 
 
@@ -398,7 +398,9 @@ async def notify_blocked_user_in_topic(context: ContextTypes.DEFAULT_TYPE, chat_
     # Stop active session to avoid repeated forwarding errors after user blocks the bot.
     try:
         active = context.application.bot_data.setdefault("active_chats", {})
-        active.pop(str(target_user), None)
+        active_session = active.pop(str(target_user), None)
+        if active_session:
+            _close_user_session(context, target_user, active_session)
     except Exception:
         pass
 

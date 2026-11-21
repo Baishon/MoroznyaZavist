@@ -46,6 +46,64 @@ MESSAGE_HISTORY_CHAT_INDEX_SQL = (
     "CREATE INDEX IF NOT EXISTS idx_message_history_chat_id ON message_history (chat_id)"
 )
 
+USER_ACTION_HISTORY_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS user_action_history (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    actor_id TEXT,
+    action TEXT NOT NULL,
+    details TEXT,
+    created_at TEXT NOT NULL
+)
+"""
+
+USER_ACTION_HISTORY_INDEX_SQL = (
+    "CREATE INDEX IF NOT EXISTS idx_user_action_history_user_created "
+    "ON user_action_history (user_id, created_at)"
+)
+
+USER_SESSION_HISTORY_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS user_session_history (
+    session_id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    admin_id TEXT,
+    admin_name TEXT,
+    chat_id TEXT,
+    topic_id TEXT,
+    mood TEXT,
+    started_at TEXT NOT NULL,
+    closed_at TEXT,
+    status TEXT NOT NULL
+)
+"""
+
+USER_SESSION_HISTORY_INDEX_SQL = (
+    "CREATE INDEX IF NOT EXISTS idx_user_session_history_user_started "
+    "ON user_session_history (user_id, started_at)"
+)
+
+USER_SESSION_MESSAGES_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS user_session_messages (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    message_id TEXT NOT NULL,
+    actor_id TEXT,
+    actor_name TEXT,
+    direction TEXT NOT NULL,
+    message_type TEXT NOT NULL,
+    text TEXT,
+    caption TEXT,
+    created_at TEXT NOT NULL,
+    deleted INTEGER NOT NULL DEFAULT 0,
+    UNIQUE (session_id, message_id)
+)
+"""
+
+USER_SESSION_MESSAGES_INDEX_SQL = (
+    "CREATE INDEX IF NOT EXISTS idx_user_session_messages_session_created "
+    "ON user_session_messages (session_id, created_at)"
+)
+
 ALL_SCHEMA_STATEMENTS = (
     META_TABLE_SQL,
     PROFILES_TABLE_SQL,
@@ -55,4 +113,10 @@ ALL_SCHEMA_STATEMENTS = (
     MESSAGE_HISTORY_USER_INDEX_SQL,
     MESSAGE_HISTORY_CREATED_INDEX_SQL,
     MESSAGE_HISTORY_CHAT_INDEX_SQL,
+    USER_ACTION_HISTORY_TABLE_SQL,
+    USER_ACTION_HISTORY_INDEX_SQL,
+    USER_SESSION_HISTORY_TABLE_SQL,
+    USER_SESSION_HISTORY_INDEX_SQL,
+    USER_SESSION_MESSAGES_TABLE_SQL,
+    USER_SESSION_MESSAGES_INDEX_SQL,
 )

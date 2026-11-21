@@ -8,5 +8,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY main.py .
 COPY app/ app/
+COPY site/ site/
 
 ENTRYPOINT ["python", "main.py"]

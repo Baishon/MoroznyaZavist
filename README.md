@@ -27,6 +27,12 @@ app/
   handlers/
     user.py                   # private-chat / user-facing commands & callbacks
     admin.py                  # staff-group / log-chat commands & callbacks
+  images/
+    okak.png                  # main menu image
+    profile.png               # user profile image
+    Sunday.png                # weekly admin report image
+site/
+  index.html                  # animated Telegram login and protected homepage
 ```
 
 `app/services/messaging.py` is shared by `handlers/user.py` and
@@ -43,25 +49,42 @@ Add these environment variables in Render:
 - `TELEGRAM_TOKEN` — the bot token, stored as a secret.
 - `DATABASE_URL` — the **Internal Database URL** from a Render PostgreSQL
   database in the same region.
-- `ADMIN_API_TOKEN` — a long random secret used by the Android admin panel in
-  the `X-Admin-Token` header. The API rejects requests without this token.
-- `ADMIN_OWNER_ID` — owner ID accepted by the admin login (defaults to
-  `7545068007`).
-- `ADMIN_PASSWORD` — admin password accepted by the admin login (defaults to
-  `Martinez231107`). Set both credential variables as deployment secrets in
-  production.
 
-Set the health check path to `/`. The bot exposes a small HTTP health endpoint
-on Render's `$PORT` while receiving Telegram updates through polling. The same
-port also serves the protected admin API:
-
-- `GET /api/users`
-- `GET /api/users/{telegram_id}/messages`
-- `GET /api/messages`
-- `POST /api/auth/login`
-
-Send `X-Admin-Token: <ADMIN_API_TOKEN>` with API requests. The root `/`
-health endpoint remains public.
+The bot serves a website at `/` and a health endpoint at `/healthz` on Render's
+`$PORT` while receiving Telegram updates through polling. Website login uses
+short-lived, one-time Telegram approval requests and requires an administrator
+with level 4 or higher and the exact `👁Logs` prefix. Browser sessions are kept
+in memory and expire after 12 hours, so a bot restart signs website users out.
+Login links open `@Icyenvy_helper_bot`; the configured `TELEGRAM_TOKEN` must
+belong to that bot. Use HTTPS when exposing the site publicly; the same-origin
+API does not enable cross-origin access. After login, the dashboard shows the
+Telegram account and profile photo when available, plus a read-only console
+with `help`, `status`, and recent warning/error `logs` commands. It does not
+execute operating-system commands or control the bot process. The `Logs` tab
+lists known private-chat users and their recorded message history. Authorized
+admins can send technical notices (prefixed with
+`Сообщение от технического раздела:`) and delete private-chat messages.
+The chat history is kept in a compact scrollable area, and the `История` view
+shows up to 50 recent moderation and session actions recorded for the selected
+user. Telegram permission and age restrictions still apply; only conversations
+known to this bot are available.
+The `База данных` tab looks up users by Telegram ID and shows their profile,
+ban/block status, action history, registration data, and session history.
+Administrators can change levels (level 4 may assign levels 1–3; level 5 may
+assign levels 1–5), optionally send an onboarding message, remove admin rights
+silently or with a 14-day ban, and manage up to three prefixes as a level-5
+administrator. The separate `Сессии` tab lists recorded active and closed
+sessions; active sessions allow sending technical-section messages and deleting
+recorded Telegram messages, while closed sessions are read-only. Session message
+history starts being recorded after this feature is deployed; Telegram does
+not provide the bot with older topic history to backfill.
+The main menu offers an admin-candidature application to eligible non-admin
+users. Starting it requires confirmation, closes the user's active sessions,
+and begins a five-step questionnaire; while filling it in, only the application
+steps, `/restart`, and `/stop` are available. Submitted applications are posted
+to the configured review topic. Level-4+ administrators can accept or reject
+them there. Rejected applicants can reapply after seven days; accepted
+applicants receive a one-use academy invite link that expires after one hour.
 
 Do not upload `config/.env`, `.venv/`, or `bot_storage/` to Render. The
 filesystem of a Web Service is not a database; PostgreSQL is used automatically

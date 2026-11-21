@@ -7,11 +7,12 @@ editors, info-topic and setprefix panels); the
 into callback_data. Pure UI construction only — no bot_data mutation beyond
 handing out sequence ids, no Telegram API calls.
 """
+import time
+
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup
 from telegram.ext import ContextTypes
 
 from app.services.profiles import (
-    _effective_admin_level,
     _ensure_profile,
     _has_admin_rights_level_1_5,
 )
@@ -36,47 +37,94 @@ def _build_mood_selection_keyboard(user_id: str, selected_keys: list[str]) -> In
             [buttons[0], buttons[1]],
             [buttons[2], buttons[3]],
             [InlineKeyboardButton("▶️ Далее", callback_data=f"mood_next_{user_id}")],
+            [InlineKeyboardButton("◀️ Назад", callback_data="main_menu_back")],
         ]
     )
 
 
 def _build_request_gender_keyboard(user_id: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
-        [[
-            InlineKeyboardButton("👨 Мальчик", callback_data=f"request_gender_{user_id}_male"),
-            InlineKeyboardButton("👩 Девочка", callback_data=f"request_gender_{user_id}_female"),
-        ]]
+        [
+            [
+                InlineKeyboardButton("👨 Мальчик", callback_data=f"request_gender_{user_id}_male"),
+                InlineKeyboardButton("👩 Девочка", callback_data=f"request_gender_{user_id}_female"),
+            ],
+            [InlineKeyboardButton("◀️ Назад", callback_data="main_menu_back")],
+        ]
     )
 
 
-def _build_main_menu_keyboard(context: ContextTypes.DEFAULT_TYPE, user_id: int | str, username_hint: str | None = None) -> ReplyKeyboardMarkup:
+def _build_main_menu_keyboard(
+    context: ContextTypes.DEFAULT_TYPE,
+    user_id: int | str,
+    username_hint: str | None = None,
+) -> InlineKeyboardMarkup:
+    return _build_main_menu_inline_keyboard(context, user_id, username_hint)
+
+
+def _build_main_menu_inline_keyboard(
+    context: ContextTypes.DEFAULT_TYPE,
+    user_id: int | str,
+    username_hint: str | None = None,
+) -> InlineKeyboardMarkup:
     profile = _ensure_profile(context, str(user_id), username_hint or f"id{user_id}")
     is_admin = _has_admin_rights_level_1_5(profile)
-    admin_level = _effective_admin_level(profile)
     profile_button = "🔰Админ-профиль" if is_admin else "👤 Профиль"
-    rows = [[KeyboardButton("👤 Найти админа")]]
+    find_admin_button = InlineKeyboardButton(
+        "✨ Найти своего админа ✨",
+        callback_data="main_menu_find_admin",
+    )
+    channel_button = InlineKeyboardButton("⭐ Канал бота", url="https://t.me/berlogaAskly")
+    profile_button = InlineKeyboardButton(
+        profile_button,
+        callback_data="main_menu_admin_profile" if is_admin else "main_menu_profile",
+    )
+    settings_button = InlineKeyboardButton("⚙️Настройки", callback_data="main_menu_settings")
+    rows = []
 
-    profile_row = [KeyboardButton(profile_button)]
     if is_admin:
-        profile_row.append(KeyboardButton("🛒Админ-магазин"))
+        rows.extend([[find_admin_button], [channel_button]])
+        profile_row = [profile_button, InlineKeyboardButton("🛒Админ-магазин", callback_data="main_menu_admin_shop")]
         rows.append(profile_row)
-        if admin_level <= 3:
-            rows.append([KeyboardButton("👨‍🏫Квесты и загадки"), KeyboardButton("❓Помощь")])
-            rows.append([KeyboardButton("⚙️Настройки")])
-        else:
-            rows.append([KeyboardButton("❓Помощь"), KeyboardButton("⚙️Настройки")])
+        rows.append([settings_button])
     else:
-        rows.append([KeyboardButton("👤 Профиль"), KeyboardButton("👨‍🏫Квесты и загадки")])
-        rows.append([KeyboardButton("❓Помощь"), KeyboardButton("⚙️Настройки")])
+        rows.extend(
+            [
+                [find_admin_button],
+                [profile_button],
+                [settings_button, channel_button],
+            ]
+        )
+        if _candidate_application_button_available(profile):
+            rows.insert(
+                1,
+                [InlineKeyboardButton("👑Хочу стать администратором", callback_data="main_menu_candidate")],
+            )
 
     active = (context.application.bot_data.get("active_chats", {}) or {}).get(str(user_id))
     if active and active.get("active"):
-        rows.append([KeyboardButton("↩️Вернуться к кнопкам диалога")])
-    return ReplyKeyboardMarkup(
-        rows,
-        resize_keyboard=True,
-        one_time_keyboard=False,
-    )
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    "↩️Вернуться к кнопкам диалога",
+                    callback_data="main_menu_dialog",
+                )
+            ]
+        )
+    return InlineKeyboardMarkup(rows)
+
+
+def _candidate_application_button_available(profile: dict | None) -> bool:
+    profile = profile or {}
+    status = profile.get("candidate_application_status")
+    if status in {"active", "submitting", "pending_review", "reviewing", "accepted"}:
+        return False
+    if status == "rejected":
+        try:
+            return float(profile.get("candidate_application_reapply_after", 0) or 0) <= time.time()
+        except (TypeError, ValueError):
+            return True
+    return True
 
 
 def _build_log_chat_menu_keyboard() -> ReplyKeyboardMarkup:
@@ -96,46 +144,6 @@ def _build_chat_menu_keyboard() -> ReplyKeyboardMarkup:
         [[KeyboardButton("📊Моя норма")]],
         resize_keyboard=True,
         one_time_keyboard=False,
-    )
-
-
-def _build_quests_menu_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        [
-            [
-                InlineKeyboardButton("🗺️Квесты", callback_data="quests_open"),
-                InlineKeyboardButton("🧩Загадки", callback_data="riddles_open"),
-            ],
-            [InlineKeyboardButton("↩️Выйти", callback_data="quests_exit")],
-        ]
-    )
-
-
-def _build_quests_section_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        [
-            [InlineKeyboardButton("🎮Игровые квесты", callback_data="game_quests_open")],
-            [InlineKeyboardButton("📚Школьные примеры", callback_data="school_tasks_open")],
-            [InlineKeyboardButton("↩️Назад", callback_data="quests_back")],
-        ]
-    )
-
-
-def _build_game_quests_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        [
-            [InlineKeyboardButton("Brawl stars", callback_data="brawl_stars_open")],
-            [InlineKeyboardButton("↩️Назад", callback_data="quests_back")],
-        ]
-    )
-
-
-def _build_brawl_stars_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        [[
-            InlineKeyboardButton("▶️Начать", callback_data="brawl_stars_start"),
-            InlineKeyboardButton("↩️Назад", callback_data="game_quests_back"),
-        ]]
     )
 
 
